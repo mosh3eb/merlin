@@ -48,7 +48,7 @@ class FeatureMap:
         *,
         trainable_parameters: list[str] = None,
         dtype: str = torch.float32,
-        device=None
+        device = None
     ):
         self.circuit = circuit
         self.input_size = input_size
@@ -79,7 +79,11 @@ class FeatureMap:
             p = torch.rand(param_length, requires_grad=True)
             self._training_dict[param_name] = torch.nn.Parameter(p)
 
-    def compute_unitary(self, x: Union[Tensor, np.ndarray, float], *training_parameters: Tensor) -> Tensor:
+    def compute_unitary(
+        self, 
+        x: Union[Tensor, np.ndarray, float], 
+        *training_parameters: Tensor
+    ) -> Tensor:
         """
         Computes the unitary associated with the feature map and given 
         datapoint and training parameters.
@@ -152,9 +156,9 @@ class FidelityKernel(torch.nn.Module):
         processed with some pseudo-sampling method: 'multinomial', 
         'binomial' or 'gaussian'.
     :param no_bunching: Whether or not to post-select out results with 
-        bunching.
+        bunching. Default: `False`.
     :param force_psd: Projects training kernel matrix to closest 
-    positive semi-definite. Default: `True`.
+        positive semi-definite. Default: `True`.
     :param device: Device on which to perform SLOS
     :param dtype: Datatype with which to perform SLOS
 
@@ -192,10 +196,10 @@ class FidelityKernel(torch.nn.Module):
         *,
         shots: int = None,
         sampling_method: str = 'multinomial',
-        no_bunching=True,
-        force_psd=True,
-        device=None,
-        dtype=None
+        no_bunching = False,
+        force_psd = True,
+        device = None,
+        dtype = None
     ):
         super().__init__()
         self.feature_map = feature_map
@@ -236,7 +240,7 @@ class FidelityKernel(torch.nn.Module):
             dtype=self.dtype
         )
         # Find index of input state in output distribution
-        all_fock_states = list(generate_all_fock_states(m, n, no_bunching=no_bunching))
+        all_fock_states = list(generate_all_fock_states(m, n, no_bunching))
         self._input_state_index = all_fock_states.index(tuple(input_state))
 
         # For sampling
@@ -245,17 +249,19 @@ class FidelityKernel(torch.nn.Module):
 
     def forward(self, x1: Union[float, np.ndarray, Tensor], x2=None):
         """
-        Calculate the quantum kernel for input data `x1` and `x2.` If `x1` 
-        and `x2` are datapoints, a scalar value is returned. For input 
-        datasets the kernel matrix is computed.
+        Calculate the quantum kernel for input data `x1` and `x2.` If 
+        `x1` and `x2` are datapoints, a scalar value is returned. For 
+        input datasets the kernel matrix is computed.
 
         :param x1: Input datapoint or dataset.
-        :param x2: Input datapoint or dataset. If `None`, the kernel matrix 
-            is assumed to be symmetric with input datasets, x1, x1 and only 
-            the upper triangular is calculated. Default: `None`.
+        :param x2: Input datapoint or dataset. If `None`, the kernel 
+            matrix is assumed to be symmetric with input datasets, x1, 
+            x1 and only the upper triangular is calculated. Default: 
+            `None`.
 
-        If you would like the diagonal and lower triangular to be explicitly 
-        calculated for identical inputs, please specify an argument `x2`.
+        If you would like the diagonal and lower triangular to be 
+        explicitly calculated for identical inputs, please specify an 
+        argument `x2`.
         """
         if x2 is not None and type(x1) is not type(x2):
             raise TypeError(
@@ -327,7 +333,7 @@ class FidelityKernel(torch.nn.Module):
 
             if self.force_psd and equal_inputs:
                 # Symmetrize the matrix
-                kernel_matrix = 0.5 * (kernel_matrix + kernel_matrix.transpose(0, 1))
+                kernel_matrix = 0.5 * (kernel_matrix + kernel_matrix.T)
                 kernel_matrix = self._project_psd(kernel_matrix)
 
         if isinstance(x1, np.ndarray):
@@ -344,7 +350,7 @@ class FidelityKernel(torch.nn.Module):
         
         U = self.feature_map.compute_unitary(x1)
         U_adjoint = self.feature_map.compute_unitary(x2)
-        U_adjoint = U_adjoint.conj().transpose(0, 1)
+        U_adjoint = U_adjoint.conj().T
 
         probs = self._slos_graph.compute(U @ U_adjoint, self.input_state)[1]
 
@@ -361,8 +367,7 @@ class FidelityKernel(torch.nn.Module):
         eigenvals, eigenvecs = torch.linalg.eigh(matrix)
         eigenvals = torch.diag(torch.where(eigenvals > 0, eigenvals, 0))
 
-        matrix_psd = eigenvecs @ eigenvals @ eigenvecs.transpose(0, 1)
-        matrix_psd.fill_diagonal_(1)
+        matrix_psd = eigenvecs @ eigenvals @ eigenvecs.T
         
         return matrix_psd
     
