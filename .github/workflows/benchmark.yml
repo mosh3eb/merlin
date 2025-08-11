@@ -35,7 +35,7 @@ jobs:
           echo "# Benchmark Results" > README.md
           git add README.md
           git commit -m "Initial gh-pages commit"
-          git push gh-pages
+          git push origin gh-pages
           git checkout main
           git fetch origin gh-pages:gh-pages
         fi
