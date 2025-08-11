@@ -26,7 +26,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     command: >
-      pytest tests/benchmark_slos_core.py 
+      pytest benchmarks/benchmark_slos_core.py 
       --benchmark-json=/app/results/benchmark-results.json 
       -v --benchmark-only -k "config0"
 
