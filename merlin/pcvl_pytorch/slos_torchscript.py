@@ -503,7 +503,6 @@ class SLOSComputeGraph:
                 p,
             )
 
-
         amplitudes *= torch.sqrt(self.norm_factor_output.to(amplitudes.device))
         amplitudes /= math.sqrt(self.norm_factor_input)
         self.prev_amplitudes = amplitudes  # type: ignore[assignment]
