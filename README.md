@@ -1,5 +1,7 @@
 # MerLin - Photonic Quantum Machine Learning Framework
 
+![Tests](https://img.shields.io/github/actions/workflow/status/merlinquantum/merlin/ci.yml?branch=main&style=flat-square&logo=github&label=tests)
+
 MerLin brings quantum computing capabilities to AI practitioners through easy-to-use PyTorch integrations. Named after the legendary wizard, MerLin adds quantum wizardry to your AI toolkit with no quantum expertise required.
 
 **Built for AI/ML practitioners**: MerLin is designed to feel familiar to PyTorch users while unlocking the potential of quantum computing. Under the hood, it leverages photonic quantum computing - a cutting-edge approach using single-photons that's hardware-aware and prepares your models for real quantum processors.
