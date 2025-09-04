@@ -563,7 +563,7 @@ class QuantumLayer(nn.Module):
         if device is not None:
             self.device = device
             self.computation_process.simulation_graph = (
-                self.computation_process.simulation_graph.to(self.dtype, device)
+                self.computation_process.simulation_graph.to(device)
             )
             self.computation_process.converter = self.computation_process.converter.to(
                 self.dtype, device
