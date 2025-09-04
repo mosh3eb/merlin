@@ -75,7 +75,7 @@ def test_switch_model_to_cuda():
     assert layer.device == torch.device("cpu")
     layer = layer.to(torch.device("cuda"))
     _ = layer()
-    layer.computation_process.input_state = torch.rand(3, 6)
+    layer.computation_process.input_state = torch.rand((3, 6), device=torch.device("cuda"))
     _ = layer()
     assert layer.device == torch.device("cuda")
     if len(layer.thetas) > 0:
