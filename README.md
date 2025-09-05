@@ -47,7 +47,7 @@ Build documentation locally:
 ```bash
 pip install -e '.[docs]'
 cd docs
-make html  # ou: make livehtml (si sphinx-autobuild ajouté manuellement)
+make html  # or: make livehtml (if sphinx-autobuild added manually)
 ```
 
 ### Tests & Benchmarks
