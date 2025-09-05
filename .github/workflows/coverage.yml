@@ -84,14 +84,14 @@ jobs:
       if: github.ref == 'refs/heads/main'
       
     - name: Upload to GitHub Pages
-      uses: actions/upload-pages-artifact@v2
+      uses: actions/upload-pages-artifact@v4
       if: github.ref == 'refs/heads/main'
       with:
         path: htmlcov
         
     - name: Deploy to GitHub Pages
       id: deployment
-      uses: actions/deploy-pages@v2
+      uses: actions/deploy-pages@v4
       if: github.ref == 'refs/heads/main'
     
     - name: Comment PR with coverage  
