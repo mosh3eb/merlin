@@ -11,6 +11,8 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      pages: write
+      id-token: write
     
     steps:
     - uses: actions/checkout@v4
@@ -72,18 +74,25 @@ jobs:
         echo "======================="
     
     - name: Upload coverage HTML report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: coverage-html-report
         path: htmlcov/
     
-    - name: Deploy coverage to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v3
+    - name: Setup Pages
+      uses: actions/configure-pages@v3
+      if: github.ref == 'refs/heads/main'
+      
+    - name: Upload to GitHub Pages
+      uses: actions/upload-pages-artifact@v2
       if: github.ref == 'refs/heads/main'
       with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: htmlcov
-        destination_dir: coverage
+        path: htmlcov
+        
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v2
+      if: github.ref == 'refs/heads/main'
     
     - name: Comment PR with coverage  
       uses: actions/github-script@v6
