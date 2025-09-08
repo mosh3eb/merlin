@@ -31,12 +31,12 @@ jobs:
     
     - name: Run tests with coverage
       run: |
-        pytest tests/ --cov=merlin --cov-report=xml --cov-report=json --cov-report=html --cov-report=term-missing
+        pytest tests/ --cov=merlin --cov-report=xml --cov-report=json --cov-report=html --cov-report=term-missing | tee coverage_output.txt
     
     - name: Parse coverage report
       run: |
         # Extract coverage percentage from pytest-cov output
-        pytest tests/ --cov=merlin --cov-report=term-missing --cov-report=xml | tee coverage_output.txt
+        # The output from pytest is already saved in coverage_output.txt
         
         # Extract coverage percentage from output
         COVERAGE=$(grep "TOTAL" coverage_output.txt | awk '{print $4}' | sed 's/%//')
