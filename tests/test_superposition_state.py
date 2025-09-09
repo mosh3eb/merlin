@@ -32,7 +32,7 @@ class TestOutputSuperposedState:
         # When using NONE strategy without specifying output_size,
         # the output size should equal the distribution size
         circuit = pcvl.components.GenericInterferometer(
-            6,
+            10,
             pcvl.components.catalog["mzi phase last"].generate,
             shape=pcvl.InterferometerShape.RECTANGLE,
         )
@@ -71,7 +71,7 @@ class TestOutputSuperposedState:
         # When using NONE strategy without specifying output_size,
         # the output size should equal the distribution size
         circuit = pcvl.components.GenericInterferometer(
-            6,
+            10,
             pcvl.components.catalog["mzi phase last"].generate,
             shape=pcvl.InterferometerShape.RECTANGLE,
         )

@@ -31,7 +31,8 @@ import perceval as pcvl
 from perceval.components import BS, PS
 from itertools import chain
 import merlin as ML
-from merlin.core.feed_forward import FeedForward, FeedForwardBlock
+from merlin.core.feed_forward import FeedForwardBlock
+
 
 
 class TestFeedForward:
@@ -39,30 +40,30 @@ class TestFeedForward:
 
     def test_init(self):
         """Test FeedForward initialization."""
-        ff = FeedForward(m=6, n_photons=2, conditional_mode=0)
+        ff = FeedForwardBlock(input_size=6, m=6, n=2, depth=3, conditional_mode=0)
         assert ff.m == 6
         assert ff.n_photons == 2
         assert ff.conditional_mode == 0
-        assert ff.layer1 is not None
+        assert ff.depth == 3
         assert isinstance(ff.layers, dict)
 
     def test_generate_possible_tuples(self):
         """Test possible tuples generation."""
-        ff = FeedForward(m=4, n_photons=2, conditional_mode=0)
+        ff = FeedForwardBlock(input_size=2, n=2, m=4, conditional_mode=0)
         tuples = ff.generate_possible_tuples()
-        assert isinstance(tuples, set)
+        assert isinstance(tuples, list)
         assert len(tuples) > 0
 
     def test_parameters_method(self):
         """Test parameters() method returns generator."""
-        ff = FeedForward(m=4, n_photons=2, conditional_mode=0)
+        ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_mode=0)
         params = list(ff.parameters())
         assert len(params) > 0
         assert all(isinstance(p, torch.Tensor) for p in params)
 
     def test_forward_pass(self):
         """Test forward pass execution."""
-        ff = FeedForward(m=4, n_photons=2, conditional_mode=0)
+        ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_mode=0)
         x = torch.rand(1, 4)
         output = ff(x)
         assert isinstance(output, torch.Tensor)
@@ -70,7 +71,7 @@ class TestFeedForward:
 
     def test_backward_pass(self):
         """Test backward pass execution."""
-        ff = FeedForward(m=4, n_photons=2, conditional_mode=0)
+        ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_mode=0)
         x = torch.rand(1, 4, requires_grad=True)
         
         output = ff(x)
@@ -84,25 +85,25 @@ class TestFeedForward:
 
     def test_indices_by_value(self):
         """Test indices_by_value method."""
-        ff = FeedForward(m=4, n_photons=2, conditional_mode=0)
+        ff = FeedForwardBlock(input_size=2, n=2, m=4, depth=2, conditional_mode=0)
         keys = [(0, 1, 0), (1, 0, 1), (0, 0, 1)]
-        idx_0, idx_1 = ff.indices_by_value(keys, 0)
+        idx_0, idx_1 = ff._indices_by_value(keys, 0)
         
         assert len(idx_0) == 2  # positions where first element is 0
         assert len(idx_1) == 1  # positions where first element is 1
 
     def test_match_indices(self):
         """Test match_indices method."""
-        ff = FeedForward(m=4, n_photons=2, conditional_mode=0)
+        ff = FeedForwardBlock(input_size=2, n=2, m=4, depth=2, conditional_mode=0)
         data = [(0, 1, 0), (1, 0, 1), (0, 0, 1)]
         data_out = [(1, 0), (0, 1), (0, 1)]
         
-        idx = ff.match_indices(data, data_out, k=0, k_value=0)
+        idx = ff._match_indices(data, data_out, k=0, k_value=0)
         assert isinstance(idx, torch.Tensor)
 
     def test_integration_with_optimizer(self):
         """Test integration with PyTorch optimizer."""
-        ff = FeedForward(m=4, n_photons=2, conditional_mode=0)
+        ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_mode=0)
         x = torch.rand(1, 4)
         optimizer = torch.optim.Adam(ff.parameters())
         
