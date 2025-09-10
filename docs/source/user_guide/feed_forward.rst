@@ -24,10 +24,12 @@ It provides a structured way to define a sequence of layers that adapt dynamical
 **Key properties:**
 
 - Initialization specifies:
-  
+
+  - ``input_size``: Input size of the feedforward block
   - ``depth``: number of feedforward layers.
   - ``n``: number of photons.
   - ``m``: number of modes.
+  - ``state_injection``: Whether or not to enable state injection
 
 - Each feedforward layer is defined as a *collection of quantum layers* corresponding to the possible measurement outcomes.
   - Each successive layer acts on *one mode less*.
