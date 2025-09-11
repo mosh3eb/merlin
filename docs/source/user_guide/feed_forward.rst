@@ -86,6 +86,8 @@ Example
    # Forward pass
    o = ffb(t)
 
+   ffb = FeedforwardBlock(input_size=20, n=2, m=6, depth=3)
+
    # Inspect output size
    print(ffb.get_output_size())   # 6
 
