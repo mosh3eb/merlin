@@ -14,24 +14,22 @@ Requirements:
 
 import os
 import random
-from typing import List
 
+import matplotlib
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import matplotlib
-
-matplotlib.use('Agg')  # safe for headless environments
+matplotlib.use("Agg")  # safe for headless environments
 import matplotlib.pyplot as plt
-
 import pennylane as qml
 import perceval as pcvl
 
-# Merlin layer and bridge
-from merlin import QuantumLayer, OutputMappingStrategy
 from bridge import QuantumBridge  # Import the bridge class
+
+# Merlin layer and bridge
+from merlin import OutputMappingStrategy, QuantumLayer
 
 
 # ----------------------------
@@ -61,7 +59,7 @@ class PennyLaneModule(nn.Module):
         self.device = device
 
         # Create PennyLane device and parameters
-        self.pennylane_device = qml.device('default.qubit', wires=n_qubits)
+        self.pennylane_device = qml.device("default.qubit", wires=n_qubits)
         self.qubit_params = nn.Parameter(
             torch.randn(n_qubits, 2, dtype=dtype, device=device) * 0.1
         )
@@ -70,7 +68,7 @@ class PennyLaneModule(nn.Module):
         self.qnode = self._create_circuit()
 
     def _create_circuit(self):
-        @qml.qnode(self.pennylane_device, interface='torch', diff_method='backprop')
+        @qml.qnode(self.pennylane_device, interface="torch", diff_method="backprop")
         def circuit(inputs, params):
             # 3 lightweight layers
             for _ in range(3):
@@ -139,8 +137,8 @@ def create_photonic_circuit(n_modes: int):
         )
 
     circuit = pcvl.Circuit(n_modes)
-    circuit.add(0, gi('l'), merge=True)
-    circuit.add(0, gi('r'), merge=True)
+    circuit.add(0, gi("l"), merge=True)
+    circuit.add(0, gi("r"), merge=True)
     return circuit
 
 
@@ -176,7 +174,7 @@ class LightweightQuantumAutoencoder(nn.Module):
             output_size=latent_dim,
             circuit=photonic_circuit,
             n_photons=n_photons,
-            trainable_parameters=['theta_'],
+            trainable_parameters=["theta_"],
             input_parameters=[],
             output_mapping_strategy=OutputMappingStrategy.LINEAR,
             no_bunching=True,
@@ -216,19 +214,19 @@ def generate_simple_patterns(n_samples=100, size=4):
     labels = []
 
     for _ in range(n_samples):
-        pattern_type = np.random.choice(['horizontal', 'vertical', 'diagonal', 'checkerboard'])
+        pattern_type = np.random.choice(["horizontal", "vertical", "diagonal", "checkerboard"])
         img = np.zeros((size, size))
 
-        if pattern_type == 'horizontal':
+        if pattern_type == "horizontal":
             img[np.random.randint(0, size), :] = 1
             labels.append(0)
-        elif pattern_type == 'vertical':
+        elif pattern_type == "vertical":
             img[:, np.random.randint(0, size)] = 1
             labels.append(1)
-        elif pattern_type == 'diagonal':
+        elif pattern_type == "diagonal":
             np.fill_diagonal(img, 1)
             labels.append(2)
-        elif pattern_type == 'checkerboard':
+        elif pattern_type == "checkerboard":
             img[::2, ::2] = 1
             img[1::2, 1::2] = 1
             labels.append(3)
@@ -256,36 +254,36 @@ def visualize_results(model, test_data, test_labels, n_samples=8):
             # Original
             ax = plt.subplot(4, n_samples, i + 1)
             orig = test_data[i].reshape(4, 4).numpy()
-            ax.imshow(orig, cmap='coolwarm', vmin=0, vmax=1)
-            ax.axis('off')
+            ax.imshow(orig, cmap="coolwarm", vmin=0, vmax=1)
+            ax.axis("off")
             if i == 0:
-                ax.set_ylabel('Original', fontsize=8)
+                ax.set_ylabel("Original", fontsize=8)
 
             # Reconstructed
             ax = plt.subplot(4, n_samples, n_samples + i + 1)
             recon = reconstructed[i].reshape(4, 4).numpy()
-            ax.imshow(recon, cmap='coolwarm', vmin=0, vmax=1)
-            ax.axis('off')
+            ax.imshow(recon, cmap="coolwarm", vmin=0, vmax=1)
+            ax.axis("off")
             if i == 0:
-                ax.set_ylabel('Reconstructed', fontsize=8)
+                ax.set_ylabel("Reconstructed", fontsize=8)
 
             # Latent representation
             ax = plt.subplot(4, n_samples, 2 * n_samples + i + 1)
             ax.bar(range(len(latent[i])), latent[i].numpy())
             ax.set_ylim([0, 1])
-            ax.axis('off')
+            ax.axis("off")
             if i == 0:
-                ax.set_ylabel('Latent', fontsize=8)
+                ax.set_ylabel("Latent", fontsize=8)
 
             # Quantum output
             ax = plt.subplot(4, n_samples, 3 * n_samples + i + 1)
             ax.bar(range(len(quantum[i])), quantum[i].numpy())
             ax.set_ylim([0, 1])
-            ax.axis('off')
+            ax.axis("off")
             if i == 0:
-                ax.set_ylabel('Quantum', fontsize=8)
+                ax.set_ylabel("Quantum", fontsize=8)
 
-    plt.suptitle('Quantum Autoencoder: Original → Latent → Quantum → Reconstructed')
+    plt.suptitle("Quantum Autoencoder: Original → Latent → Quantum → Reconstructed")
     plt.tight_layout()
     return fig
 
@@ -345,10 +343,10 @@ if __name__ == "__main__":
     total_params = sum(p.numel() for p in model.parameters())
     quantum_params = sum(p.numel() for p in model.quantum_bridge.parameters())
 
-    print(f"Model configuration:")
-    print(f"  Qubits: 4 (groups: [2, 2])")
-    print(f"  Photons: 2")
-    print(f"  Photonic modes: 8")
+    print("Model configuration:")
+    print("  Qubits: 4 (groups: [2, 2])")
+    print("  Photons: 2")
+    print("  Photonic modes: 8")
     print(f"  Parameters: {total_params} (quantum bridge: {quantum_params})\n")
 
     # Train
@@ -365,11 +363,11 @@ if __name__ == "__main__":
 
     # Plot training history
     plt.figure(figsize=(8, 4))
-    plt.plot(train_losses, label='Train', alpha=0.9)
-    plt.plot(val_losses, label='Validation', alpha=0.9)
-    plt.xlabel('Epoch')
-    plt.ylabel('MSE Loss')
-    plt.title('Training Progress')
+    plt.plot(train_losses, label="Train", alpha=0.9)
+    plt.plot(val_losses, label="Validation", alpha=0.9)
+    plt.xlabel("Epoch")
+    plt.ylabel("MSE Loss")
+    plt.title("Training Progress")
     plt.legend()
     plt.grid(True, alpha=0.3)
     figpath2 = os.path.join("outputs", "training_history.png")

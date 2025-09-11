@@ -1,18 +1,21 @@
-import torch
 from itertools import product
-from merlin import OutputMappingStrategy
-from merlin import PhotonicBackend, CircuitType, StatePattern, AnsatzFactory, QuantumLayer
+
 import perceval as pcvl
+import torch
 from perceval.components import BS, PS
-from typing import List
+
+from merlin import (
+    OutputMappingStrategy,
+    QuantumLayer,
+)
 
 
 def create_circuit(M, input_size):
     """Create a quantum photonic circuit with beam splitters and phase shifters.
-    
+
     Args:
         M (int): Number of modes in the circuit.
-        
+
     Returns:
         pcvl.Circuit: A quantum photonic circuit with alternating beam splitter layers and phase shifters.
     """
@@ -39,14 +42,13 @@ def create_circuit(M, input_size):
     return circuit
 
 
-
 def define_layer_no_input(n_modes, n_photons):
     """Define a quantum layer for feed-forward processing.
-    
+
     Args:
         n_modes (int): Number of optical modes.
         n_photons (int): Number of photons in the layer.
-        
+
     Returns:
         QuantumLayer: A configured quantum layer with trainable parameters.
     """
@@ -64,13 +66,14 @@ def define_layer_no_input(n_modes, n_photons):
     )
     return layer
 
+
 def define_layer_with_input(M, N, input_size):
     """Define the first layer of the feed-forward network.
-    
+
     Args:
         M (int): Number of modes in the circuit.
         N (int): Number of photons.
-        
+
     Returns:
         QuantumLayer: The first quantum layer with input parameters.
     """
@@ -89,26 +92,27 @@ def define_layer_with_input(M, N, input_size):
     )
     return layer
 
+
 class FeedForwardBlock(torch.nn.Module):
     """Feed-forward quantum neural network for photonic computation.
-    
+
     This class implements a feed-forward architecture where quantum layers are
     conditionally activated based on photon detection measurements.
-    
+
     Args:
         m (int): Total number of modes.
         n_photons (int): Number of photons in the system.
         conditional_mode (int): Mode index used for conditional measurement.
     """
-    
+
     def __init__(self,
-                 input_size:int,
+                 input_size: int,
                  n: int,
-                 m:int,
+                 m: int,
                  depth: int = None,
                  state_injection=False,
-                 conditional_mode:int=0,
-                 layers: List[QuantumLayer]=None,
+                 conditional_mode: int = 0,
+                 layers: list[QuantumLayer] = None,
                  ):
         super().__init__()
         self.conditional_mode = conditional_mode
@@ -125,11 +129,11 @@ class FeedForwardBlock(torch.nn.Module):
         else:
             tuples = self.generate_possible_tuples()
             self.tuples = tuples
-            assert len(tuples)==len(layers), (f"Layers should be a list of Quantum Layers of length {len(tuples)}")
-            self.layers = {tuples[k]:layers[k] for k in range(len(layers))}
+            assert len(tuples) == len(layers), (f"Layers should be a list of Quantum Layers of length {len(tuples)}")
+            self.layers = {tuples[k]: layers[k] for k in range(len(layers))}
             start = 0
             self.input_segments = {}
-            for k, tuple in enumerate(tuples):
+            for _k, tuple in enumerate(tuples):
                 input_size = self.layers[tuple].input_size
                 self.input_segments[tuple] = (start, start + input_size)
                 start += input_size
@@ -137,25 +141,25 @@ class FeedForwardBlock(torch.nn.Module):
 
     def generate_possible_tuples(self):
         """Generate all possible measurement outcome tuples.
-        
+
         Returns:
             List: Set of tuples representing possible measurement patterns.
         """
         n = self.n_photons
         m = self.m
         possible_tuples = []
-        for l in range(self.depth + 1):
-            for t in product([0, 1], repeat=l):
+        for depth in range(self.depth + 1):
+            for t in product([0, 1], repeat=depth):
                 if self.state_injection:
                     possible_tuples.append(t)
                 elif t.count(1) <= n - 1 and t.count(0) <= (m - n - 1):
-                        possible_tuples.append(t)
+                    possible_tuples.append(t)
 
         return possible_tuples
 
     def define_layers(self):
         """Define all quantum layers for different measurement outcomes.
-        
+
         Creates a dictionary mapping measurement tuples to corresponding quantum layers.
         Also creates mapping for input size distribution.
         """
@@ -170,10 +174,10 @@ class FeedForwardBlock(torch.nn.Module):
             if self.state_injection:
                 input = min(self.m, input_size)
             else:
-                input = min(self.m-m, input_size)
+                input = min(self.m - m, input_size)
             if input > 0:
                 if self.state_injection:
-                    self.layers[tup] = define_layer_with_input(self.m , self.n_photons, input)
+                    self.layers[tup] = define_layer_with_input(self.m, self.n_photons, input)
                 else:
                     self.layers[tup] = define_layer_with_input(self.m - m, self.n_photons - n, input)
                 self.input_segments[tup] = (start, start + input)
@@ -189,15 +193,12 @@ class FeedForwardBlock(torch.nn.Module):
 
     def parameters(self):
         """Return an iterator over all trainable parameters.
-        
+
         Yields:
             torch.Tensor: Trainable parameters from all quantum layers.
         """
         for layer in self.layers.values():
-            for param in layer.parameters():
-                yield param
-
-
+            yield from layer.parameters()
 
     def iterate_feedforward(self, current_tuple, remaining_amplitudes, keys, accumulated_prob, intermediary, outputs, depth=0, conditional_mode=0, x=None):
         """Recursively process the feed-forward computation.
@@ -240,7 +241,7 @@ class FeedForwardBlock(torch.nn.Module):
 
         if layer_with_photon is not None:
             m = layer_with_photon.computation_process.m
-            conditional_mode = min(self.conditional_mode, m-1)
+            conditional_mode = min(self.conditional_mode, m - 1)
             if self.state_injection:
                 match_idx_with = layer_idx
                 keys_with = keys
@@ -274,7 +275,7 @@ class FeedForwardBlock(torch.nn.Module):
 
         if layer_without_photon is not None:
             m = layer_without_photon.computation_process.m
-            conditional_mode = min(self.conditional_mode, m-1)
+            conditional_mode = min(self.conditional_mode, m - 1)
             if self.state_injection:
                 match_idx_without = layer_idx_not
                 keys_without = keys
@@ -308,18 +309,17 @@ class FeedForwardBlock(torch.nn.Module):
             new_prob_without = accumulated_prob * intermediary[current_key_without]
             outputs[final_tuple_without] = new_prob_without
 
-
     def forward(self, x):
         """Forward pass of the feed-forward network.
-        
+
         Args:
             x (torch.Tensor): Input tensor.
-            
+
         Returns:
             torch.Tensor: Output probabilities for all measurement patterns.
         """
         if x.shape[-1] != self.input_size:
-            raise ValueError("The input should be of size {}".format(self.input_size))
+            raise ValueError(f"The input should be of size {self.input_size}")
         intermediary = {}
         outputs = {}
         input_size = min(self.input_size, self.m)
@@ -330,14 +330,13 @@ class FeedForwardBlock(torch.nn.Module):
         self.iterate_feedforward((), amplitudes, keys, 1.0, intermediary, outputs, 0, self.conditional_mode, x=x)
         return torch.stack(list(outputs.values()), dim=1)
 
-
     def _indices_by_value(self, keys, k):
         """Find indices where a specific position has value 0 or 1.
-        
+
         Args:
             keys (list): List of tuples representing quantum states.
             k (int): Position index to check.
-            
+
         Returns:
             tuple: Indices where value is 0, indices where value is 1.
         """
@@ -351,25 +350,24 @@ class FeedForwardBlock(torch.nn.Module):
 
         return idx_0, idx_1
 
-
     def _match_indices(self, data, data_out, k, k_value):
         """Match indices between two state representations.
-        
+
         Args:
             data (list): List of tuples with length n.
             data_out (list): List of tuples with length n-1.
             k (int): Index of the column to remove.
             k_value (int): Value to match at position k (0 or 1).
-            
+
         Returns:
             torch.Tensor: Indices of matching states.
         """
         # Convert to dict to optimize search
         out_map = {tuple(row): i for i, row in enumerate(data_out)}
 
-        idx= []
+        idx = []
 
-        for i, tup in enumerate(data):
+        for _i, tup in enumerate(data):
             removed = tup[:k] + tup[k + 1:]
             if removed in out_map:
                 j = out_map[removed]
@@ -382,32 +380,31 @@ class FeedForwardBlock(torch.nn.Module):
         x = torch.rand(1, self.input_size)
         return self.forward(x).shape[-1]
 
-    def size_ff_layer(self, k:int):
-        tuples_k = [1 for tup in self.tuples if len(tup)==k]
+    def size_ff_layer(self, k: int):
+        tuples_k = [1 for tup in self.tuples if len(tup) == k]
         return len(tuples_k)
 
-    def define_ff_layer(self, k:int, layers: List[QuantumLayer]):
+    def define_ff_layer(self, k: int, layers: list[QuantumLayer]):
         len_layers = self.size_ff_layer(k)
-        assert len(layers)==len_layers, (f"layers should be of length {len_layers}")
+        assert len(layers) == len_layers, (f"layers should be of length {len_layers}")
         for i, t in enumerate(product([0, 1], repeat=k)):
             if t in self.layers:
-                old_input_size = self.layers[t].input_size
                 self.layers[t] = layers[i]
         self._recompute_segments()
 
-    def input_size_ff_layer(self, k:int):
-        return [self.layers[tup].input_size for tup in self.tuples if len(tup)==k]
+    def input_size_ff_layer(self, k: int):
+        return [self.layers[tup].input_size for tup in self.tuples if len(tup) == k]
 
     def _recompute_segments(self):
         """Recompute input segments based on current layer configuration.
-        
+
         This method recalculates the input_segments mapping and updates input_size
         based on the current layers, similar to the computation in define_layers.
         """
         start = 0
         total_input_size = 0
         self.input_segments = {}
-        
+
         for tup in self.tuples:
             if tup in self.layers:
                 input_size = self.layers[tup].input_size
@@ -416,23 +413,22 @@ class FeedForwardBlock(torch.nn.Module):
                 total_input_size += input_size
             else:
                 self.input_segments[tup] = (0, 0)
-        
+
         # Update input_size and print new value
         self.input_size = total_input_size
         print(f"New input size: {self.input_size}")
 
 
-
 if __name__ == "__main__":
-    import merlin as ML
-    import perceval as pcvl
-    from perceval.components import BS, PS
     from itertools import chain
 
+    import perceval as pcvl
+    from perceval.components import BS, PS
+
     L = torch.nn.Linear(20, 20)
-    feed_forward = FeedForwardBlock(20, 2, 6,  depth=3, conditional_mode=5, state_injection=True)
+    feed_forward = FeedForwardBlock(20, 2, 6, depth=3, conditional_mode=5, state_injection=True)
     layers = list(feed_forward.layers.values())
-    feed_forward =  FeedForwardBlock(20, 2, 6, depth=3, state_injection=True, conditional_mode=5, layers=layers)
+    feed_forward = FeedForwardBlock(20, 2, 6, depth=3, state_injection=True, conditional_mode=5, layers=layers)
     params = chain(L.parameters(), feed_forward.parameters())
     optimizer = torch.optim.Adam(params)
     print(feed_forward.get_output_size())
@@ -447,13 +443,3 @@ if __name__ == "__main__":
         result.backward()
         optimizer.step()
         optimizer.zero_grad()
-
-
-
-
-
-
-
-
-
-

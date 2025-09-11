@@ -55,8 +55,7 @@ class TestOutputSuperposedState:
             no_bunching=True,
         )
 
-
-        input_state_superposed = {layer.computation_process.simulation_graph.mapped_keys[k]:input_state[1, k] for k in range(len(input_state[0]))}
+        input_state_superposed = {layer.computation_process.simulation_graph.mapped_keys[k]: input_state[1, k] for k in range(len(input_state[0]))}
 
         output_superposed = benchmark(layer)
 
@@ -98,7 +97,6 @@ class TestOutputSuperposedState:
                                   range(len(input_state[0]))}
 
         output_superposed = layer()
-
 
         output_classical = benchmark(
             lambda: classical_method(layer, input_state_superposed)

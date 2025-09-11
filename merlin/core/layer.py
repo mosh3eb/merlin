@@ -43,9 +43,6 @@ from ..sampling.strategies import OutputMappingStrategy
 from .ansatz import Ansatz, AnsatzFactory
 
 
-
-
-
 class QuantumLayer(nn.Module):
     """
     Enhanced Quantum Neural Network Layer with factory-based architecture.

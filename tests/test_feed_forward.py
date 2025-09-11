@@ -24,15 +24,11 @@
 Tests for the FeedForward class.
 """
 
+
 import pytest
 import torch
-import perceval as pcvl
 
-from perceval.components import BS, PS
-from itertools import chain
-import merlin as ML
 from merlin.core.feed_forward import FeedForwardBlock
-
 
 
 class TestFeedForward:
@@ -73,13 +69,13 @@ class TestFeedForward:
         """Test backward pass execution."""
         ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_mode=0)
         x = torch.rand(1, 4, requires_grad=True)
-        
+
         output = ff(x)
         loss = output.sum()
-        
+
         # Should not raise an error
         loss.backward()
-        
+
         # Check gradients are computed
         assert x.grad is not None
 
@@ -88,7 +84,7 @@ class TestFeedForward:
         ff = FeedForwardBlock(input_size=2, n=2, m=4, depth=2, conditional_mode=0)
         keys = [(0, 1, 0), (1, 0, 1), (0, 0, 1)]
         idx_0, idx_1 = ff._indices_by_value(keys, 0)
-        
+
         assert len(idx_0) == 2  # positions where first element is 0
         assert len(idx_1) == 1  # positions where first element is 1
 
@@ -97,7 +93,7 @@ class TestFeedForward:
         ff = FeedForwardBlock(input_size=2, n=2, m=4, depth=2, conditional_mode=0)
         data = [(0, 1, 0), (1, 0, 1), (0, 0, 1)]
         data_out = [(1, 0), (0, 1), (0, 1)]
-        
+
         idx = ff._match_indices(data, data_out, k=0, k_value=0)
         assert isinstance(idx, torch.Tensor)
 
@@ -106,18 +102,18 @@ class TestFeedForward:
         ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_mode=0)
         x = torch.rand(1, 4)
         optimizer = torch.optim.Adam(ff.parameters())
-        
+
         # Forward pass
         output = ff(x)
         loss = output.pow(2).sum()
-        
+
         # Backward pass
         loss.backward()
-        
+
         # Optimizer step
         optimizer.step()
         optimizer.zero_grad()
-        
+
         # Should complete without errors
         assert True
 

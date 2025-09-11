@@ -19,11 +19,11 @@
 from __future__ import annotations
 
 import math
-from typing import Callable, List, Optional, Sequence, Union
+from collections.abc import Callable, Sequence
 
+import perceval as pcvl
 import torch
 import torch.nn as nn
-import perceval as pcvl
 
 try:
     # Requires the 'merlin' package exposing QuantumLayer
@@ -35,12 +35,12 @@ except Exception as e:  # pragma: no cover
 # ----------------------------
 # Helpers: qubit-groups <-> Fock (no ancillas)
 # ----------------------------
-def to_fock_state(qubit_state: str, group_sizes: List[int]) -> pcvl.BasicState:
+def to_fock_state(qubit_state: str, group_sizes: list[int]) -> pcvl.BasicState:
     """
     Map a bitstring to a BasicState with one photon per qubit-group (one-hot over 2^k modes).
     No ancilla/postselected modes are added. The number of modes is m = Σ 2^group_size.
     """
-    fock_state: List[int] = []
+    fock_state: list[int] = []
     bit_offset = 0
     for size in group_sizes:
         group_len = 2 ** size
@@ -51,7 +51,7 @@ def to_fock_state(qubit_state: str, group_sizes: List[int]) -> pcvl.BasicState:
     return pcvl.BasicState(fock_state)
 
 
-def _to_occ_tuple(key: Union[pcvl.BasicState, Sequence[int]]) -> tuple:
+def _to_occ_tuple(key: pcvl.BasicState | Sequence[int]) -> tuple:
     """Convert a BasicState or occupancy list to a tuple for dict keys."""
     if isinstance(key, pcvl.BasicState):
         return tuple(list(key))
@@ -85,13 +85,13 @@ class QuantumBridge(nn.Module):
     def __init__(
         self,
         *,
-        qubit_groups: List[int],
+        qubit_groups: list[int],
         merlin_layer: QuantumLayer,                         # REQUIRED
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
         dtype: torch.dtype = torch.float32,
         # PennyLane side:
-        pl_module: Optional[nn.Module] = None,
-        pl_state_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        pl_module: nn.Module | None = None,
+        pl_state_fn: Callable[[torch.Tensor], torch.Tensor] | None = None,
         # encoding behavior:
         wires_order: str = "little",
         normalize: bool = True,
@@ -122,8 +122,8 @@ class QuantumBridge(nn.Module):
 
         # Lazily built on first forward (when we see the actual 2^n)
         self._initialized = False
-        self.n_qubits: Optional[int] = None
-        self.n_photonic_modes: Optional[int] = None
+        self.n_qubits: int | None = None
+        self.n_photonic_modes: int | None = None
 
         # Buffers to fill later
         self.register_buffer("index_map", torch.tensor([], dtype=torch.long), persistent=False)
@@ -142,7 +142,7 @@ class QuantumBridge(nn.Module):
         by_state = {_to_occ_tuple(k): i for i, k in enumerate(mapped_keys)}
 
         # ordered map: for each computational basis |bits⟩, map to its Fock BasicState index
-        idx_map: List[int] = []
+        idx_map: list[int] = []
         n = int(round(math.log2(K)))
         for k in range(K):
             bits = format(k, f"0{n}b")

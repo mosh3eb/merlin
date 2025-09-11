@@ -165,10 +165,10 @@ class TestPercevalComparison:
         diff = np.abs(merlin_probs - perceval_probs)
         max_diff = np.max(diff)
 
-        #print(f"MerLin probabilities: {merlin_probs}")
-        #print(f"Perceval probabilities: {perceval_probs}")
-        #print(f"Maximum difference: {max_diff}")
-        #print(f"Mean absolute difference: {np.mean(diff)}")
+        # print(f"MerLin probabilities: {merlin_probs}")
+        # print(f"Perceval probabilities: {perceval_probs}")
+        # print(f"Maximum difference: {max_diff}")
+        # print(f"Mean absolute difference: {np.mean(diff)}")
 
         # The distributions should be reasonably close
         assert max_diff < tolerance, (

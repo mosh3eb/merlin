@@ -40,7 +40,7 @@ class ComputationProcess(AbstractComputationProcess):
         input_state: list[int] | dict[list[int], float],
         trainable_parameters: list[str],
         input_parameters: list[str],
-        n_photons: int=None,
+        n_photons: int = None,
         reservoir_mode: bool = False,
         dtype: torch.dtype = torch.float32,
         device: torch.device | None = None,
@@ -64,7 +64,7 @@ class ComputationProcess(AbstractComputationProcess):
 
         self.m = circuit.m  # Number of modes
         if n_photons is None:
-            self.n_photons = sum(input_state) # Total number of photons
+            self.n_photons = sum(input_state)  # Total number of photons
         else:
             self.n_photons = n_photons
         # Build computation graphs
@@ -110,6 +110,7 @@ class ComputationProcess(AbstractComputationProcess):
     ) -> torch.Tensor:
         unitary = self.converter.to_tensor(*parameters)
         changed_unitary = True
+
         def is_swap_permutation(t1, t2):
             if t1 == t2:
                 return False
@@ -144,24 +145,19 @@ class ComputationProcess(AbstractComputationProcess):
         sum_input = self.input_state.abs().pow(2).sum(dim=1).sqrt().unsqueeze(1)
         self.input_state = self.input_state / sum_input
 
-
         mask = (self.input_state.real ** 2 + self.input_state.imag ** 2 < 1e-13).all(dim=0)
 
         masked_input_state = (~mask).int().tolist()
 
-
         input_states = [(k, self.simulation_graph.mapped_keys[k]) for k, mask in enumerate(masked_input_state) if mask == 1]
 
         state_list = reorder_swap_chain(input_states)
-
 
         prev_state_index, prev_state = state_list.pop(0)
 
         _, amplitude = self.simulation_graph.compute(unitary, prev_state)
         amplitudes = torch.zeros((self.input_state.shape[-1], len(self.simulation_graph.mapped_keys)), dtype=amplitude.dtype, device=self.input_state.device)
         amplitudes[prev_state_index] = amplitude
-
-
 
         for index, fock_state in state_list:
             amplitudes[index] = self.simulation_graph.compute_pa_inc(
@@ -174,7 +170,6 @@ class ComputationProcess(AbstractComputationProcess):
         final_amplitudes = input_state @ amplitudes
 
         return final_amplitudes
-
 
     def compute_with_keys(self, parameters: list[torch.Tensor]):
         """Compute quantum output distribution and return both keys and probabilities."""

@@ -29,12 +29,12 @@ The optimized implementation pre-builds the computation graph based on the input
 configuration, which can then be reused for multiple unitary evaluations.
 """
 
+import math
 import os
 from collections.abc import Callable
 
 import torch
 import torch.jit as jit
-import math
 
 
 def _get_complex_dtype_for_float(dtype):
@@ -447,10 +447,9 @@ class SLOSComputeGraph:
                 - Probability distribution tensor
         """
         if len(unitary.shape) == 2:
-            is_batched = False
             unitary = unitary.unsqueeze(0)  # Add batch dimension [1 x m x m]
         else:
-            is_batched = True
+            pass
 
         if any(n < 0 for n in input_state) or sum(input_state) == 0:
             raise ValueError("Photon numbers cannot be negative or all zeros")
@@ -564,10 +563,9 @@ class SLOSComputeGraph:
         changed_unitary=False,
     ) -> tuple[list[tuple[int, ...]], torch.Tensor]:
         if len(unitary.shape) == 2:
-            is_batched = False
             unitary = unitary.unsqueeze(0)  # Add batch dimension [1 x m x m]
         else:
-            is_batched = True
+            pass
 
         if any(n < 0 for n in input_state) or sum(input_state) == 0:
             raise ValueError("Photon numbers cannot be negative or all zeros")
@@ -672,6 +670,7 @@ class SLOSComputeGraph:
             probabilities = probabilities.squeeze(0)
 
         return keys, probabilities
+
 
 def build_slos_distribution_computegraph(
     m,
