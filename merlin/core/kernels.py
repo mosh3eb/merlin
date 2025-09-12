@@ -235,14 +235,13 @@ class FidelityKernel(torch.nn.Module):
             m=m,
             n_photons=n,
             no_bunching=no_bunching,
-            keep_keys=False,
+            keep_keys=True,
             device=device,
             dtype=self.dtype
         )
         # Find index of input state in output distribution
-        all_fock_states = list(generate_all_fock_states(m, n, no_bunching))
-        self._input_state_index = all_fock_states.index(tuple(input_state))
-
+        keys, _ = self._slos_graph.compute(torch.eye(m, dtype = torch.cfloat), input_state)
+        self._input_state_index = keys.index(tuple(input_state))
         # For sampling
         self._autodiff_process = AutoDiffProcess()
 
@@ -358,6 +357,8 @@ class FidelityKernel(torch.nn.Module):
             probs = self._autodiff_process.sampling_noise.pcvl_sampler(
                 probs, self.shots, self.sampling_method
             )
+        print(f"Probs: {probs} of shape {probs.shape}")
+        print(f"input_state index: {self._input_state_index}")
         return probs[self._input_state_index].item()
 
     @staticmethod
