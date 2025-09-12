@@ -24,9 +24,9 @@
 Setup script for Merlin - Photonic Quantum Neural Networks.
 """
 
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
-with open("README.md", "r", encoding="utf-8") as fh:
+with open("README.md", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
@@ -40,9 +40,7 @@ setup(
             "pytest>=6.0",
             "pytest-cov>=3.0",
             "pytest-benchmark",
-            "black>=22.0",
-            "isort>=5.0",
-            "flake8>=4.0",
+            "ruff>=0.1.0",
             "mypy>=0.950",
         ],
         "docs": [

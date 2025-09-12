@@ -32,5 +32,10 @@ class AbstractComputationProcess(ABC):
 
     @abstractmethod
     def compute(self, *args, **kwargs):
-        """Perform the computation."""
+        r"""Perform the computation.
+
+        Args:
+            \*args: Positional arguments for the computation.
+            \*\*kwargs: Keyword arguments for the computation.`
+        """
         pass

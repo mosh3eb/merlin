@@ -20,8 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from .slos_torchscript import compute_slos_distribution, build_slos_distribution_computegraph, load_slos_distribution_computegraph
 from .locirc_to_tensor import CircuitConverter
+from .slos_torchscript import build_slos_distribution_computegraph
 
 __all__ = ["build_slos_distribution_computegraph", "CircuitConverter"]
-

@@ -23,8 +23,9 @@
 import pytest
 import torch
 import torch.nn as nn
-import merlin as ML
+import torch.nn.functional as F
 
+import merlin as ML
 
 
 class TestOutputMapper:
@@ -33,9 +34,7 @@ class TestOutputMapper:
     def test_linear_mapping_creation(self):
         """Test creation of linear output mapping."""
         mapping = ML.OutputMapper.create_mapping(
-            ML.OutputMappingStrategy.LINEAR,
-            input_size=6,
-            output_size=3
+            ML.OutputMappingStrategy.LINEAR, input_size=6, output_size=3
         )
 
         assert isinstance(mapping, nn.Linear)
@@ -45,9 +44,7 @@ class TestOutputMapper:
     def test_lexgrouping_mapping_creation(self):
         """Test creation of lexicographical grouping mapping."""
         mapping = ML.OutputMapper.create_mapping(
-            ML.OutputMappingStrategy.LEXGROUPING,
-            input_size=8,
-            output_size=4
+            ML.OutputMappingStrategy.LEXGROUPING, input_size=8, output_size=4
         )
 
         assert isinstance(mapping, ML.LexGroupingMapper)
@@ -57,9 +54,7 @@ class TestOutputMapper:
     def test_modgrouping_mapping_creation(self):
         """Test creation of modulo grouping mapping."""
         mapping = ML.OutputMapper.create_mapping(
-            ML.OutputMappingStrategy.MODGROUPING,
-            input_size=10,
-            output_size=3
+            ML.OutputMappingStrategy.MODGROUPING, input_size=10, output_size=3
         )
 
         assert isinstance(mapping, ML.ModGroupingMapper)
@@ -69,29 +64,25 @@ class TestOutputMapper:
     def test_none_mapping_creation_valid(self):
         """Test creation of identity mapping with matching sizes."""
         mapping = ML.OutputMapper.create_mapping(
-            ML.OutputMappingStrategy.NONE,
-            input_size=5,
-            output_size=5
+            ML.OutputMappingStrategy.NONE, input_size=5, output_size=5
         )
 
         assert isinstance(mapping, nn.Identity)
 
     def test_none_mapping_creation_invalid(self):
         """Test that NONE strategy with mismatched sizes raises error."""
-        with pytest.raises(ValueError, match="Distribution size .* must equal output size"):
+        with pytest.raises(
+            ValueError, match="Distribution size .* must equal output size"
+        ):
             ML.OutputMapper.create_mapping(
-                ML.OutputMappingStrategy.NONE,
-                input_size=5,
-                output_size=3
+                ML.OutputMappingStrategy.NONE, input_size=5, output_size=3
             )
 
     def test_invalid_strategy(self):
         """Test that invalid strategy raises error."""
         with pytest.raises(ValueError, match="Unknown output mapping strategy"):
             ML.OutputMapper.create_mapping(
-                "invalid_strategy",
-                input_size=5,
-                output_size=3
+                "invalid_strategy", input_size=5, output_size=3
             )
 
 
@@ -138,11 +129,7 @@ class TestLexGroupingMapper:
 
         # Each batch should preserve total probability
         for i in range(batch_size):
-            assert torch.allclose(
-                output[i].sum(),
-                input_dist[i].sum(),
-                atol=1e-6
-            )
+            assert torch.allclose(output[i].sum(), input_dist[i].sum(), atol=1e-6)
 
     def test_lexgrouping_no_padding_needed(self):
         """Test lexicographical grouping when no padding is needed."""
@@ -228,11 +215,7 @@ class TestModGroupingMapper:
         # Check each batch individually
         for i in range(batch_size):
             # Total probability should be preserved
-            assert torch.allclose(
-                output[i].sum(),
-                input_dist[i].sum(),
-                atol=1e-6
-            )
+            assert torch.allclose(output[i].sum(), input_dist[i].sum(), atol=1e-6)
 
     def test_modgrouping_single_output(self):
         """Test modulo grouping with single output dimension."""
@@ -278,16 +261,14 @@ class TestOutputMappingIntegration:
     def test_linear_mapping_integration(self):
         """Test linear mapping integration with QuantumLayer."""
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=4,
-            n_photons=2
+            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
         )
 
         ansatz = ML.AnsatzFactory.create(
             PhotonicBackend=experiment,
             input_size=2,
             output_size=3,
-            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR
+            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
         )
 
         layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
@@ -301,16 +282,14 @@ class TestOutputMappingIntegration:
     def test_lexgrouping_mapping_integration(self):
         """Test lexicographical grouping integration with QuantumLayer."""
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=4,
-            n_photons=2
+            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
         )
 
         ansatz = ML.AnsatzFactory.create(
             PhotonicBackend=experiment,
             input_size=2,
             output_size=4,
-            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING
+            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING,
         )
 
         layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
@@ -324,16 +303,14 @@ class TestOutputMappingIntegration:
     def test_modgrouping_mapping_integration(self):
         """Test modulo grouping integration with QuantumLayer."""
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=4,
-            n_photons=2
+            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
         )
 
         ansatz = ML.AnsatzFactory.create(
             PhotonicBackend=experiment,
             input_size=2,
             output_size=3,
-            output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING
+            output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING,
         )
 
         layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
@@ -344,19 +321,16 @@ class TestOutputMappingIntegration:
         assert output.shape == (4, 3)
         assert torch.all(output >= 0)
 
-
     def test_mapping_gradient_flow(self):
         """Test gradient flow through different mapping strategies."""
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=6,
-            n_photons=2
+            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=6, n_photons=2
         )
 
         strategies = [
             ML.OutputMappingStrategy.LINEAR,
             ML.OutputMappingStrategy.LEXGROUPING,
-            ML.OutputMappingStrategy.MODGROUPING
+            ML.OutputMappingStrategy.MODGROUPING,
         ]
 
         for strategy in strategies:
@@ -364,27 +338,29 @@ class TestOutputMappingIntegration:
                 PhotonicBackend=experiment,
                 input_size=2,
                 output_size=3,
-                output_mapping_strategy=strategy
+                output_mapping_strategy=strategy,
             )
 
             layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
 
             x = torch.rand(2, 2, requires_grad=True)
             output = layer(x)
-            loss = output.sum()
+
+            # Use MSE loss instead of sum for better gradient flow
+            target = torch.ones_like(output)
+            loss = F.mse_loss(output, target)
             loss.backward()
 
             # Input should have gradients
             assert x.grad is not None, f"No gradients for strategy {strategy}"
-            assert not torch.allclose(x.grad, torch.zeros_like(x.grad)), \
+            assert not torch.allclose(x.grad, torch.zeros_like(x.grad)), (
                 f"Zero gradients for strategy {strategy}"
+            )
 
     def test_mapping_output_bounds(self):
         """Test that different mappings produce reasonable output bounds."""
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=4,
-            n_photons=2
+            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
         )
 
         x = torch.rand(5, 2)
@@ -394,7 +370,7 @@ class TestOutputMappingIntegration:
             PhotonicBackend=experiment,
             input_size=2,
             output_size=3,
-            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR
+            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
         )
         layer_linear = ML.QuantumLayer(input_size=2, ansatz=ansatz_linear)
         output_linear = layer_linear(x)
@@ -405,7 +381,7 @@ class TestOutputMappingIntegration:
             PhotonicBackend=experiment,
             input_size=2,
             output_size=4,
-            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING
+            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING,
         )
         layer_lex = ML.QuantumLayer(input_size=2, ansatz=ansatz_lex)
         output_lex = layer_lex(x)
@@ -416,7 +392,7 @@ class TestOutputMappingIntegration:
             PhotonicBackend=experiment,
             input_size=2,
             output_size=3,
-            output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING
+            output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING,
         )
         layer_mod = ML.QuantumLayer(input_size=2, ansatz=ansatz_mod)
         output_mod = layer_mod(x)
@@ -425,9 +401,7 @@ class TestOutputMappingIntegration:
     def test_dtype_consistency_in_mappings(self):
         """Test that output mappings respect input dtypes."""
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=4,
-            n_photons=2
+            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
         )
 
         for dtype in [torch.float32, torch.float64]:
@@ -436,7 +410,7 @@ class TestOutputMappingIntegration:
                 input_size=2,
                 output_size=3,
                 output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
-                dtype=dtype
+                dtype=dtype,
             )
 
             layer = ML.QuantumLayer(input_size=2, ansatz=ansatz, dtype=dtype)
@@ -452,9 +426,7 @@ class TestOutputMappingIntegration:
         """Test mappings with larger dimensions."""
         # Create a larger quantum system
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=6,
-            n_photons=3
+            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=6, n_photons=3
         )
 
         # Test with larger input/output dimensions
@@ -462,7 +434,7 @@ class TestOutputMappingIntegration:
             PhotonicBackend=experiment,
             input_size=4,
             output_size=8,
-            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING
+            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING,
         )
 
         layer = ML.QuantumLayer(input_size=4, ansatz=ansatz)
@@ -477,16 +449,14 @@ class TestOutputMappingIntegration:
     def test_edge_case_single_dimension(self):
         """Test edge case with single input/output dimensions."""
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL,
-            n_modes=3,
-            n_photons=1
+            circuit_type=ML.CircuitType.PARALLEL, n_modes=3, n_photons=1
         )
 
         ansatz = ML.AnsatzFactory.create(
             PhotonicBackend=experiment,
             input_size=1,
             output_size=1,
-            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR
+            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
         )
 
         layer = ML.QuantumLayer(input_size=1, ansatz=ansatz)
@@ -500,16 +470,14 @@ class TestOutputMappingIntegration:
     def test_mapping_determinism(self):
         """Test that mappings are deterministic."""
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=4,
-            n_photons=2
+            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
         )
 
         ansatz = ML.AnsatzFactory.create(
             PhotonicBackend=experiment,
             input_size=2,
             output_size=3,
-            output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING
+            output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING,
         )
 
         layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
@@ -525,6 +493,6 @@ class TestOutputMappingIntegration:
 
         # All outputs should be identical (deterministic)
         for i in range(1, len(outputs)):
-            assert torch.allclose(outputs[0], outputs[i], atol=1e-6), \
+            assert torch.allclose(outputs[0], outputs[i], atol=1e-6), (
                 f"Output {i} differs from output 0"
-
+            )

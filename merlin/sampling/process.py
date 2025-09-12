@@ -28,23 +28,53 @@ import torch
 
 
 class SamplingProcess:
-    """Handles quantum measurement sampling with different methods."""
+    """Handles quantum measurement sampling with different methods.
 
-    def __init__(self):
-        self.gradient_method = "exact"  # Always use exact for gradients
+    This class provides functionality to simulate quantum measurement noise
+    by applying different sampling strategies to probability distributions.
+    """
 
-    def pcvl_sampler(self, distribution: torch.Tensor, shots: int,
-                     method: str = 'multinomial') -> torch.Tensor:
-        """Apply sampling noise to a probability distribution."""
+    def __init__(self, method: str = "multinomial"):
+        """Initialize the sampling process with a specific method.
+        Args:
+            method: Sampling method to use ('multinomial', 'binomial', or 'gaussian')
+
+        Raises:
+            ValueError: If method is not one of the valid options
+
+        """
+        # Validate method
+        self.valid_methods = ["multinomial", "binomial", "gaussian"]
+        if method not in self.valid_methods:
+            raise ValueError(
+                f"Invalid sampling method: {method}. Valid options are: {self.valid_methods}"
+            )
+        self.method = method
+
+    def pcvl_sampler(
+        self, distribution: torch.Tensor, shots: int, method: str = None
+    ) -> torch.Tensor:
+        """Apply sampling noise to a probability distribution.
+
+        Args:
+            distribution: Input probability distribution tensor
+            method: Sampling method to use ('multinomial', 'binomial', or 'gaussian'), defaults to the initialized method
+            shots: Number of measurement shots to simulate
+
+        Returns:
+            Noisy probability distribution after sampling
+
+        Raises:
+            ValueError: If method is not one of the valid options
+
+        """
         if shots <= 0:
             return distribution
 
-        # Validate method
-        valid_methods = ['multinomial', 'binomial', 'gaussian']
-        if method not in valid_methods:
-            raise ValueError(f"Invalid sampling method: {method}. Valid options are: {valid_methods}")
+        if method is None:
+            method = self.method
 
-        if method == 'multinomial':
+        if method == "multinomial":
             if distribution.dim() == 1:
                 sampled_counts = torch.multinomial(
                     distribution, num_samples=shots, replacement=True
@@ -66,13 +96,17 @@ class SamplingProcess:
                     noisy_dists.append(noisy_dist / shots)
                 return torch.stack(noisy_dists)
 
-        elif method == 'binomial':
+        elif method == "binomial":
             return torch.distributions.Binomial(shots, distribution).sample() / shots
 
-        elif method == 'gaussian':
+        elif method == "gaussian":
             std_dev = torch.sqrt(distribution * (1 - distribution) / shots)
             noise = torch.randn_like(distribution) * std_dev
             noisy_dist = distribution + noise
             noisy_dist = torch.clamp(noisy_dist, 0, 1)
             noisy_dist = noisy_dist / noisy_dist.sum(dim=-1, keepdim=True)
             return noisy_dist
+
+        raise ValueError(
+            f"Invalid sampling method: {method}. Valid options are: {self.valid_methods}"
+        )

@@ -24,9 +24,11 @@
 Tests for sampling and autodiff utilities.
 """
 
+import warnings
+
 import pytest
 import torch
-import warnings
+
 import merlin as ML
 
 
@@ -52,7 +54,7 @@ class TestSamplingProcess:
         dist = torch.tensor([0.3, 0.4, 0.2, 0.1])
         shots = 1000
 
-        result = sampler.pcvl_sampler(dist, shots=shots, method='multinomial')
+        result = sampler.pcvl_sampler(dist, shots=shots, method="multinomial")
 
         # Check output is valid probability distribution
         assert torch.all(result >= 0)
@@ -71,7 +73,7 @@ class TestSamplingProcess:
         dist = dist / dist.sum(dim=1, keepdim=True)  # Normalize
 
         shots = 500
-        result = sampler.pcvl_sampler(dist, shots=shots, method='multinomial')
+        result = sampler.pcvl_sampler(dist, shots=shots, method="multinomial")
 
         assert result.shape == dist.shape
         # Each row should sum to 1
@@ -85,7 +87,7 @@ class TestSamplingProcess:
         dist = torch.tensor([0.4, 0.3, 0.2, 0.1])
         shots = 1000
 
-        result = sampler.pcvl_sampler(dist, shots=shots, method='gaussian')
+        result = sampler.pcvl_sampler(dist, shots=shots, method="gaussian")
 
         # Check output is valid probability distribution
         assert torch.all(result >= 0)
@@ -101,7 +103,7 @@ class TestSamplingProcess:
         dist = torch.tensor([0.4, 0.3, 0.2, 0.1])
         shots = 1000
 
-        result = sampler.pcvl_sampler(dist, shots=shots, method='binomial')
+        result = sampler.pcvl_sampler(dist, shots=shots, method="binomial")
 
         # Check output is valid probability distribution
         assert torch.all(result >= 0)
@@ -117,7 +119,7 @@ class TestSamplingProcess:
         dist = torch.tensor([0.4, 0.3, 0.2, 0.1])
 
         with pytest.raises(ValueError, match="Invalid sampling method"):
-            sampler.pcvl_sampler(dist, shots=100, method='invalid_method')
+            sampler.pcvl_sampler(dist, shots=100, method="invalid_method")
 
     def test_sampling_with_small_shots(self):
         """Test sampling behavior with small number of shots."""
@@ -126,7 +128,7 @@ class TestSamplingProcess:
         dist = torch.tensor([0.5, 0.3, 0.2])
         shots = 10
 
-        result = sampler.pcvl_sampler(dist, shots=shots, method='multinomial')
+        result = sampler.pcvl_sampler(dist, shots=shots, method="multinomial")
 
         # Should still be valid distribution
         assert torch.all(result >= 0)
@@ -141,9 +143,7 @@ class TestAutoDiffProcess:
         autodiff = ML.AutoDiffProcess()
 
         apply_sampling, shots = autodiff.autodiff_backend(
-            needs_gradient=False,
-            apply_sampling=False,
-            shots=0
+            needs_gradient=False, apply_sampling=False, shots=0
         )
 
         assert apply_sampling is False
@@ -154,9 +154,7 @@ class TestAutoDiffProcess:
         autodiff = ML.AutoDiffProcess()
 
         apply_sampling, shots = autodiff.autodiff_backend(
-            needs_gradient=False,
-            apply_sampling=True,
-            shots=100
+            needs_gradient=False, apply_sampling=True, shots=100
         )
 
         assert apply_sampling is True
@@ -170,9 +168,7 @@ class TestAutoDiffProcess:
             warnings.simplefilter("always")
 
             apply_sampling, shots = autodiff.autodiff_backend(
-                needs_gradient=True,
-                apply_sampling=True,
-                shots=100
+                needs_gradient=True, apply_sampling=True, shots=100
             )
 
             # Should disable sampling
@@ -191,9 +187,7 @@ class TestAutoDiffProcess:
             warnings.simplefilter("always")
 
             apply_sampling, shots = autodiff.autodiff_backend(
-                needs_gradient=True,
-                apply_sampling=False,
-                shots=100
+                needs_gradient=True, apply_sampling=False, shots=100
             )
 
             # Should disable sampling
@@ -212,9 +206,7 @@ class TestAutoDiffProcess:
             warnings.simplefilter("always")
 
             apply_sampling, shots = autodiff.autodiff_backend(
-                needs_gradient=True,
-                apply_sampling=False,
-                shots=0
+                needs_gradient=True, apply_sampling=False, shots=0
             )
 
             # Should remain unchanged
@@ -231,15 +223,11 @@ class TestSamplingIntegration:
     def test_layer_sampling_during_training(self):
         """Test that sampling is disabled during training mode."""
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=4,
-            n_photons=2
+            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
         )
 
         ansatz = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment,
-            input_size=2,
-            output_size=3
+            PhotonicBackend=experiment, input_size=2, output_size=3
         )
 
         layer = ML.QuantumLayer(input_size=2, ansatz=ansatz, shots=100)
@@ -258,22 +246,20 @@ class TestSamplingIntegration:
             loss.backward()
 
             # Should have warned about disabled sampling
-            warning_found = any("Sampling was requested but is disabled" in str(warning.message)
-                                for warning in w)
+            warning_found = any(
+                "Sampling was requested but is disabled" in str(warning.message)
+                for warning in w
+            )
             assert warning_found
 
     def test_layer_sampling_during_evaluation(self):
         """Test that sampling works during evaluation mode."""
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=4,
-            n_photons=2
+            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
         )
 
         ansatz = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment,
-            input_size=2,
-            output_size=3
+            PhotonicBackend=experiment, input_size=2, output_size=3
         )
 
         layer = ML.QuantumLayer(input_size=2, ansatz=ansatz, shots=100)
@@ -299,48 +285,40 @@ class TestSamplingIntegration:
     def test_layer_sampling_config_update(self):
         """Test updating sampling configuration on layer."""
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=4,
-            n_photons=2
+            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
         )
 
         ansatz = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment,
-            input_size=2,
-            output_size=3
+            PhotonicBackend=experiment, input_size=2, output_size=3
         )
 
         layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
 
         # Initial config
         assert layer.shots == 0
-        assert layer.sampling_method == 'multinomial'
+        assert layer.sampling_method == "multinomial"
 
         # Update config
-        layer.set_sampling_config(shots=200, method='gaussian')
+        layer.set_sampling_config(shots=200, method="gaussian")
 
         assert layer.shots == 200
-        assert layer.sampling_method == 'gaussian'
+        assert layer.sampling_method == "gaussian"
 
         # Test invalid updates
         with pytest.raises(ValueError):
             layer.set_sampling_config(shots=-1)
 
         with pytest.raises(ValueError):
-            layer.set_sampling_config(method='invalid')
+            layer.set_sampling_config(method="invalid")
 
     def test_different_sampling_methods_produce_different_results(self):
         """Test that different sampling methods produce different results."""
         experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=4,
-            n_photons=2
+            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
         )
 
         ansatz = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment,
-            input_size=2,
-            output_size=3
+            PhotonicBackend=experiment, input_size=2, output_size=3
         )
 
         layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
@@ -349,7 +327,7 @@ class TestSamplingIntegration:
         x = torch.rand(5, 2)
 
         results = {}
-        methods = ['multinomial', 'gaussian', 'binomial']
+        methods = ["multinomial", "gaussian", "binomial"]
 
         for method in methods:
             layer.set_sampling_config(shots=100, method=method)
@@ -358,6 +336,7 @@ class TestSamplingIntegration:
 
         # All results should be different from each other
         for i, method1 in enumerate(methods):
-            for method2 in methods[i + 1:]:
-                assert not torch.allclose(results[method1], results[method2], atol=1e-3), \
-                    f"Methods {method1} and {method2} produced identical results"
+            for method2 in methods[i + 1 :]:
+                assert not torch.allclose(
+                    results[method1], results[method2], atol=1e-3
+                ), f"Methods {method1} and {method2} produced identical results"

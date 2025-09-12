@@ -32,6 +32,7 @@ classifiers=[
 dependencies = [
     "torch>=2.0.0",
     "perceval-quandela>=0.13.1",
+    "numpy>=2.2.6",
     "pandas"
 ]
 
@@ -48,4 +49,55 @@ packages = ["merlin", "merlin.core", "merlin.datasets", "merlin.pcvl_pytorch", "
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+preview = true
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "venv",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+    "Q",  # flake8-quotes
+    "COM", # flake8-commas
+    "S",  # flake8-bandit (security)
+    "N",  # pep8-naming
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "B904",  # Within an `except` clause, raise exceptions with `raise ... from err`
+    "S101",  # Use of assert detected (common in tests)
+    "N806",  # Variable in function should be lowercase (allows mixed case)
+    "COM812", # Trailing comma missing - handled by ruff format
+    "S310",  # Suspicious URL open (urllib.request is safe here)
+    "S311",  # Standard pseudo-random generators are fine for non-crypto
+    "N803",  # Argument name should be lowercase (allows PhotonicBackend param)
+    "N812",  # Imported as non-lowercase (allows import as ML),
+    "N801",  # Class name `UnpairedDataset_Quantum` should use CapWords convention
+    "N802",  # function name should be lowercase
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["B011"]  # assert False in tests is ok
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
 
