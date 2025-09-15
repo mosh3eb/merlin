@@ -6,7 +6,10 @@ from ..sampling.autodiff import AutoDiffProcess
 from ..pcvl_pytorch.locirc_to_tensor import CircuitConverter
 from ..pcvl_pytorch.slos_torchscript import build_slos_distribution_computegraph as build_slos_graph
 from .loss import NKernelAlignment
-from typing import Union
+from ..core.photonicbackend import PhotonicBackend
+from ..core.ansatz import AnsatzFactory
+from ..core.generators import CircuitType, StatePattern
+from typing import Union, Optional
 from torch import Tensor
 
 dtype_to_torch = {
@@ -131,6 +134,266 @@ class FeatureMap:
                 return 1 in x.shape and self.input_size in x.shape
         
         raise ValueError(error_msg)
+
+    @classmethod
+    def from_photonic_backend(
+        cls,
+        input_size: int,
+        photonic_backend: PhotonicBackend,
+        *,
+        trainable_parameters: Optional[list[str]] = None,
+        dtype: Union[str, torch.dtype] = torch.float32,
+        device: Optional[torch.device] = None
+    ) -> 'FeatureMap':
+        """
+        Create a FeatureMap from a PhotonicBackend configuration.
+        
+        This factory method uses the PhotonicBackend to automatically generate
+        a circuit and appropriate parameters for quantum kernel applications.
+        
+        :param input_size: Dimensionality of input data
+        :param photonic_backend: PhotonicBackend configuration
+        :param trainable_parameters: Optional trainable parameters. 
+            If None, automatically determined from backend configuration
+        :param dtype: Data type for computations
+        :param device: Device for computations
+        :return: Configured FeatureMap instance
+        
+        Examples
+        --------
+        >>> backend = PhotonicBackend(
+        ...     circuit_type=CircuitType.SERIES,
+        ...     n_modes=4, 
+        ...     n_photons=2
+        ... )
+        >>> feature_map = FeatureMap.from_photonic_backend(
+        ...     input_size=2, 
+        ...     photonic_backend=backend
+        ... )
+        """
+        ansatz = AnsatzFactory.create(
+            PhotonicBackend=photonic_backend,
+            input_size=input_size,
+            dtype=dtype if isinstance(dtype, torch.dtype) else None
+        )
+        
+        # Override trainable parameters if specified
+        if trainable_parameters is not None:
+            ansatz.trainable_parameters = trainable_parameters
+
+        return cls(
+            circuit=ansatz.circuit,
+            input_size=input_size,
+            input_parameters=ansatz.input_parameters,
+            trainable_parameters=ansatz.trainable_parameters,
+            dtype=dtype,
+            device=device
+        )
+
+    @classmethod 
+    def simple(
+        cls,
+        input_size: int,
+        n_modes: int,
+        n_photons: Optional[int] = None,
+        *,
+        circuit_type: Union[CircuitType, str] = CircuitType.SERIES,
+        state_pattern: Union[StatePattern, str] = StatePattern.PERIODIC,
+        reservoir_mode: bool = False,
+        trainable_parameters: Optional[list[str]] = None,
+        dtype: Union[str, torch.dtype] = torch.float32,
+        device: Optional[torch.device] = None
+    ) -> 'FeatureMap':
+        """
+        Simple factory method to create a FeatureMap with minimal configuration.
+        
+        :param input_size: Dimensionality of input data
+        :param n_modes: Number of modes in the photonic circuit
+        :param n_photons: Number of photons. If None, defaults to input_size
+        :param circuit_type: Type of circuit topology
+        :param state_pattern: Pattern for initial state generation
+        :param reservoir_mode: Whether to use reservoir computing mode
+        :param trainable_parameters: Optional trainable parameters
+        :param dtype: Data type for computations
+        :param device: Device for computations
+        :return: Configured FeatureMap instance
+        
+        Examples
+        --------
+        >>> # Create a simple feature map for 2D data
+        >>> feature_map = FeatureMap.simple(
+        ...     input_size=2,
+        ...     n_modes=4,
+        ...     circuit_type="series"
+        ... )
+        """
+        if n_photons is None:
+            n_photons = input_size
+            
+        backend = PhotonicBackend(
+            circuit_type=circuit_type,
+            n_modes=n_modes,
+            n_photons=n_photons,
+            state_pattern=state_pattern,
+            reservoir_mode=reservoir_mode
+        )
+        
+        return cls.from_photonic_backend(
+            input_size=input_size,
+            photonic_backend=backend,
+            trainable_parameters=trainable_parameters,
+            dtype=dtype,
+            device=device
+        )
+
+
+class KernelCircuitBuilder:
+    """
+    Builder class for creating quantum kernel circuits with photonic backends.
+    
+    This class provides a fluent interface for building quantum kernel circuits
+    with various configurations, inspired by the core.layer architecture.
+    """
+    
+    def __init__(self):
+        self._input_size: Optional[int] = None
+        self._circuit_type: CircuitType = CircuitType.SERIES
+        self._n_modes: Optional[int] = None
+        self._n_photons: Optional[int] = None
+        self._state_pattern: StatePattern = StatePattern.PERIODIC
+        self._reservoir_mode: bool = False
+        self._trainable_parameters: Optional[list[str]] = None
+        self._dtype: Union[str, torch.dtype] = torch.float32
+        self._device: Optional[torch.device] = None
+        self._use_bandwidth_tuning: bool = False
+
+    def input_size(self, size: int) -> 'KernelCircuitBuilder':
+        """Set the input dimensionality."""
+        self._input_size = size
+        return self
+
+    def circuit_type(self, circuit_type: Union[CircuitType, str]) -> 'KernelCircuitBuilder':
+        """Set the circuit topology type."""
+        if isinstance(circuit_type, str):
+            circuit_type = CircuitType(circuit_type.lower())
+        self._circuit_type = circuit_type
+        return self
+
+    def n_modes(self, modes: int) -> 'KernelCircuitBuilder':
+        """Set the number of modes in the circuit."""
+        self._n_modes = modes
+        return self
+
+    def n_photons(self, photons: int) -> 'KernelCircuitBuilder':
+        """Set the number of photons."""
+        self._n_photons = photons
+        return self
+
+    def state_pattern(self, pattern: Union[StatePattern, str]) -> 'KernelCircuitBuilder':
+        """Set the state initialization pattern."""
+        if isinstance(pattern, str):
+            pattern = StatePattern(pattern.lower())
+        self._state_pattern = pattern
+        return self
+
+    def reservoir_mode(self, enabled: bool = True) -> 'KernelCircuitBuilder':
+        """Enable or disable reservoir computing mode."""
+        self._reservoir_mode = enabled
+        return self
+
+    def trainable_parameters(self, params: list[str]) -> 'KernelCircuitBuilder':
+        """Set custom trainable parameters."""
+        self._trainable_parameters = params
+        return self
+
+    def dtype(self, dtype: Union[str, torch.dtype]) -> 'KernelCircuitBuilder':
+        """Set the data type for computations."""
+        self._dtype = dtype
+        return self
+
+    def device(self, device: torch.device) -> 'KernelCircuitBuilder':
+        """Set the computation device."""
+        self._device = device
+        return self
+
+    def bandwidth_tuning(self, enabled: bool = True) -> 'KernelCircuitBuilder':
+        """Enable or disable bandwidth tuning."""
+        self._use_bandwidth_tuning = enabled
+        return self
+
+    def build_feature_map(self) -> FeatureMap:
+        """
+        Build and return a FeatureMap instance.
+        
+        :return: Configured FeatureMap
+        :raises ValueError: If required parameters are missing
+        """
+        if self._input_size is None:
+            raise ValueError("Input size must be specified")
+        
+        # Set defaults
+        n_modes = self._n_modes or max(self._input_size + 1, 4)
+        n_photons = self._n_photons or self._input_size
+        
+        backend = PhotonicBackend(
+            circuit_type=self._circuit_type,
+            n_modes=n_modes,
+            n_photons=n_photons,
+            state_pattern=self._state_pattern,
+            reservoir_mode=self._reservoir_mode,
+            use_bandwidth_tuning=self._use_bandwidth_tuning
+        )
+        
+        return FeatureMap.from_photonic_backend(
+            input_size=self._input_size,
+            photonic_backend=backend,
+            trainable_parameters=self._trainable_parameters,
+            dtype=self._dtype,
+            device=self._device
+        )
+
+    def build_fidelity_kernel(
+        self,
+        input_state: Optional[list[int]] = None,
+        *,
+        shots: int = 0,
+        sampling_method: str = 'multinomial',
+        no_bunching: bool = False,
+        force_psd: bool = True
+    ) -> 'FidelityKernel':
+        """
+        Build and return a FidelityKernel instance.
+        
+        :param input_state: Input Fock state. If None, automatically generated
+        :param shots: Number of sampling shots
+        :param sampling_method: Sampling method for shots
+        :param no_bunching: Whether to exclude bunched states
+        :param force_psd: Whether to project to positive semi-definite
+        :return: Configured FidelityKernel
+        """
+        feature_map = self.build_feature_map()
+        
+        # Generate default input state if not provided
+        if input_state is None:
+            n_modes = self._n_modes or max(self._input_size or 2, 4)
+            n_photons = self._n_photons or (self._input_size or 2)
+            
+            # Create input state based on state pattern
+            if self._state_pattern == StatePattern.PERIODIC:
+                input_state = [1] * n_photons + [0] * (n_modes - n_photons)
+            else:  # FIRST_MODES or other patterns
+                input_state = [1] * n_photons + [0] * (n_modes - n_photons)
+        
+        return FidelityKernel(
+            feature_map=feature_map,
+            input_state=input_state,
+            shots=shots,
+            sampling_method=sampling_method,
+            no_bunching=no_bunching,
+            force_psd=force_psd,
+            device=self._device,
+            dtype=self._dtype
+        )
 
 
 class FidelityKernel(torch.nn.Module):
@@ -363,6 +626,127 @@ class FidelityKernel(torch.nn.Module):
                 real_probs, self.shots, self.sampling_method
             )
         return torch.abs(probs[0, self._input_state_index]).item()
+
+    @classmethod
+    def from_photonic_backend(
+        cls,
+        input_size: int,
+        photonic_backend: PhotonicBackend,
+        input_state: Optional[list[int]] = None,
+        *,
+        shots: int = 0,
+        sampling_method: str = 'multinomial',
+        no_bunching: bool = False,
+        force_psd: bool = True,
+        trainable_parameters: Optional[list[str]] = None,
+        dtype: Union[str, torch.dtype] = torch.float32,
+        device: Optional[torch.device] = None
+    ) -> 'FidelityKernel':
+        """
+        Create a FidelityKernel from a PhotonicBackend configuration.
+        
+        :param input_size: Dimensionality of input data
+        :param photonic_backend: PhotonicBackend configuration
+        :param input_state: Input Fock state. If None, auto-generated
+        :param shots: Number of sampling shots
+        :param sampling_method: Sampling method for shots
+        :param no_bunching: Whether to exclude bunched states
+        :param force_psd: Whether to project to positive semi-definite
+        :param trainable_parameters: Optional trainable parameters
+        :param dtype: Data type for computations
+        :param device: Device for computations
+        :return: Configured FidelityKernel
+        """
+        # Create feature map
+        feature_map = FeatureMap.from_photonic_backend(
+            input_size=input_size,
+            photonic_backend=photonic_backend,
+            trainable_parameters=trainable_parameters,
+            dtype=dtype,
+            device=device
+        )
+        
+        # Generate default input state if not provided
+        if input_state is None:
+            ansatz = AnsatzFactory.create(
+                PhotonicBackend=photonic_backend,
+                input_size=input_size,
+                dtype=dtype if isinstance(dtype, torch.dtype) else None
+            )
+            input_state = ansatz.input_state
+        
+        return cls(
+            feature_map=feature_map,
+            input_state=input_state,
+            shots=shots,
+            sampling_method=sampling_method,
+            no_bunching=no_bunching,
+            force_psd=force_psd,
+            device=device,
+            dtype=dtype
+        )
+
+    @classmethod
+    def simple(
+        cls,
+        input_size: int,
+        n_modes: int,
+        n_photons: Optional[int] = None,
+        input_state: Optional[list[int]] = None,
+        *,
+        circuit_type: Union[CircuitType, str] = CircuitType.SERIES,
+        state_pattern: Union[StatePattern, str] = StatePattern.PERIODIC,
+        reservoir_mode: bool = False,
+        shots: int = 0,
+        sampling_method: str = 'multinomial',
+        no_bunching: bool = False,
+        force_psd: bool = True,
+        trainable_parameters: Optional[list[str]] = None,
+        dtype: Union[str, torch.dtype] = torch.float32,
+        device: Optional[torch.device] = None
+    ) -> 'FidelityKernel':
+        """
+        Simple factory method to create a FidelityKernel with minimal configuration.
+        
+        :param input_size: Dimensionality of input data
+        :param n_modes: Number of modes in the photonic circuit
+        :param n_photons: Number of photons. If None, defaults to input_size
+        :param input_state: Input Fock state. If None, auto-generated
+        :param circuit_type: Type of circuit topology
+        :param state_pattern: Pattern for initial state generation
+        :param reservoir_mode: Whether to use reservoir computing mode
+        :param shots: Number of sampling shots
+        :param sampling_method: Sampling method for shots
+        :param no_bunching: Whether to exclude bunched states
+        :param force_psd: Whether to project to positive semi-definite
+        :param trainable_parameters: Optional trainable parameters
+        :param dtype: Data type for computations
+        :param device: Device for computations
+        :return: Configured FidelityKernel
+        """
+        if n_photons is None:
+            n_photons = input_size
+            
+        backend = PhotonicBackend(
+            circuit_type=circuit_type,
+            n_modes=n_modes,
+            n_photons=n_photons,
+            state_pattern=state_pattern,
+            reservoir_mode=reservoir_mode
+        )
+        
+        return cls.from_photonic_backend(
+            input_size=input_size,
+            photonic_backend=backend,
+            input_state=input_state,
+            shots=shots,
+            sampling_method=sampling_method,
+            no_bunching=no_bunching,
+            force_psd=force_psd,
+            trainable_parameters=trainable_parameters,
+            dtype=dtype,
+            device=device
+        )
 
     @staticmethod
     def _project_psd(matrix: Tensor) -> Tensor:
