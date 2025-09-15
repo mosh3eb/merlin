@@ -49,7 +49,7 @@ Available Reproductions
      - 2025
      - In Progress
      - Fine Tuning a LLM with a photonic neural network
-    * - :doc:`reproductions/photonic_qcnn`
+   * - :doc:`reproductions/photonic_qcnn`
      - Monbroussou et al.
      - 2025
      - Complete
