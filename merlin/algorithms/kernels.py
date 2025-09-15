@@ -525,9 +525,15 @@ class FidelityKernel(torch.nn.Module):
         explicitly calculated for identical inputs, please specify an 
         argument `x2`.
         """
-        if x2 is not None and type(x1) is not type(x2):
-            raise TypeError(
-                'x2 should be of the same type as x1, if x2 is not None.')
+        # Convert inputs to tensors and ensure they are on the correct device
+        if isinstance(x1, np.ndarray):
+            x1 = torch.from_numpy(x1).to(device=x1.device, dtype=self.dtype)
+
+        if x2 is not None:
+            if isinstance(x2, np.ndarray):
+                x2 = torch.from_numpy(x2).to(device=x1.device, dtype=self.dtype)
+            elif isinstance(x2, torch.Tensor):
+                x2 = x2.to(device=x1.device, dtype=self.dtype)
         
         # Return scalar value for input datapoints
         if self.feature_map.is_datapoint(x1):
@@ -541,14 +547,13 @@ class FidelityKernel(torch.nn.Module):
         
         # Check if we are constructing training matrix
         equal_inputs = self._check_equal_inputs(x1, x2)
-
         U_forward = torch.stack(
-            [self.feature_map.compute_unitary(x) for x in x1])
+            [self.feature_map.compute_unitary(x).to(x1.device) for x in x1])
         
         len_x1 = len(x1)
         if x2 is not None:
             U_adjoint = torch.stack([
-                self.feature_map.compute_unitary(x).transpose(0, 1).conj()
+                self.feature_map.compute_unitary(x).transpose(0, 1).conj().to(x1.device)
                 for x in x2])
             
             # Calculate circuit unitary for every pair of datapoints
@@ -561,7 +566,7 @@ class FidelityKernel(torch.nn.Module):
             upper_idx = torch.triu_indices(
                 len_x1, len_x1,
                 offset=1,
-                device=self.feature_map.device,
+                device=x1.device,
             )
             all_circuits = U_forward[upper_idx[0]] @ U_adjoint[upper_idx[1]]
 
@@ -581,10 +586,10 @@ class FidelityKernel(torch.nn.Module):
         if x2 is None:
             # Copy transition probs to upper & lower diagonal
             kernel_matrix = torch.zeros(
-                len_x1, len_x1, dtype=self.dtype, device=self.device)
+                len_x1, len_x1, dtype=self.dtype, device=x1.device)
             
-            upper_idx = upper_idx.to(self.device)
-            transition_probs = transition_probs.to(dtype=self.dtype, device=self.device)
+            upper_idx = upper_idx.to(x1.device)
+            transition_probs = transition_probs.to(dtype=self.dtype, device=x1.device)
             kernel_matrix[upper_idx[0], upper_idx[1]] = transition_probs
             kernel_matrix[upper_idx[1], upper_idx[0]] = transition_probs
             kernel_matrix.fill_diagonal_(1)
@@ -593,16 +598,13 @@ class FidelityKernel(torch.nn.Module):
                 kernel_matrix = self._project_psd(kernel_matrix)
 
         else:
-            transition_probs = transition_probs.to(dtype=self.dtype, device=self.device)
+            transition_probs = transition_probs.to(dtype=self.dtype, device=x1.device)
             kernel_matrix = transition_probs.reshape(len_x1, len(x2))
 
             if self.force_psd and equal_inputs:
                 # Symmetrize the matrix
                 kernel_matrix = 0.5 * (kernel_matrix + kernel_matrix.T)
                 kernel_matrix = self._project_psd(kernel_matrix)
-
-        if isinstance(x1, np.ndarray):
-            kernel_matrix = kernel_matrix.detach().numpy()
 
         return kernel_matrix
 
