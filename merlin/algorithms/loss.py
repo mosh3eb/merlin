@@ -1,9 +1,11 @@
 """
 Specialized loss functions for QML
 """
+
 import torch
-from torch.nn.modules.loss import _Loss
 from torch import Tensor
+from torch.nn.modules.loss import _Loss
+
 
 class NKernelAlignment(_Loss):
     r"""
@@ -29,11 +31,13 @@ class NKernelAlignment(_Loss):
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         if input.dim() != 2:
             raise ValueError(
-                'Input must be a 2D tensor representing the kernel matrix.')
+                "Input must be a 2D tensor representing the kernel matrix."
+            )
 
         if torch.any((target != 1) & (target != -1)):
             raise ValueError(
-                'Negative kernel alignment requires binary target values +1, -1.')
+                "Negative kernel alignment requires binary target values +1, -1."
+            )
 
         if target.dim() == 1:
             # Make the target the ideal Kernel matrix

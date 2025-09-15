@@ -170,7 +170,7 @@ class CircuitGenerator:
 
         # Create one phase shifter per feature to match input data dimensions
         # Limited by available modes
-        #num_phase_shifters = min((1 << n_features) - 1, n_modes - 1)
+        # num_phase_shifters = min((1 << n_features) - 1, n_modes - 1)
         num_phase_shifters = min(n_features, n_modes - 1)
 
         # Create exactly num_phase_shifters phase shifters
