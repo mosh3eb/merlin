@@ -2,6 +2,8 @@ import numpy as np
 import perceval as pcvl
 import torch
 from torch import Tensor
+import itertools
+from typing import Optional, Union, Callable, List  # NEW
 
 from ..core.ansatz import AnsatzFactory
 from ..core.generators import CircuitType, StatePattern
@@ -47,11 +49,12 @@ class FeatureMap:
         self,
         circuit: pcvl.Circuit,
         input_size: int,
-        input_parameters: str | list[str],
+        input_parameters: Union[str, List[str]],
         *,
-        trainable_parameters: list[str] = None,
-        dtype: str = torch.float32,
-        device=None,
+        trainable_parameters: Optional[List[str]] = None,
+        dtype: Union[str, torch.dtype] = torch.float32,
+        device: Optional[torch.device] = None,
+        encoder: Optional[Callable[[Tensor], Tensor]] = None,  # was: callable | None
     ):
         self.circuit = circuit
         self.input_size = input_size
@@ -59,6 +62,7 @@ class FeatureMap:
         self.dtype = dtype_to_torch.get(dtype, torch.float32)
         self.device = device or torch.device("cpu")
         self.is_trainable = bool(trainable_parameters)
+        self._encoder = encoder  # NEW
 
         if isinstance(input_parameters, list):
             if len(input_parameters) > 1:
@@ -82,31 +86,84 @@ class FeatureMap:
             p = torch.rand(param_length, requires_grad=True)
             self._training_dict[param_name] = torch.nn.Parameter(p)
 
+    def _px_len(self) -> int:
+        """Number of circuit input-parameter slots (e.g. 'px') required by the circuit."""
+        return len(self._circuit_graph.spec_mappings.get(self.input_parameters, []))
+
+    def _subset_sum_expand(self, x: Tensor, k: int) -> Tensor:
+        """
+        Deterministic series-style expansion: non-empty subset sums of x in
+        increasing subset-size order, truncated/padded to length k.
+        """
+        x = x.to(dtype=self.dtype, device=self.device).reshape(-1)
+        d = x.shape[0]
+        vals: list[Tensor] = []
+        # generate sums for subset sizes 1..d
+        for r in range(1, d + 1):
+            for idxs in itertools.combinations(range(d), r):
+                vals.append(x[list(idxs)].sum())
+                if len(vals) == k:
+                    return torch.stack(vals, dim=0)
+        # if fewer than k (shouldn't happen for k <= 2^d-1), pad with zeros
+        if len(vals) == 0:
+            return torch.zeros(k, dtype=self.dtype, device=self.device)
+        pad = k - len(vals)
+        return torch.cat([torch.stack(vals, dim=0), torch.zeros(pad, dtype=self.dtype, device=self.device)], dim=0)
+
+    def _encode_x(self, x: Tensor) -> Tensor:
+        """
+        Encode raw features x (length = input_size) to match px_len.
+        Tries ansatz-like encoder first; falls back to subset-sum expansion.
+        """
+        x = x.to(dtype=self.dtype, device=self.device).reshape(-1)
+        px_len = self._px_len()
+
+        if x.numel() == px_len:
+            return x
+        if x.numel() < px_len:
+            # Try provided encoder (e.g., from Ansatz)
+            if callable(self._encoder):
+                try:
+                    encoded = self._encoder(x)
+                    # Allow numpy/torch outputs and ensure correct shape/device/dtype
+                    if isinstance(encoded, np.ndarray):
+                        encoded = torch.from_numpy(encoded)
+                    encoded = torch.as_tensor(encoded, dtype=self.dtype, device=self.device).reshape(-1)
+                    if encoded.numel() != px_len:
+                        # Fall back if encoder does not match spec
+                        return self._subset_sum_expand(x, px_len)
+                    return encoded
+                except Exception:
+                    # Encoder failed; use deterministic subset-sum expansion
+                    return self._subset_sum_expand(x, px_len)
+            # No encoder provided; series-style expansion
+            return self._subset_sum_expand(x, px_len)
+        # x longer than needed; truncate
+        return x[:px_len]
+
     def compute_unitary(
         self, x: Tensor | np.ndarray | float, *training_parameters: Tensor
     ) -> Tensor:
         """
-        Computes the unitary associated with the feature map and given
-        datapoint and training parameters.
-
-        :param x: Input datapoint or dataset.
-        :param training_parameters: If specified, the unitary for a
-            specific set of training parameters is given. If not,
-            internal parameters are used instead.
+        Computes the unitary associated with the feature map and given datapoint.
         """
+        # Normalize input to tensor on correct device/dtype
         if not isinstance(x, torch.Tensor):
             x = [x] if isinstance(x, (float, int)) else x
             x = torch.tensor(x, dtype=self.dtype, device=self.device)
         else:
             x = x.to(dtype=self.dtype, device=self.device)
 
+        # Encode x to match the circuit's input parameter spec
+        x_encoded = self._encode_x(x)
+
         if not self.is_trainable:
-            return self._circuit_graph.to_tensor(x)
+            return self._circuit_graph.to_tensor(x_encoded)
 
         if not training_parameters:
             training_parameters = self._training_dict.values()
 
-        return self._circuit_graph.to_tensor(x, *training_parameters)
+        return self._circuit_graph.to_tensor(x_encoded, *training_parameters)
 
     def is_datapoint(self, x: Tensor | np.ndarray | float | int) -> bool:
         """Checks whether an input data is a singular datapoint or dataset."""
@@ -140,9 +197,9 @@ class FeatureMap:
         input_size: int,
         photonic_backend: PhotonicBackend,
         *,
-        trainable_parameters: list[str] | None = None,
-        dtype: str | torch.dtype = torch.float32,
-        device: torch.device | None = None,
+        trainable_parameters: Optional[List[str]] = None,
+        dtype: Union[str, torch.dtype] = torch.float32,
+        device: Optional[torch.device] = None,
     ) -> "FeatureMap":
         """
         Create a FeatureMap from a PhotonicBackend configuration.
@@ -180,6 +237,13 @@ class FeatureMap:
         if trainable_parameters is not None:
             ansatz.trainable_parameters = trainable_parameters
 
+        # Try to grab the same encoder QuantumLayer uses
+        encoder = None
+        for name in ("encode_input", "encode_features", "feature_encoder", "encode"):
+            if hasattr(ansatz, name) and callable(getattr(ansatz, name)):
+                encoder = getattr(ansatz, name)
+                break
+
         return cls(
             circuit=ansatz.circuit,
             input_size=input_size,
@@ -187,6 +251,7 @@ class FeatureMap:
             trainable_parameters=ansatz.trainable_parameters,
             dtype=dtype,
             device=device,
+            encoder=encoder,  # pass encoder through
         )
 
     @classmethod
@@ -194,14 +259,14 @@ class FeatureMap:
         cls,
         input_size: int,
         n_modes: int,
-        n_photons: int | None = None,
+        n_photons: Optional[int] = None,
         *,
-        circuit_type: CircuitType | str = CircuitType.SERIES,
-        state_pattern: StatePattern | str = StatePattern.PERIODIC,
+        circuit_type: Union[CircuitType, str] = CircuitType.SERIES,
+        state_pattern: Union[StatePattern, str] = StatePattern.PERIODIC,
         reservoir_mode: bool = False,
-        trainable_parameters: list[str] | None = None,
-        dtype: str | torch.dtype = torch.float32,
-        device: torch.device | None = None,
+        trainable_parameters: Optional[List[str]] = None,
+        dtype: Union[str, torch.dtype] = torch.float32,
+        device: Optional[torch.device] = None,
     ) -> "FeatureMap":
         """
         Simple factory method to create a FeatureMap with minimal configuration.
@@ -261,9 +326,9 @@ class KernelCircuitBuilder:
         self._n_photons: int | None = None
         self._state_pattern: StatePattern = StatePattern.PERIODIC
         self._reservoir_mode: bool = False
-        self._trainable_parameters: list[str] | None = None
-        self._dtype: str | torch.dtype = torch.float32
-        self._device: torch.device | None = None
+        self._trainable_parameters: Optional[List[str]] = None
+        self._dtype: Union[str, torch.dtype] = torch.float32
+        self._device: Optional[torch.device] = None
         self._use_bandwidth_tuning: bool = False
 
     def input_size(self, size: int) -> "KernelCircuitBuilder":
@@ -271,7 +336,7 @@ class KernelCircuitBuilder:
         self._input_size = size
         return self
 
-    def circuit_type(self, circuit_type: CircuitType | str) -> "KernelCircuitBuilder":
+    def circuit_type(self, circuit_type: Union[CircuitType, str]) -> "KernelCircuitBuilder":
         """Set the circuit topology type."""
         if isinstance(circuit_type, str):
             circuit_type = CircuitType(circuit_type.lower())
@@ -288,7 +353,7 @@ class KernelCircuitBuilder:
         self._n_photons = photons
         return self
 
-    def state_pattern(self, pattern: StatePattern | str) -> "KernelCircuitBuilder":
+    def state_pattern(self, pattern: Union[StatePattern, str]) -> "KernelCircuitBuilder":
         """Set the state initialization pattern."""
         if isinstance(pattern, str):
             pattern = StatePattern(pattern.lower())
@@ -300,12 +365,12 @@ class KernelCircuitBuilder:
         self._reservoir_mode = enabled
         return self
 
-    def trainable_parameters(self, params: list[str]) -> "KernelCircuitBuilder":
+    def trainable_parameters(self, params: List[str]) -> "KernelCircuitBuilder":
         """Set custom trainable parameters."""
         self._trainable_parameters = params
         return self
 
-    def dtype(self, dtype: str | torch.dtype) -> "KernelCircuitBuilder":
+    def dtype(self, dtype: Union[str, torch.dtype]) -> "KernelCircuitBuilder":
         """Set the data type for computations."""
         self._dtype = dtype
         return self
@@ -353,7 +418,7 @@ class KernelCircuitBuilder:
 
     def build_fidelity_kernel(
         self,
-        input_state: list[int] | None = None,
+        input_state: Optional[List[int]] = None,
         *,
         shots: int = 0,
         sampling_method: str = "multinomial",
@@ -451,15 +516,15 @@ class FidelityKernel(torch.nn.Module):
 
     def __init__(
         self,
-        feature_map: FeatureMap | pcvl.Circuit,
-        input_state: list,
+        feature_map: Union[FeatureMap, pcvl.Circuit],
+        input_state: List[int],
         *,
-        shots: int = None,
+        shots: Optional[int] = None,
         sampling_method: str = "multinomial",
-        no_bunching=False,
-        force_psd=True,
-        device=None,
-        dtype=None,
+        no_bunching: bool = False,
+        force_psd: bool = True,
+        device: Optional[torch.device] = None,
+        dtype: Optional[Union[str, torch.dtype]] = None,
     ):
         super().__init__()
         self.feature_map = feature_map
@@ -530,13 +595,15 @@ class FidelityKernel(torch.nn.Module):
         """
         # Convert inputs to tensors and ensure they are on the correct device
         if isinstance(x1, np.ndarray):
-            x1 = torch.from_numpy(x1).to(device=x1.device, dtype=self.dtype)
+            x1 = torch.from_numpy(x1).to(device=self.device, dtype=self.dtype)
+        elif isinstance(x1, torch.Tensor):
+            x1 = x1.to(device=self.device, dtype=self.dtype)
 
         if x2 is not None:
             if isinstance(x2, np.ndarray):
-                x2 = torch.from_numpy(x2).to(device=x1.device, dtype=self.dtype)
+                x2 = torch.from_numpy(x2).to(device=self.device, dtype=self.dtype)
             elif isinstance(x2, torch.Tensor):
-                x2 = x2.to(device=x1.device, dtype=self.dtype)
+                x2 = x2.to(device=self.device, dtype=self.dtype)
 
         # Return scalar value for input datapoints
         if self.feature_map.is_datapoint(x1):
@@ -639,15 +706,15 @@ class FidelityKernel(torch.nn.Module):
         cls,
         input_size: int,
         photonic_backend: PhotonicBackend,
-        input_state: list[int] | None = None,
+        input_state: Optional[List[int]] = None,
         *,
         shots: int = 0,
         sampling_method: str = "multinomial",
         no_bunching: bool = False,
         force_psd: bool = True,
-        trainable_parameters: list[str] | None = None,
-        dtype: str | torch.dtype = torch.float32,
-        device: torch.device | None = None,
+        trainable_parameters: Optional[List[str]] = None,
+        dtype: Union[str, torch.dtype] = torch.float32,
+        device: Optional[torch.device] = None,
     ) -> "FidelityKernel":
         """
         Create a FidelityKernel from a PhotonicBackend configuration.
@@ -698,19 +765,19 @@ class FidelityKernel(torch.nn.Module):
         cls,
         input_size: int,
         n_modes: int,
-        n_photons: int | None = None,
-        input_state: list[int] | None = None,
+        n_photons: Optional[int] = None,
+        input_state: Optional[List[int]] = None,
         *,
-        circuit_type: CircuitType | str = CircuitType.SERIES,
-        state_pattern: StatePattern | str = StatePattern.PERIODIC,
+        circuit_type: Union[CircuitType, str] = CircuitType.SERIES,
+        state_pattern: Union[StatePattern, str] = StatePattern.PERIODIC,
         reservoir_mode: bool = False,
         shots: int = 0,
         sampling_method: str = "multinomial",
         no_bunching: bool = False,
         force_psd: bool = True,
-        trainable_parameters: list[str] | None = None,
-        dtype: str | torch.dtype = torch.float32,
-        device: torch.device | None = None,
+        trainable_parameters: Optional[List[str]] = None,
+        dtype: Union[str, torch.dtype] = torch.float32,
+        device: Optional[torch.device] = None,
     ) -> "FidelityKernel":
         """
         Simple factory method to create a FidelityKernel with minimal configuration.

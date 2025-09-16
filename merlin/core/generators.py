@@ -168,10 +168,9 @@ class CircuitGenerator:
             0, CircuitGenerator._generate_interferometer(n_modes, 0, reservoir_mode)
         )
 
-        # Create one phase shifter per feature to match input data dimensions
-        # Limited by available modes
-        # num_phase_shifters = min((1 << n_features) - 1, n_modes - 1)
-        num_phase_shifters = min(n_features, n_modes - 1)
+        # Based on the paper: we need 2^n_features - 1 phase shifters
+        # but limited by n_modes - 1
+        num_phase_shifters = min((1 << n_features) - 1, n_modes - 1)
 
         # Create exactly num_phase_shifters phase shifters
         for i in range(num_phase_shifters):
