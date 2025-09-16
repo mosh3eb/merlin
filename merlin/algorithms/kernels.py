@@ -669,7 +669,7 @@ class FidelityKernel(torch.nn.Module):
 
         if self.shots > 0:
             # Convert complex amplitudes to real probabilities for multinomial sampling
-            real_probs = torch.abs(all_probs)
+            real_probs = torch.abs(all_probs).square()
             all_probs = self._autodiff_process.sampling_noise.pcvl_sampler(
                 real_probs, self.shots, self.sampling_method
             )
