@@ -1,9 +1,10 @@
+import itertools
+from collections.abc import Callable  # NEW
+
 import numpy as np
 import perceval as pcvl
 import torch
 from torch import Tensor
-import itertools
-from typing import Optional, Union, Callable, List  # NEW
 
 from ..core.ansatz import AnsatzFactory
 from ..core.generators import CircuitType, StatePattern
@@ -49,12 +50,12 @@ class FeatureMap:
         self,
         circuit: pcvl.Circuit,
         input_size: int,
-        input_parameters: Union[str, List[str]],
+        input_parameters: str | list[str],
         *,
-        trainable_parameters: Optional[List[str]] = None,
-        dtype: Union[str, torch.dtype] = torch.float32,
-        device: Optional[torch.device] = None,
-        encoder: Optional[Callable[[Tensor], Tensor]] = None,  # was: callable | None
+        trainable_parameters: list[str] | None = None,
+        dtype: str | torch.dtype = torch.float32,
+        device: torch.device | None = None,
+        encoder: Callable[[Tensor], Tensor] | None = None,  # was: callable | None
     ):
         self.circuit = circuit
         self.input_size = input_size
@@ -108,7 +109,13 @@ class FeatureMap:
         if len(vals) == 0:
             return torch.zeros(k, dtype=self.dtype, device=self.device)
         pad = k - len(vals)
-        return torch.cat([torch.stack(vals, dim=0), torch.zeros(pad, dtype=self.dtype, device=self.device)], dim=0)
+        return torch.cat(
+            [
+                torch.stack(vals, dim=0),
+                torch.zeros(pad, dtype=self.dtype, device=self.device),
+            ],
+            dim=0,
+        )
 
     def _encode_x(self, x: Tensor) -> Tensor:
         """
@@ -128,7 +135,9 @@ class FeatureMap:
                     # Allow numpy/torch outputs and ensure correct shape/device/dtype
                     if isinstance(encoded, np.ndarray):
                         encoded = torch.from_numpy(encoded)
-                    encoded = torch.as_tensor(encoded, dtype=self.dtype, device=self.device).reshape(-1)
+                    encoded = torch.as_tensor(
+                        encoded, dtype=self.dtype, device=self.device
+                    ).reshape(-1)
                     if encoded.numel() != px_len:
                         # Fall back if encoder does not match spec
                         return self._subset_sum_expand(x, px_len)
@@ -197,9 +206,9 @@ class FeatureMap:
         input_size: int,
         photonic_backend: PhotonicBackend,
         *,
-        trainable_parameters: Optional[List[str]] = None,
-        dtype: Union[str, torch.dtype] = torch.float32,
-        device: Optional[torch.device] = None,
+        trainable_parameters: list[str] | None = None,
+        dtype: str | torch.dtype = torch.float32,
+        device: torch.device | None = None,
     ) -> "FeatureMap":
         """
         Create a FeatureMap from a PhotonicBackend configuration.
@@ -259,14 +268,14 @@ class FeatureMap:
         cls,
         input_size: int,
         n_modes: int,
-        n_photons: Optional[int] = None,
+        n_photons: int | None = None,
         *,
-        circuit_type: Union[CircuitType, str] = CircuitType.SERIES,
-        state_pattern: Union[StatePattern, str] = StatePattern.PERIODIC,
+        circuit_type: CircuitType | str = CircuitType.SERIES,
+        state_pattern: StatePattern | str = StatePattern.PERIODIC,
         reservoir_mode: bool = False,
-        trainable_parameters: Optional[List[str]] = None,
-        dtype: Union[str, torch.dtype] = torch.float32,
-        device: Optional[torch.device] = None,
+        trainable_parameters: list[str] | None = None,
+        dtype: str | torch.dtype = torch.float32,
+        device: torch.device | None = None,
     ) -> "FeatureMap":
         """
         Simple factory method to create a FeatureMap with minimal configuration.
@@ -326,9 +335,9 @@ class KernelCircuitBuilder:
         self._n_photons: int | None = None
         self._state_pattern: StatePattern = StatePattern.PERIODIC
         self._reservoir_mode: bool = False
-        self._trainable_parameters: Optional[List[str]] = None
-        self._dtype: Union[str, torch.dtype] = torch.float32
-        self._device: Optional[torch.device] = None
+        self._trainable_parameters: list[str] | None = None
+        self._dtype: str | torch.dtype = torch.float32
+        self._device: torch.device | None = None
         self._use_bandwidth_tuning: bool = False
 
     def input_size(self, size: int) -> "KernelCircuitBuilder":
@@ -336,7 +345,7 @@ class KernelCircuitBuilder:
         self._input_size = size
         return self
 
-    def circuit_type(self, circuit_type: Union[CircuitType, str]) -> "KernelCircuitBuilder":
+    def circuit_type(self, circuit_type: CircuitType | str) -> "KernelCircuitBuilder":
         """Set the circuit topology type."""
         if isinstance(circuit_type, str):
             circuit_type = CircuitType(circuit_type.lower())
@@ -353,7 +362,7 @@ class KernelCircuitBuilder:
         self._n_photons = photons
         return self
 
-    def state_pattern(self, pattern: Union[StatePattern, str]) -> "KernelCircuitBuilder":
+    def state_pattern(self, pattern: StatePattern | str) -> "KernelCircuitBuilder":
         """Set the state initialization pattern."""
         if isinstance(pattern, str):
             pattern = StatePattern(pattern.lower())
@@ -365,12 +374,12 @@ class KernelCircuitBuilder:
         self._reservoir_mode = enabled
         return self
 
-    def trainable_parameters(self, params: List[str]) -> "KernelCircuitBuilder":
+    def trainable_parameters(self, params: list[str]) -> "KernelCircuitBuilder":
         """Set custom trainable parameters."""
         self._trainable_parameters = params
         return self
 
-    def dtype(self, dtype: Union[str, torch.dtype]) -> "KernelCircuitBuilder":
+    def dtype(self, dtype: str | torch.dtype) -> "KernelCircuitBuilder":
         """Set the data type for computations."""
         self._dtype = dtype
         return self
@@ -418,7 +427,7 @@ class KernelCircuitBuilder:
 
     def build_fidelity_kernel(
         self,
-        input_state: Optional[List[int]] = None,
+        input_state: list[int] | None = None,
         *,
         shots: int = 0,
         sampling_method: str = "multinomial",
@@ -516,15 +525,15 @@ class FidelityKernel(torch.nn.Module):
 
     def __init__(
         self,
-        feature_map: Union[FeatureMap, pcvl.Circuit],
-        input_state: List[int],
+        feature_map: FeatureMap | pcvl.Circuit,
+        input_state: list[int],
         *,
-        shots: Optional[int] = None,
+        shots: int | None = None,
         sampling_method: str = "multinomial",
         no_bunching: bool = False,
         force_psd: bool = True,
-        device: Optional[torch.device] = None,
-        dtype: Optional[Union[str, torch.dtype]] = None,
+        device: torch.device | None = None,
+        dtype: str | torch.dtype | None = None,
     ):
         super().__init__()
         self.feature_map = feature_map
@@ -704,15 +713,15 @@ class FidelityKernel(torch.nn.Module):
         cls,
         input_size: int,
         photonic_backend: PhotonicBackend,
-        input_state: Optional[List[int]] = None,
+        input_state: list[int] | None = None,
         *,
         shots: int = 0,
         sampling_method: str = "multinomial",
         no_bunching: bool = False,
         force_psd: bool = True,
-        trainable_parameters: Optional[List[str]] = None,
-        dtype: Union[str, torch.dtype] = torch.float32,
-        device: Optional[torch.device] = None,
+        trainable_parameters: list[str] | None = None,
+        dtype: str | torch.dtype = torch.float32,
+        device: torch.device | None = None,
     ) -> "FidelityKernel":
         """
         Create a FidelityKernel from a PhotonicBackend configuration.
@@ -763,19 +772,19 @@ class FidelityKernel(torch.nn.Module):
         cls,
         input_size: int,
         n_modes: int,
-        n_photons: Optional[int] = None,
-        input_state: Optional[List[int]] = None,
+        n_photons: int | None = None,
+        input_state: list[int] | None = None,
         *,
-        circuit_type: Union[CircuitType, str] = CircuitType.SERIES,
-        state_pattern: Union[StatePattern, str] = StatePattern.PERIODIC,
+        circuit_type: CircuitType | str = CircuitType.SERIES,
+        state_pattern: StatePattern | str = StatePattern.PERIODIC,
         reservoir_mode: bool = False,
         shots: int = 0,
         sampling_method: str = "multinomial",
         no_bunching: bool = False,
         force_psd: bool = True,
-        trainable_parameters: Optional[List[str]] = None,
-        dtype: Union[str, torch.dtype] = torch.float32,
-        device: Optional[torch.device] = None,
+        trainable_parameters: list[str] | None = None,
+        dtype: str | torch.dtype = torch.float32,
+        device: torch.device | None = None,
     ) -> "FidelityKernel":
         """
         Simple factory method to create a FidelityKernel with minimal configuration.

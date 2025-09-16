@@ -29,7 +29,6 @@ from .layer import QuantumLayer
 from .photonicbackend import PhotonicBackend
 from .process import ComputationProcess, ComputationProcessFactory
 
-
 __all__ = [
     "QuantumLayer",
     "PhotonicBackend",
