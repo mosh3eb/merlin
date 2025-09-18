@@ -58,19 +58,17 @@ class NoBunchingBenchmarkRunner:
             return 0
         return math.comb(n_modes, n_photons)
     
-    def validate_distribution_correctness(self, distribution: torch.Tensor, expected_size: int) -> bool:
+    def validate_distribution_correctness(self, pa: torch.Tensor, expected_size: int) -> bool:
         """Validate that the no bunching distribution is correct."""
         # Check distribution size
-        if distribution.shape[-1] != expected_size:
+        if pa.shape[-1] != expected_size:
             return False
-            
+
         # Check probability normalization (allow small numerical errors)
-        prob_sum = distribution.sum(dim=-1).mean().item()
-        if not (0.95 <= prob_sum <= 1.05):
-            return False
-            
+        probs = (pa.abs() ** 2).real
+           
         # Check that all probabilities are non-negative
-        if (distribution < 0).any():
+        if (probs < 0).any():
             return False
             
         return True

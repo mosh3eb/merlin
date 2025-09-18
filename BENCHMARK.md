@@ -30,19 +30,20 @@ benchmarks/                    # Benchmark files directory
 ├── benchmark_slos_core.py     # SLOS core function benchmarks
 ├── benchmark_no_bunching.py   # No bunching algorithm benchmarks  
 ├── benchmark_layer.py         # Quantum layer benchmarks
-└── benchmark_robustness.py    # Robustness and stress test benchmarks
+├── benchmark_robustness.py    # Robustness and stress test benchmarks
+└── benchmark_unitary_conversion.py  # Unitary conversion (Perceval→Torch) benchmarks
 
 .github/workflows/
 └── benchmark.yml              # GitHub Actions workflow
 
-GitHub Pages: https://your-username.github.io/your-repo/dev/bench/
+GitHub Pages: https://merlinquantum.github.io/merlin/dev/bench/
 ```
 
 ## ⚡ How It Works
 
 ### For Pull Requests:
 1. **Triggers**: Workflow runs when PR is created/updated
-2. **Benchmarks Execute**: All benchmark files run in parallel Docker containers
+2. **Benchmarks Execute**: All benchmark files are run on github runners
 3. **Comparison**: Results compared against main branch baseline
 4. **Alerts**: PR gets automated comment if performance regression >20%
 5. **Blocking**: Workflow fails if regression detected (configurable)
@@ -246,7 +247,8 @@ This ensures GitHub Pages only updates on main branch merges, not PRs.
 ## 📊 Viewing Results
 
 ### GitHub Pages Location:
-- **Main Dashboard**: `https://your-username.github.io/your-repo/`
+- **Main Dashboard**: `https://merlinquantum.github.io/merlin/`
+- **All Benchmarks Index**: `https://merlinquantum.github.io/merlin/dev/bench/`
 
 ### Automatic Navigation:
 The system automatically generates navigation pages by scanning existing benchmark directories. New benchmarks appear automatically without manual configuration.

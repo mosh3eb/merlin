@@ -208,9 +208,52 @@ jobs:
         comment-on-alert: true
         summary-always: true
 
+  benchmark-unitary-conversion:
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install torch --index-url https://download.pytorch.org/whl/cpu
+        pip install pytest pytest-benchmark numpy pandas psutil
+        pip install perceval-quandela==0.13.1
+        pip install -e .
+
+    - name: Set performance environment variables
+      run: |
+        echo "OMP_NUM_THREADS=1" >> $GITHUB_ENV
+        echo "MKL_NUM_THREADS=1" >> $GITHUB_ENV
+        echo "NUMEXPR_NUM_THREADS=1" >> $GITHUB_ENV
+        echo "OPENBLAS_NUM_THREADS=1" >> $GITHUB_ENV
+
+    - name: Run unitary conversion benchmarks
+      run: |
+        pytest benchmarks/benchmark_unitary_conversion.py --benchmark-json=unitary-conversion-results.json -v --benchmark-only
+
+    - name: Store unitary conversion benchmark results
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'pytest'
+        output-file-path: unitary-conversion-results.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        benchmark-data-dir-path: 'dev/bench/unitary-conversion'
+        fail-on-alert: true
+        alert-threshold: '120%'
+        comment-on-alert: true
+        summary-always: true
+
   create-index:
     runs-on: ubuntu-latest
-    needs: [benchmark-slos-core, benchmark-no-bunching, benchmark-layer, benchmark-robustness]
+    needs: [benchmark-slos-core, benchmark-no-bunching, benchmark-layer, benchmark-robustness, benchmark-unitary-conversion]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
     - uses: actions/checkout@v4

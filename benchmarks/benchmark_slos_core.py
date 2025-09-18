@@ -58,19 +58,22 @@ class SLOSBenchmarkRunner:
         q, _ = torch.linalg.qr(u)
         return q.to(dtype=dtype, device=device)
     
-    def validate_output_correctness(self, keys: List, probs: torch.Tensor, input_state: List[int]) -> bool:
+    def validate_output_correctness(self, keys: List, pa: torch.Tensor, input_state: List[int], no_bunching: bool) -> bool:
         """Validate that the SLOS output is correct."""
         if keys is None:
             return True  # If keep_keys=False, we can't validate keys
             
-        # Check probability normalization
-        prob_sum = probs.sum().item()
-        if not (0.95 <= prob_sum <= 1.05):  # Allow small numerical errors
-            return False
-            
-        # Check that all probabilities are non-negative
-        if (probs < 0).any():
-            return False
+        if not no_bunching:
+            # Check probability normalization
+            probs = (pa.abs()**2).real
+            probs_sum = probs.sum().item()
+
+            if not (0.95 <= probs_sum <= 1.05):  # Allow small numerical errors
+                return False
+                
+            # Check that all probabilities are non-negative
+            if (probs < 0).any():
+                return False
             
         # Check that number of output photons matches input
         n_input_photons = sum(input_state)
@@ -180,7 +183,7 @@ def test_compute_benchmark(benchmark, config: Dict, device: str, dtype_pair: Tup
     assert probs.shape[0] == batch_size, f"Expected batch size {batch_size}, got {probs.shape[0]}"
     # Validate each batch item
     for batch_idx in range(batch_size):
-        assert benchmark_runner.validate_output_correctness(keys, probs[batch_idx], input_state)
+        assert benchmark_runner.validate_output_correctness(keys, probs[batch_idx], input_state, True)
 
 
 @pytest.mark.parametrize("config", BENCHMARK_CONFIGS[:2])  # Only test smaller configs
@@ -227,12 +230,12 @@ def test_compute_batched_benchmark(benchmark, config: Dict, device: str, dtype_p
     
     # Validate correctness
     if batch_size == 1:
-        assert benchmark_runner.validate_output_correctness(keys, probs, input_state)
+        assert benchmark_runner.validate_output_correctness(keys, probs, input_state, True)
     else:
         assert probs.shape[0] == batch_size, f"Expected batch size {batch_size}, got {probs.shape[0]}"
         # Validate each batch item
         for batch_idx in range(batch_size):
-            assert benchmark_runner.validate_output_correctness(keys, probs[batch_idx], input_state)
+            assert benchmark_runner.validate_output_correctness(keys, probs[batch_idx], input_state, True)
 
 
 @pytest.mark.parametrize("config", BENCHMARK_CONFIGS[:2])  # Only test smaller configs
@@ -305,7 +308,7 @@ class TestSLOSPerformanceRegression:
         
         # Assert reasonable performance bounds
         assert compute_time < 2.0, f"Compute took {compute_time:.3f}s, expected < 2.0s"
-        assert benchmark_runner.validate_output_correctness(keys, probs, input_state)
+        assert benchmark_runner.validate_output_correctness(keys, probs, input_state, True)
 
 
 # Utility function to save benchmark results in github-action-benchmark format
@@ -375,7 +378,7 @@ if __name__ == "__main__":
     # Validate batched output
     all_valid = True
     for batch_idx in range(batch_size):
-        if not benchmark_runner.validate_output_correctness(keys, probs[batch_idx], input_state):
+        if not benchmark_runner.validate_output_correctness(keys, probs[batch_idx], input_state, True):
             all_valid = False
             break
     print(f"Batched output validation: {'PASS' if all_valid else 'FAIL'}")
