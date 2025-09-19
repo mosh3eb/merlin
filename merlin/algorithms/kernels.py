@@ -589,12 +589,7 @@ class FidelityKernel(torch.nn.Module):
             dtype=self.dtype,
         )
         # Find index of input state in output distribution
-        complex_dtype = (
-            torch.complex128 if self.dtype == torch.float64 else torch.complex64
-        )
-        keys, _ = self._slos_graph.compute(
-            torch.eye(m, dtype=complex_dtype), input_state
-        )
+        keys = self._slos_graph.final_keys
         self._input_state_index = keys.index(tuple(input_state))
         # For sampling
         self._autodiff_process = AutoDiffProcess()
