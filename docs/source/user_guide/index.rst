@@ -15,3 +15,4 @@ User Guide
    output_mappings
    feed_forward
    algorithms
+   quantum_bridge

@@ -68,6 +68,7 @@ def test_bridge_gpu_matches_cpu_basis_state():
             psi = torch.zeros(4, dtype=torch.complex64, device=device)
             psi[1] = 1.0 + 0.0j  # |01>
             return psi
+
         return _inner
 
     out_cpu, out_gpu = cpu_gpu_bridge_outputs(groups, statevec_fn, batch=1)
@@ -86,6 +87,7 @@ def test_bridge_gpu_matches_cpu_superposition_batched():
             if isinstance(x, torch.Tensor) and x.dim() > 0 and x.shape[0] > 1:
                 return psi.unsqueeze(0).expand(x.shape[0], -1)
             return psi
+
         return _inner
 
     out_cpu, out_gpu = cpu_gpu_bridge_outputs(groups, statevec_fn, batch=3)

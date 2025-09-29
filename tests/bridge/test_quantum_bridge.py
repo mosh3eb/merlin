@@ -30,7 +30,9 @@ def find_key_index(layer: QuantumLayer, basic_state: pcvl.BasicState) -> int:
     raise AssertionError(f"BasicState {target} not found in mapped_keys")
 
 
-@pytest.mark.parametrize("basis_index,bits", [(0, "00"), (1, "01"), (2, "10"), (3, "11")])
+@pytest.mark.parametrize(
+    "basis_index,bits", [(0, "00"), (1, "01"), (2, "10"), (3, "11")]
+)
 def test_basis_state_mapping_little_endian(basis_index: int, bits: str):
     groups = [1, 1]  # 2 qubits -> two 1-qubit groups
     m = sum(2**g for g in groups)
@@ -94,9 +96,15 @@ def test_superposition_and_normalization():
 
     # After normalization, each component should carry 0.5 probability on identity circuit
     for b in range(2):
-        assert torch.isclose(out[b, idx_00], torch.tensor(0.5, dtype=out.dtype), atol=1e-5)
-        assert torch.isclose(out[b, idx_11], torch.tensor(0.5, dtype=out.dtype), atol=1e-5)
-        assert torch.isclose(out[b].sum(), torch.tensor(1.0, dtype=out.dtype), atol=1e-6)
+        assert torch.isclose(
+            out[b, idx_00], torch.tensor(0.5, dtype=out.dtype), atol=1e-5
+        )
+        assert torch.isclose(
+            out[b, idx_11], torch.tensor(0.5, dtype=out.dtype), atol=1e-5
+        )
+        assert torch.isclose(
+            out[b].sum(), torch.tensor(1.0, dtype=out.dtype), atol=1e-6
+        )
 
 
 def test_wires_order_big_endian_changes_mapping():
@@ -130,8 +138,12 @@ def test_wires_order_big_endian_changes_mapping():
     out_little = bridge_little(torch.zeros(1, 1))
     idx_little = find_key_index(layer, to_fock_state("01"[::-1], groups))
 
-    assert torch.isclose(out_big[0, idx_big], torch.tensor(1.0, dtype=out_big.dtype), atol=1e-6)
-    assert torch.isclose(out_little[0, idx_little], torch.tensor(1.0, dtype=out_little.dtype), atol=1e-6)
+    assert torch.isclose(
+        out_big[0, idx_big], torch.tensor(1.0, dtype=out_big.dtype), atol=1e-6
+    )
+    assert torch.isclose(
+        out_little[0, idx_little], torch.tensor(1.0, dtype=out_little.dtype), atol=1e-6
+    )
     # Ensure they target different keys for the same computational basis
     assert idx_big != idx_little
 
@@ -141,9 +153,13 @@ def test_error_when_qubit_groups_do_not_match_state_length():
     layer = make_identity_layer(m=2, n_photons=1)
 
     def pl_state_fn(_x: torch.Tensor) -> torch.Tensor:
-        return torch.tensor([1.0 + 0.0j, 0.0 + 0.0j, 0.0 + 0.0j, 0.0 + 0.0j], dtype=torch.complex64)
+        return torch.tensor(
+            [1.0 + 0.0j, 0.0 + 0.0j, 0.0 + 0.0j, 0.0 + 0.0j], dtype=torch.complex64
+        )
 
-    bridge = QuantumBridge(qubit_groups=[1], merlin_layer=layer, pl_state_fn=pl_state_fn)
+    bridge = QuantumBridge(
+        qubit_groups=[1], merlin_layer=layer, pl_state_fn=pl_state_fn
+    )
 
     with pytest.raises(ValueError):
         _ = bridge(torch.zeros(1, 1))
@@ -158,7 +174,9 @@ def test_error_when_merlin_layer_mismatch_modes():
         psi[0] = 1.0 + 0.0j
         return psi
 
-    bridge = QuantumBridge(qubit_groups=[1, 1], merlin_layer=bad_layer, pl_state_fn=pl_state_fn)
+    bridge = QuantumBridge(
+        qubit_groups=[1, 1], merlin_layer=bad_layer, pl_state_fn=pl_state_fn
+    )
 
     with pytest.raises((ValueError, RuntimeError)):
         _ = bridge(torch.zeros(1, 1))

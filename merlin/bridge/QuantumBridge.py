@@ -19,31 +19,33 @@
 from __future__ import annotations
 
 import math
-from typing import Callable, List, Optional, Sequence, Union
+from collections.abc import Callable, Sequence
 
+import perceval as pcvl
 import torch
 import torch.nn as nn
-import perceval as pcvl
 
 try:
     # Requires the 'merlin' package exposing QuantumLayer
     from merlin import QuantumLayer
 except Exception as e:  # pragma: no cover
-    raise ImportError("This bridge requires 'merlin' with QuantumLayer installed.") from e
+    raise ImportError(
+        "This bridge requires 'merlin' with QuantumLayer installed."
+    ) from e
 
 
 # ----------------------------
 # Helpers: qubit-groups <-> Fock (no ancillas)
 # ----------------------------
-def to_fock_state(qubit_state: str, group_sizes: List[int]) -> pcvl.BasicState:
+def to_fock_state(qubit_state: str, group_sizes: list[int]) -> pcvl.BasicState:
     """
     Map a bitstring to a BasicState with one photon per qubit-group (one-hot over 2^k modes).
     No ancilla/postselected modes are added. The number of modes is m = Σ 2^group_size.
     """
-    fock_state: List[int] = []
+    fock_state: list[int] = []
     bit_offset = 0
     for size in group_sizes:
-        group_len = 2 ** size
+        group_len = 2**size
         bits = qubit_state[bit_offset : bit_offset + size]
         idx = int(bits, 2)
         fock_state += [1 if i == idx else 0 for i in range(group_len)]
@@ -51,11 +53,11 @@ def to_fock_state(qubit_state: str, group_sizes: List[int]) -> pcvl.BasicState:
     return pcvl.BasicState(fock_state)
 
 
-def _to_occ_tuple(key: Union[pcvl.BasicState, Sequence[int]]) -> tuple:
+def _to_occ_tuple(key: pcvl.BasicState | Sequence[int]) -> tuple:
     """Convert a BasicState or occupancy list to a tuple for dict keys."""
     if isinstance(key, pcvl.BasicState):
-        return tuple(list(key))
-    return tuple(list(key))
+        return tuple(key)
+    return tuple(key)
 
 
 # ----------------------------
@@ -85,20 +87,22 @@ class QuantumBridge(nn.Module):
     def __init__(
         self,
         *,
-        qubit_groups: List[int],
-        merlin_layer: QuantumLayer,                         # REQUIRED
-        device: Optional[torch.device] = None,
+        qubit_groups: list[int],
+        merlin_layer: QuantumLayer,  # REQUIRED
+        device: torch.device | None = None,
         dtype: torch.dtype = torch.float32,
         # PennyLane side:
-        pl_module: Optional[nn.Module] = None,
-        pl_state_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        pl_module: nn.Module | None = None,
+        pl_state_fn: Callable[[torch.Tensor], torch.Tensor] | None = None,
         # encoding behavior:
         wires_order: str = "little",
         normalize: bool = True,
     ):
         super().__init__()
         if merlin_layer is None:
-            raise ValueError("QuantumBridge requires a user-supplied 'merlin_layer' (QuantumLayer).")
+            raise ValueError(
+                "QuantumBridge requires a user-supplied 'merlin_layer' (QuantumLayer)."
+            )
         if wires_order not in ("little", "big"):
             raise ValueError("wires_order must be 'little' or 'big'.")
 
@@ -111,9 +115,15 @@ class QuantumBridge(nn.Module):
 
         # PennyLane state provider
         if pl_module is None and pl_state_fn is None:
-            raise ValueError("Provide either 'pl_module' or 'pl_state_fn' that returns a complex statevector.")
+            raise ValueError(
+                "Provide either 'pl_module' or 'pl_state_fn' that returns a complex statevector."
+            )
         self.pl_module = pl_module
-        self._pl_state_fn = pl_state_fn if pl_state_fn is not None else (pl_module.forward if pl_module is not None else None)
+        self._pl_state_fn = (
+            pl_state_fn
+            if pl_state_fn is not None
+            else (pl_module.forward if pl_module is not None else None)
+        )
         if self._pl_state_fn is None:
             raise ValueError("Could not resolve a PennyLane state function.")
 
@@ -122,11 +132,13 @@ class QuantumBridge(nn.Module):
 
         # Lazily built on first forward (when we see the actual 2^n)
         self._initialized = False
-        self.n_qubits: Optional[int] = None
-        self.n_photonic_modes: Optional[int] = None
+        self.n_qubits: int | None = None
+        self.n_photonic_modes: int | None = None
 
         # Buffers to fill later
-        self.register_buffer("index_map", torch.tensor([], dtype=torch.long), persistent=False)
+        self.register_buffer(
+            "index_map", torch.tensor([], dtype=torch.long), persistent=False
+        )
 
     # ------------- internal: building maps -------------
     def _ensure_sim_graph(self):
@@ -142,7 +154,7 @@ class QuantumBridge(nn.Module):
         by_state = {_to_occ_tuple(k): i for i, k in enumerate(mapped_keys)}
 
         # ordered map: for each computational basis |bits⟩, map to its Fock BasicState index
-        idx_map: List[int] = []
+        idx_map: list[int] = []
         n = int(round(math.log2(K)))
         for k in range(K):
             bits = format(k, f"0{n}b")
@@ -169,7 +181,9 @@ class QuantumBridge(nn.Module):
         if 2**n != K:
             raise ValueError(f"PennyLane state length {K} is not a power of two.")
         if sum(self.group_sizes) != n:
-            raise ValueError(f"sum(qubit_groups)={sum(self.group_sizes)} != inferred n_qubits={n}")
+            raise ValueError(
+                f"sum(qubit_groups)={sum(self.group_sizes)} != inferred n_qubits={n}"
+            )
         self.n_qubits = n
         self.n_photonic_modes = sum(2**g for g in self.group_sizes)
 
@@ -186,7 +200,7 @@ class QuantumBridge(nn.Module):
                     raise ValueError(
                         f"Merlin layer has m={cp.m} modes, but qubit_groups imply {self.n_photonic_modes}."
                     )
-        except Exception:
+        except AttributeError:
             # If attributes are not present, skip strict validation
             pass
 
@@ -207,12 +221,16 @@ class QuantumBridge(nn.Module):
                 return out
         # Fallback: try per-sample evaluation
         if not isinstance(x, torch.Tensor) or x.ndim < 1:
-            raise ValueError("pl_state_fn returned unsupported type/shape and input is not batchable.")
+            raise ValueError(
+                "pl_state_fn returned unsupported type/shape and input is not batchable."
+            )
         outs = []
         for i in range(x.shape[0]):
             yi = self._pl_state_fn(x[i])
             if not isinstance(yi, torch.Tensor) or yi.ndim != 1:
-                raise ValueError("pl_state_fn must return a 1D complex statevector per sample.")
+                raise ValueError(
+                    "pl_state_fn must return a 1D complex statevector per sample."
+                )
             outs.append(yi)
         return torch.stack(outs, dim=0)
 
@@ -223,7 +241,11 @@ class QuantumBridge(nn.Module):
         """
         psi = self._call_pl_state(x)  # (B,K) complex
         # Unify dtype/device with the bridge/merlin side
-        target_complex = torch.complex64 if self.dtype in (torch.float32, torch.bfloat16) else torch.complex128
+        target_complex = (
+            torch.complex64
+            if self.dtype in (torch.float32, torch.bfloat16)
+            else torch.complex128
+        )
         target_device = self.device if self.device is not None else psi.device
         psi = psi.to(dtype=target_complex, device=target_device)
 
