@@ -4,5 +4,7 @@ Merlin algorithms package containing various quantum machine learning algorithms
 
 from .kernels import FeatureMap, FidelityKernel
 from .loss import NKernelAlignment
+from .layer import QuantumLayer
+from .feed_forward import FeedForwardBlock
 
-__all__ = ["FeatureMap", "FidelityKernel", "NKernelAlignment"]
+__all__ = ["FeatureMap", "FidelityKernel", "NKernelAlignment", "QuantumLayer","FeedForwardBlock"]

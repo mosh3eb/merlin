@@ -38,9 +38,9 @@ from ..core.generators import CircuitType, StatePattern
 from ..core.photonicbackend import PhotonicBackend as Experiment
 from ..core.process import ComputationProcessFactory
 from ..sampling.autodiff import AutoDiffProcess
-from ..sampling.mappers import OutputMapper
+from ..torch_utils.torch_codes import OutputMapper
 from ..sampling.strategies import OutputMappingStrategy
-from .ansatz import Ansatz, AnsatzFactory
+from ..core.ansatz import Ansatz, AnsatzFactory
 
 
 class QuantumLayer(nn.Module):

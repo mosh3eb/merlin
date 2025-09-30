@@ -21,7 +21,8 @@
 # SOFTWARE.
 
 from .torch_codes import (
-    FeatureEncoder,
+    FeatureEncoder, LexGroupingMapper, ModGroupingMapper, OutputMapper
+
 )
 
-__all__ = ["FeatureEncoder"]
+__all__ = ["FeatureEncoder", "OutputMapper", "LexGroupingMapper", "ModGroupingMapper"]

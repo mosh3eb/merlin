@@ -12,6 +12,7 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
+   merlin.algorithms
    merlin.core
    merlin.datasets
    merlin.pcvl_pytorch

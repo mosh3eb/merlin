@@ -25,12 +25,10 @@
 from .ansatz import Ansatz, AnsatzFactory
 from .base import AbstractComputationProcess
 from .generators import CircuitGenerator, CircuitType, StateGenerator, StatePattern
-from .layer import QuantumLayer
 from .photonicbackend import PhotonicBackend
 from .process import ComputationProcess, ComputationProcessFactory
 
 __all__ = [
-    "QuantumLayer",
     "PhotonicBackend",
     "Ansatz",
     "AnsatzFactory",
