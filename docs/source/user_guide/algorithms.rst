@@ -80,8 +80,7 @@ This example mirrors the tests using scikit-learn’s Iris dataset. We build a q
         input_size=4,      # number of input features
         n_modes=6,         # photonic modes in the circuit
         n_photons=2,       # number of photons
-        circuit_type="series",
-        reservoir_mode=False  # set True for a non-trainable, stable reservoir
+        trainable=True     # set False for a fixed, non-trainable kernel
     )
 
     # Compute precomputed kernel matrices
@@ -99,7 +98,7 @@ Notes
 
 - K_train is symmetric and approximately positive semi-definite; diagonal entries are ≈ 1. Use force_psd=True if you want an explicit PSD projection.
 - Values typically lie in [0, 1] (allowing for small numerical tolerances).
-- Set reservoir_mode=True for a fixed, non-trainable kernel. Leave it False and specify trainable parameters for learning.
+- Set ``trainable=False`` for a fixed, non-trainable kernel; keep it ``True`` (default) to optimise phase parameters with learning algorithms such as ``NKernelAlignment``.
 
 
 Advanced: Custom Circuit (as in tests)

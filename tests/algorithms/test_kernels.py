@@ -10,7 +10,6 @@ from sklearn.svm import SVC
 from merlin.algorithms.kernels import FeatureMap, FidelityKernel, KernelCircuitBuilder
 from merlin.algorithms.loss import NKernelAlignment
 from merlin.builder import CircuitBuilder
-from merlin.core.generators import CircuitType
 
 
 class TestFeatureMap:
@@ -367,22 +366,12 @@ class TestFeatureMapFactoryMethods:
 
     def test_simple_factory_method(self):
         """Test the simple FeatureMap factory method."""
-        feature_map = FeatureMap.simple(
-            input_size=2, n_modes=6, n_photons=2, circuit_type=CircuitType.SERIES
-        )
+        feature_map = FeatureMap.simple(input_size=2, n_modes=6, n_photons=2)
 
         assert feature_map.input_size == 2
         assert feature_map.circuit.m == 6
-        # Feature map is trainable by default (has phi_ parameters when not in reservoir mode)
-
-    def test_simple_factory_with_string_parameters(self):
-        """Test simple factory with string circuit_type and state_pattern."""
-        feature_map = FeatureMap.simple(
-            input_size=2, n_modes=4, circuit_type="series", state_pattern="periodic"
-        )
-
-        assert feature_map.input_size == 2
-        assert feature_map.circuit.m == 4
+        assert feature_map.is_trainable
+        assert "phi" in feature_map.trainable_parameters
 
     def test_simple_factory_default_photons(self):
         """Test simple factory with default n_photons (should equal input_size)."""
@@ -391,15 +380,12 @@ class TestFeatureMapFactoryMethods:
         assert feature_map.input_size == 3
         # Should default to a 3-photon configuration
 
-    def test_simple_factory_with_trainable_params(self):
-        """Test simple factory with trainable parameters."""
-        feature_map = FeatureMap.simple(
-            input_size=2, n_modes=4, trainable_parameters=["phi_"], reservoir_mode=False
-        )
+    def test_simple_factory_can_disable_training(self):
+        """Simple factory can build static feature maps when requested."""
+        feature_map = FeatureMap.simple(input_size=2, n_modes=4, trainable=False)
 
         assert feature_map.input_size == 2
-        assert feature_map.is_trainable
-        assert "phi_" in feature_map.trainable_parameters
+        assert not feature_map.is_trainable
 
     def test_simple_factory_raises_when_input_exceeds_modes(self):
         with pytest.raises(
@@ -456,23 +442,12 @@ class TestFidelityKernelFactoryMethods:
 
     def test_simple_factory_method(self):
         """Test the simple FidelityKernel factory method."""
-        kernel = FidelityKernel.simple(
-            input_size=2, n_modes=4, n_photons=2, circuit_type=CircuitType.SERIES
-        )
+        kernel = FidelityKernel.simple(input_size=2, n_modes=4, n_photons=2)
 
         assert kernel.input_size == 2
         assert kernel.feature_map.circuit.m == 4
         assert len(kernel.input_state) == 4
         assert sum(kernel.input_state) == 2
-
-    def test_simple_factory_with_string_parameters(self):
-        """Test simple factory with string parameters."""
-        kernel = FidelityKernel.simple(
-            input_size=2, n_modes=4, circuit_type="series", state_pattern="periodic"
-        )
-
-        assert kernel.input_size == 2
-        assert kernel.feature_map.circuit.m == 4
 
     def test_simple_factory_default_photons(self):
         """Test simple factory with default n_photons."""
@@ -497,27 +472,7 @@ class TestKernelCircuitBuilder:
     def test_builder_basic_usage(self):
         """Test basic KernelCircuitBuilder usage."""
         builder = KernelCircuitBuilder()
-        feature_map = (
-            builder.input_size(2)
-            .n_modes(4)
-            .n_photons(2)
-            .circuit_type(CircuitType.SERIES)
-            .build_feature_map()
-        )
-
-        assert feature_map.input_size == 2
-        assert feature_map.circuit.m == 4
-
-    def test_builder_string_parameters(self):
-        """Test builder with string parameters."""
-        builder = KernelCircuitBuilder()
-        feature_map = (
-            builder.input_size(2)
-            .n_modes(4)
-            .circuit_type("series")
-            .state_pattern("periodic")
-            .build_feature_map()
-        )
+        feature_map = builder.input_size(2).n_modes(4).n_photons(2).build_feature_map()
 
         assert feature_map.input_size == 2
         assert feature_map.circuit.m == 4
@@ -537,28 +492,26 @@ class TestKernelCircuitBuilder:
         assert feature_map.input_size == 2
         assert feature_map.device == device
 
-    def test_builder_reservoir_mode(self):
-        """Test builder with reservoir mode."""
-        builder = KernelCircuitBuilder()
-        feature_map = (
-            builder.input_size(2).n_modes(4).reservoir_mode(True).build_feature_map()
-        )
-
-        assert feature_map.input_size == 2
-        # Reservoir mode should affect trainable parameters
-
-    def test_builder_trainable_parameters(self):
-        """Test builder with trainable parameters."""
+    def test_builder_trainable_toggle(self):
+        """Builder can enable or disable training dynamically."""
         builder = KernelCircuitBuilder()
         feature_map = (
             builder.input_size(2)
             .n_modes(4)
-            .trainable_parameters(["phi_"])
-            .reservoir_mode(False)  # Ensure trainable params work
+            .trainable(False)
             .build_feature_map()
         )
 
         assert feature_map.input_size == 2
+        assert not feature_map.is_trainable
+
+        feature_map = (
+            builder.input_size(2)
+            .n_modes(4)
+            .trainable(True, prefix="phi_")
+            .build_feature_map()
+        )
+
         assert feature_map.is_trainable
         assert "phi_" in feature_map.trainable_parameters
 
@@ -684,20 +637,14 @@ class TestKernelConstructionConsistency:
         pcvl.pdisplay(fm_manual.circuit)
 
         # Method 2: simple factory
-        fm_simple = FeatureMap.simple(
-            input_size=2, n_modes=3, n_photons=2, circuit_type=CircuitType.SERIES
-        )
+        fm_simple = FeatureMap.simple(input_size=2, n_modes=3, n_photons=2)
         print("Simple factory circuit:")
         pcvl.pdisplay(fm_simple.circuit)
 
         # Method 3: KernelCircuitBuilder
         builder = KernelCircuitBuilder()
         fm_builder = (
-            builder.input_size(2)
-            .n_modes(3)
-            .n_photons(2)
-            .circuit_type(CircuitType.SERIES)
-            .build_feature_map()
+            builder.input_size(2).n_modes(3).n_photons(2).build_feature_map()
         )
         print("Builder API circuit:")
         pcvl.pdisplay(fm_builder.circuit)
@@ -727,8 +674,7 @@ class TestKernelConstructionConsistency:
             input_size=2,
             n_modes=4,
             n_photons=2,
-            circuit_type=CircuitType.SERIES,
-            reservoir_mode=True,
+            trainable=False,
         )
 
         # Builder API
@@ -737,8 +683,7 @@ class TestKernelConstructionConsistency:
             builder_api.input_size(2)
             .n_modes(4)
             .n_photons(2)
-            .circuit_type(CircuitType.SERIES)
-            .reservoir_mode(True)
+            .trainable(False)
             .build_fidelity_kernel()
         )
 
@@ -1057,8 +1002,8 @@ def test_iris_with_supported_constructors():
 
     # Define configurations to test
     configurations = [
-        {"name": "Reservoir Mode (stable)", "reservoir_mode": True},
-        {"name": "Trainable Mode (flexible)", "reservoir_mode": False},
+        {"name": "Static Mode (stable)", "trainable": False},
+        {"name": "Trainable Mode (flexible)", "trainable": True},
     ]
 
     results = {}
@@ -1068,7 +1013,7 @@ def test_iris_with_supported_constructors():
         print(f"Testing with {config['name']}")
         print(f"{'=' * 60}")
 
-        reservoir_mode = config["reservoir_mode"]
+        trainable_flag = config["trainable"]
         config_results = {}
 
         # Initialize kernel variables to None to prevent NameError
@@ -1077,14 +1022,15 @@ def test_iris_with_supported_constructors():
         kernel_builder = None
 
         # Method 1: Simple factory method
-        print(f"\n1. FidelityKernel.simple() - {config['name']} and reservoir {reservoir_mode}:")
+        print(
+            f"\n1. FidelityKernel.simple() - {config['name']} (trainable={trainable_flag}):"
+        )
         try:
             kernel_simple = FidelityKernel.simple(
                 input_size=4,  # IRIS has 4 features
                 n_modes=4,
                 n_photons=2,
-                circuit_type="series",
-                reservoir_mode=reservoir_mode,
+                trainable=trainable_flag,
             )
 
             # Test basic properties
@@ -1169,8 +1115,7 @@ def test_iris_with_supported_constructors():
                 builder.input_size(4)
                 .n_modes(4)
                 .n_photons(2)
-                .circuit_type(CircuitType.SERIES)
-                .reservoir_mode(reservoir_mode)
+                .trainable(trainable_flag)
                 .build_fidelity_kernel()
             )
 
@@ -1315,7 +1260,7 @@ def test_kernel_constructor_performance_comparison():
     # Time Method 1: Simple factory
     start = time.time()
     kernel1 = FidelityKernel.simple(
-        input_size=3, n_modes=4, n_photons=2, circuit_type="series", reservoir_mode=True
+        input_size=3, n_modes=4, n_photons=2, trainable=False
     )
     time1 = time.time() - start
     methods.append("FidelityKernel.simple()")
@@ -1349,8 +1294,7 @@ def test_kernel_constructor_performance_comparison():
         builder.input_size(3)
         .n_modes(4)
         .n_photons(2)
-        .circuit_type("series")
-        .reservoir_mode(True)
+        .trainable(False)
         .build_fidelity_kernel()
     )
     time3 = time.time() - start
@@ -1402,8 +1346,7 @@ def test_fidelity_kernel_gpu_execution_all_constructors(cuda_device, constructor
             input_size=4,
             n_modes=4,
             n_photons=2,
-            circuit_type=CircuitType.SERIES,
-            reservoir_mode=True,
+            trainable=False,
         )
     elif constructor == "manual":
         params = [pcvl.P(f"x{i+1}") for i in range(4)]
@@ -1427,8 +1370,7 @@ def test_fidelity_kernel_gpu_execution_all_constructors(cuda_device, constructor
             builder.input_size(4)
             .n_modes(4)
             .n_photons(2)
-            .circuit_type(CircuitType.SERIES)
-            .reservoir_mode(True)
+            .trainable(False)
             .build_fidelity_kernel()
         )
 
@@ -1452,8 +1394,7 @@ def test_fidelity_kernel_gpu_training_step(cuda_device):
         input_size=4,
         n_modes=6,
         n_photons=4,
-        circuit_type=CircuitType.SERIES,
-        reservoir_mode=False,
+        trainable=True,
     ).to(device)
 
     if sum(p.numel() for p in kernel.parameters()) == 0:
