@@ -299,7 +299,7 @@ class TestFeatureMapFactoryMethods:
         """FeatureMap can be constructed directly from CircuitBuilder."""
         builder = CircuitBuilder(n_modes=4, n_photons=2)
         builder.add_entangling_layer(depth=1)
-        builder.add_input_layer(modes=[0, 1], name="input")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_entangling_layer(depth=1)
 
         feature_map = FeatureMap(
@@ -315,7 +315,7 @@ class TestFeatureMapFactoryMethods:
         """FeatureMap inherits trainable parameters defined in CircuitBuilder."""
         builder = CircuitBuilder(n_modes=4, n_photons=2)
         builder.add_entangling_layer(depth=1)
-        builder.add_input_layer(modes=[0, 1], name="input")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_rotation_layer(trainable=True, name="phi_")
         builder.add_entangling_layer(depth=1)
 
@@ -387,7 +387,7 @@ class TestFidelityKernelFactoryMethods:
         """FidelityKernel can wrap a FeatureMap created from CircuitBuilder."""
         builder = CircuitBuilder(n_modes=4, n_photons=2)
         builder.add_entangling_layer(depth=1)
-        builder.add_input_layer(modes=[0, 1], name="input")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_entangling_layer(depth=1)
 
         feature_map = FeatureMap(
@@ -637,7 +637,7 @@ class TestKernelConstructionConsistency:
         # Manual builder-based kernel
         builder = CircuitBuilder(n_modes=4, n_photons=2)
         builder.add_entangling_layer(depth=1, name = "phi_1_")
-        builder.add_input_layer(modes=[0, 1], name="input")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_entangling_layer(depth=1, name = "phi_2_")
         fm_manual = FeatureMap(
             circuit=builder,

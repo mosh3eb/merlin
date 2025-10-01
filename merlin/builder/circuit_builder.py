@@ -187,8 +187,8 @@ class CircuitBuilder:
         self._layer_counter += 1
         return self
 
-    def add_input_layer(self, modes: Optional[List[int]] = None, name: Optional[str] = None) -> "CircuitBuilder":
-        """Convenience method for input encoding."""
+    def add_angle_encoding(self, modes: Optional[List[int]] = None, name: Optional[str] = None) -> "CircuitBuilder":
+        """Convenience method for angle-based input encoding."""
         if name is None:
             name = "px"
         return self.add_rotation_layer(modes=modes, role=ParameterRole.INPUT, name=name)

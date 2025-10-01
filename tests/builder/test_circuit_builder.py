@@ -97,7 +97,7 @@ def test_build_closes_open_sections_and_sets_metadata():
 
 def test_complex_builder_pipeline_exports_pcvl_circuit():
     builder = CircuitBuilder(n_modes=3, n_photons=1)
-    builder.add_input_layer(name="input")
+    builder.add_angle_encoding(name="input")
     builder.add_entangling_layer(depth=1, name="ent")
     builder.add_rotation(target=1, angle=0.25)
 
@@ -147,7 +147,7 @@ def test_to_pcvl_circuit_supports_gradient_backpropagation():
 
 def test_builder_integrates_directly_with_quantum_layer():
     builder = CircuitBuilder(n_modes=3, n_photons=1)
-    builder.add_input_layer(name="input")
+    builder.add_angle_encoding(name="input")
     builder.add_rotation_layer(trainable=True, name="theta")
     builder.add_entangling_layer(depth=1)
 

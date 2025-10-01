@@ -661,7 +661,7 @@ class QuantumLayer(nn.Module):
 
         # Input encoding across all modes (prefix ``input``)
         input_modes = list(range(min(input_size, n_modes)))
-        builder.add_input_layer(modes=input_modes, name="input")
+        builder.add_angle_encoding(modes=input_modes, name="input")
 
         # Allocate trainable rotations to match the requested parameter budget
         remaining = max(int(n_params), 0)

@@ -272,7 +272,7 @@ class FeatureMap:
 
         builder.add_entangling_layer(depth=1)
         input_modes = list(range(min(input_size, n_modes)))
-        builder.add_input_layer(modes=input_modes, name="input")
+        builder.add_angle_encoding(modes=input_modes, name="input")
 
         if trainable_parameters:
             for prefix in trainable_parameters:
@@ -383,7 +383,7 @@ class KernelCircuitBuilder:
 
         builder = CircuitBuilder(n_modes=n_modes, n_photons=n_photons)
         builder.add_entangling_layer(depth=1)
-        builder.add_input_layer(modes=list(range(min(self._input_size, n_modes))), name="input")
+        builder.add_angle_encoding(modes=list(range(min(self._input_size, n_modes))), name="input")
 
         if trainable_params:
             for prefix in trainable_params:
