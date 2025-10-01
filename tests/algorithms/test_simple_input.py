@@ -164,6 +164,19 @@ def test_gradient_flow_for_strategies(quantum_layer_api):
     assert sum(p.numel() for p in layer_none.parameters()) == nb_params
 
 
+def test_quantum_layer_simple_raises_when_input_exceeds_modes(quantum_layer_api):
+    QuantumLayer, _ = quantum_layer_api
+
+    with pytest.raises(
+        ValueError, match="You cannot encore more features than mode with Builder"
+    ):
+        QuantumLayer.simple(
+            input_size=12,
+            n_params=30,
+            output_mapping_strategy=OutputMappingStrategy.NONE,
+        )
+
+
 def test_batch_shapes_and_probabilities(quantum_layer_api):
     QuantumLayer, OutputMappingStrategy = quantum_layer_api
 

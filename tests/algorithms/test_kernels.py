@@ -329,6 +329,28 @@ class TestFeatureMapFactoryMethods:
         assert feature_map.is_trainable
         assert "phi" in feature_map.trainable_parameters
 
+    def test_angle_encoding_respects_scale_in_feature_map(self):
+        builder = CircuitBuilder(n_modes=4, n_photons=2)
+        builder.add_angle_encoding(
+            modes=[0, 1, 2],
+            name="input",
+            scale=0.5,
+        )
+
+        feature_map = FeatureMap(
+            circuit=builder,
+            input_size=3,
+            input_parameters=None,
+        )
+
+        x = torch.tensor([0.1, 0.2, 0.3], dtype=torch.float32)
+        encoded = feature_map._encode_x(x)
+
+        assert encoded.shape == (3,)
+
+        expected = torch.tensor([0.05, 0.1, 0.15], dtype=torch.float32)
+        assert torch.allclose(encoded.detach(), expected, atol=1e-6)
+
     def test_from_pcvl_circuit(self):
         """FeatureMap can be built directly from a pcvl.Circuit."""
         x1, x2 = pcvl.P("x1"), pcvl.P("x2")
@@ -378,6 +400,12 @@ class TestFeatureMapFactoryMethods:
         assert feature_map.input_size == 2
         assert feature_map.is_trainable
         assert "phi_" in feature_map.trainable_parameters
+
+    def test_simple_factory_raises_when_input_exceeds_modes(self):
+        with pytest.raises(
+            ValueError, match="You cannot encore more features than mode with Builder"
+        ):
+            FeatureMap.simple(input_size=5, n_modes=4)
 
 
 class TestFidelityKernelFactoryMethods:
@@ -580,6 +608,23 @@ class TestKernelCircuitBuilder:
         # Should use defaults: n_modes = max(input_size + 1, 4) = 4
         assert feature_map.circuit.m == 4
 
+    def test_builder_angle_encoding_configuration(self):
+        builder = KernelCircuitBuilder()
+        feature_map = (
+            builder.input_size(3)
+            .n_modes(4)
+            .angle_encoding(scale=0.5)
+            .build_feature_map()
+        )
+
+        x = torch.tensor([0.1, 0.2, 0.3], dtype=torch.float32)
+        encoded = feature_map._encode_x(x)
+
+        assert encoded.shape == (3,)
+
+        expected = torch.tensor([0.05, 0.1, 0.15], dtype=torch.float32)
+        assert torch.allclose(encoded.detach(), expected, atol=1e-6)
+
     def test_builder_missing_input_size(self):
         """Test builder error when input_size is not specified."""
         builder = KernelCircuitBuilder()
@@ -605,7 +650,7 @@ class TestKernelConstructionConsistency:
         # Method 1: direct pcvl circuit
         x1, x2 = pcvl.P("x1"), pcvl.P("x2")
         fm_manual = FeatureMap(
-            circuit=pcvl.Circuit(2)
+            circuit=pcvl.Circuit(3)
             // pcvl.PS(x1)
             // pcvl.BS()
             // pcvl.PS(x2)
@@ -613,21 +658,27 @@ class TestKernelConstructionConsistency:
             input_size=2,
             input_parameters="x",
         )
+        print("Manual circuit:")
+        pcvl.pdisplay(fm_manual.circuit)
 
         # Method 2: simple factory
         fm_simple = FeatureMap.simple(
-            input_size=2, n_modes=2, n_photons=2, circuit_type=CircuitType.SERIES
+            input_size=2, n_modes=3, n_photons=2, circuit_type=CircuitType.SERIES
         )
+        print("Simple factory circuit:")
+        pcvl.pdisplay(fm_simple.circuit)
 
         # Method 3: KernelCircuitBuilder
         builder = KernelCircuitBuilder()
         fm_builder = (
             builder.input_size(2)
-            .n_modes(2)
+            .n_modes(3)
             .n_photons(2)
             .circuit_type(CircuitType.SERIES)
             .build_feature_map()
         )
+        print("Builder API circuit:")
+        pcvl.pdisplay(fm_builder.circuit)
 
         assert fm_manual.input_size == fm_simple.input_size == fm_builder.input_size
         assert fm_manual.circuit.m == fm_simple.circuit.m == fm_builder.circuit.m

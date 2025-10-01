@@ -7,7 +7,7 @@ import perceval as pcvl
 import torch
 from torch import Tensor
 
-from ..builder.circuit_builder import CircuitBuilder
+from ..builder.circuit_builder import CircuitBuilder, ANGLE_ENCODING_MODE_ERROR
 from ..core.generators import CircuitType, StatePattern
 from ..pcvl_pytorch.locirc_to_tensor import CircuitConverter
 from ..pcvl_pytorch.slos_torchscript import (
@@ -60,9 +60,12 @@ class FeatureMap:
         builder_trainable: list[str] = []
         builder_input: list[str] = []
 
+        self._angle_encoding_specs: dict[str, dict[str, object]] = {}
+
         if isinstance(circuit, CircuitBuilder):
             builder_trainable = circuit.trainable_parameter_prefixes
             builder_input = circuit.input_parameter_prefixes
+            self._angle_encoding_specs = circuit.angle_encoding_specs
             circuit = circuit.to_pcvl_circuit(pcvl)
 
         self.circuit = circuit
@@ -143,6 +146,16 @@ class FeatureMap:
         x = x.to(dtype=self.dtype, device=self.device).reshape(-1)
         px_len = self._px_len()
 
+        spec = self._angle_encoding_specs.get(self.input_parameters)
+
+        if spec:
+            encoded = self._encode_with_specs(x, spec)
+            if encoded.numel() != px_len:
+                raise ValueError(
+                    f"Angle encoding produced {encoded.numel()} parameters but circuit expects {px_len}"
+                )
+            return encoded
+
         if x.numel() == px_len:
             return x
         if x.numel() < px_len:
@@ -167,6 +180,41 @@ class FeatureMap:
             return self._subset_sum_expand(x, px_len)
         # x longer than needed; truncate
         return x[:px_len]
+
+    def _encode_with_specs(self, x: Tensor, spec: dict[str, object]) -> Tensor:
+        """Encode input vector using builder-provided angle encoding metadata."""
+        combos = spec.get("combinations", [])
+        scales = spec.get("scales", {})
+
+        if not isinstance(combos, list) or not all(isinstance(c, tuple) for c in combos):
+            raise ValueError("Invalid angle encoding metadata: 'combinations' must be a list of tuples")
+
+        if not isinstance(scales, dict):
+            raise ValueError("Invalid angle encoding metadata: 'scales' must be a dict")
+
+        x_flat = x.to(dtype=self.dtype, device=self.device).reshape(-1)
+        encoded_vals: list[Tensor] = []
+        feature_dim = x_flat.shape[0]
+
+        for combo in combos:  # type: ignore[assignment]
+            indices = list(combo)
+            if any(idx >= feature_dim for idx in indices):
+                raise ValueError(
+                    f"Input feature dimension {feature_dim} insufficient for angle encoding combination {combo}"
+                )
+
+            selected = x_flat[indices]
+            scale_tensor = torch.tensor(
+                [float(scales.get(idx, 1.0)) for idx in indices],
+                dtype=self.dtype,
+                device=self.device,
+            )
+            encoded_vals.append((selected * scale_tensor).sum())
+
+        if not encoded_vals:
+            return torch.zeros(0, dtype=self.dtype, device=self.device)
+
+        return torch.stack(encoded_vals, dim=0)
 
     def compute_unitary(
         self, x: Tensor | np.ndarray | float, *training_parameters: Tensor
@@ -253,6 +301,7 @@ class FeatureMap:
         trainable_parameters: list[str] | None = None,
         dtype: str | torch.dtype = torch.float32,
         device: torch.device | None = None,
+        angle_encoding_scale: float = 1.0,
     ) -> "FeatureMap":
         """
         Simple factory method to create a FeatureMap with minimal configuration.
@@ -268,11 +317,19 @@ class FeatureMap:
         if trainable_parameters is None and not reservoir_mode:
             trainable_parameters = ["phi"]
 
+        if input_size > n_modes:
+            raise ValueError(ANGLE_ENCODING_MODE_ERROR)
+
         builder = CircuitBuilder(n_modes=n_modes, n_photons=n_photons)
 
         builder.add_entangling_layer(depth=1)
-        input_modes = list(range(min(input_size, n_modes)))
-        builder.add_angle_encoding(modes=input_modes, name="input")
+        input_modes = list(range(input_size))
+
+        builder.add_angle_encoding(
+            modes=input_modes,
+            name="input",
+            scale=angle_encoding_scale,
+        )
 
         if trainable_parameters:
             for prefix in trainable_parameters:
@@ -309,6 +366,7 @@ class KernelCircuitBuilder:
         self._dtype: str | torch.dtype = torch.float32
         self._device: torch.device | None = None
         self._use_bandwidth_tuning: bool = False
+        self._angle_encoding_scale: float = 1.0
 
     def input_size(self, size: int) -> "KernelCircuitBuilder":
         """Set the input dimensionality."""
@@ -364,6 +422,15 @@ class KernelCircuitBuilder:
         self._use_bandwidth_tuning = enabled
         return self
 
+    def angle_encoding(
+        self,
+        *,
+        scale: float = 1.0,
+    ) -> "KernelCircuitBuilder":
+        """Configure the angle encoding scale."""
+        self._angle_encoding_scale = scale
+        return self
+
     def build_feature_map(self) -> FeatureMap:
         """
         Build and return a FeatureMap instance.
@@ -383,7 +450,17 @@ class KernelCircuitBuilder:
 
         builder = CircuitBuilder(n_modes=n_modes, n_photons=n_photons)
         builder.add_entangling_layer(depth=1)
-        builder.add_angle_encoding(modes=list(range(min(self._input_size, n_modes))), name="input")
+
+        if self._input_size > n_modes:
+            raise ValueError(ANGLE_ENCODING_MODE_ERROR)
+
+        input_modes = list(range(self._input_size))
+
+        builder.add_angle_encoding(
+            modes=input_modes,
+            name="input",
+            scale=self._angle_encoding_scale,
+        )
 
         if trainable_params:
             for prefix in trainable_params:

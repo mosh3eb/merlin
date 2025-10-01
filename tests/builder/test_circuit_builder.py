@@ -169,3 +169,66 @@ def test_builder_integrates_directly_with_quantum_layer():
 
     assert logits.shape == (4, 3)
     assert any(p.grad is not None for p in layer.parameters() if p.requires_grad)
+
+
+def test_angle_encoding_metadata_and_scaling():
+    builder = CircuitBuilder(n_modes=4, n_photons=1)
+    builder.add_angle_encoding(
+        modes=[0, 1, 2],
+        name="input",
+        scale=0.5,
+    )
+
+    specs = builder.angle_encoding_specs
+    assert "input" in specs
+    combos = specs["input"]["combinations"]
+    scales = specs["input"]["scales"]
+
+    assert combos == [(0,), (1,), (2,)]
+
+    assert scales[0] == 0.5
+    assert scales[1] == 0.5
+    assert scales[2] == 0.5
+
+    rotations = [
+        component
+        for component in builder.circuit.components
+        if isinstance(component, Rotation) and component.role == ParameterRole.INPUT
+    ]
+    assert len(rotations) == len(combos)
+
+
+def test_angle_encoding_applies_scaling_in_quantum_layer():
+    builder = CircuitBuilder(n_modes=4, n_photons=1)
+    builder.add_angle_encoding(
+        modes=[0, 1, 2],
+        name="input",
+        scale=0.5,
+    )
+
+    layer = QuantumLayer(
+        input_size=3,
+        circuit=builder,
+        n_photons=1,
+        output_size=3,
+        output_mapping_strategy=OutputMappingStrategy.LINEAR,
+        dtype=torch.float32,
+    )
+
+    x = torch.tensor([[0.1, 0.2, 0.3]], dtype=torch.float32)
+    params = layer.prepare_parameters([x])
+    encoded = params[-1]
+
+    assert encoded.shape == (1, 3)
+
+    singles = encoded[0, :3].detach()
+    expected_singles = torch.tensor([0.05, 0.1, 0.15], dtype=torch.float32)
+    assert torch.allclose(singles, expected_singles, atol=1e-6)
+
+
+
+def test_angle_encoding_raises_when_modes_exceeded():
+    builder = CircuitBuilder(n_modes=3, n_photons=1)
+
+    with pytest.raises(ValueError, match="You cannot encore more features than mode with Builder"):
+        builder.add_angle_encoding(modes=[0, 1, 2, 3])

@@ -41,7 +41,10 @@ from ..sampling.autodiff import AutoDiffProcess
 from ..torch_utils.torch_codes import OutputMapper
 from ..sampling.strategies import OutputMappingStrategy
 from ..builder.ansatz import Ansatz, AnsatzFactory
-from ..builder.circuit_builder import CircuitBuilder
+from ..builder.circuit_builder import (
+    CircuitBuilder,
+    ANGLE_ENCODING_MODE_ERROR,
+)
 
 
 class QuantumLayer(nn.Module):
@@ -92,9 +95,12 @@ class QuantumLayer(nn.Module):
         builder_trainable: list[str] = []
         builder_input: list[str] = []
 
+        self.angle_encoding_specs: dict[str, dict[str, Any]] = {}
+
         if isinstance(circuit, CircuitBuilder):
             builder_trainable = circuit.trainable_parameter_prefixes
             builder_input = circuit.input_parameter_prefixes
+            self.angle_encoding_specs = circuit.angle_encoding_specs
             circuit = circuit.to_pcvl_circuit(pcvl)
         if trainable_parameters is None:
             trainable_parameters = list(builder_trainable)
@@ -448,7 +454,7 @@ class QuantumLayer(nn.Module):
 
         return params  # type: ignore[return-value]
 
-    def _prepare_input_encoding(self, x: torch.Tensor) -> torch.Tensor:
+    def _prepare_input_encoding(self, x: torch.Tensor, prefix: str | None = None) -> torch.Tensor:
         """Prepare input encoding based on mode."""
         if self.auto_generation_mode:
             # Use FeatureEncoder for auto-generated circuits
@@ -460,9 +466,60 @@ class QuantumLayer(nn.Module):
                 self.ansatz.experiment.n_modes,
                 self.bandwidth_coeffs,  # type: ignore[arg-type]
             )
+
+        spec = None
+        if prefix is not None:
+            spec = self.angle_encoding_specs.get(prefix)
+        elif len(self.angle_encoding_specs) == 1:
+            spec = next(iter(self.angle_encoding_specs.values()))
+
+        if spec:
+            return self._apply_angle_encoding(x, spec)
+
+        # For custom circuits without explicit encoding metadata, apply π scaling
+        return x * torch.pi
+
+    def _apply_angle_encoding(self, x: torch.Tensor, spec: dict[str, Any]) -> torch.Tensor:
+        """Apply custom angle encoding using stored metadata."""
+        combos: list[tuple[int, ...]] = spec.get("combinations", [])
+        scale_map: dict[int, float] = spec.get("scales", {})
+
+        if x.dim() == 1:
+            x_batch = x.unsqueeze(0)
+            squeeze = True
+        elif x.dim() == 2:
+            x_batch = x
+            squeeze = False
         else:
-            # For custom circuits, apply 2π scaling directly
-            return x * torch.pi
+            raise ValueError(
+                f"Angle encoding expects 1D or 2D tensors, got shape {tuple(x.shape)}"
+            )
+
+        if not combos:
+            encoded = x_batch * torch.pi
+            return encoded.squeeze(0) if squeeze else encoded
+
+        encoded_cols: list[torch.Tensor] = []
+        feature_dim = x_batch.shape[-1]
+
+        for combo in combos:
+            indices = list(combo)
+            if any(idx >= feature_dim for idx in indices):
+                raise ValueError(
+                    f"Input feature dimension {feature_dim} insufficient for angle encoding combination {combo}"
+                )
+
+            selected = x_batch[:, indices]
+            scales = [scale_map.get(idx, 1.0) for idx in indices]
+            scale_tensor = x_batch.new_tensor(scales)
+            value = (selected * scale_tensor).sum(dim=1, keepdim=True)
+            encoded_cols.append(value)
+
+        encoded = torch.cat(encoded_cols, dim=1) if encoded_cols else x_batch.new_zeros((x_batch.shape[0], 0))
+
+        if squeeze:
+            return encoded.squeeze(0)
+        return encoded
 
     def prepare_parameters(
         self, input_parameters: list[torch.Tensor]
@@ -476,13 +533,19 @@ class QuantumLayer(nn.Module):
             params = list(self.thetas)
 
         # Apply input encoding
+        prefixes = getattr(self.computation_process, "input_parameters", [])
+
         if self.auto_generation_mode and len(input_parameters) == 1:
-            encoded = self._prepare_input_encoding(input_parameters[0])
+            prefix = prefixes[0] if prefixes else None
+            encoded = self._prepare_input_encoding(input_parameters[0], prefix)
             params.append(encoded)
         else:
             # Custom mode or multiple parameters
-            for x in input_parameters:
-                encoded = self._prepare_input_encoding(x)
+            for idx, x in enumerate(input_parameters):
+                prefix = None
+                if prefixes:
+                    prefix = prefixes[idx] if idx < len(prefixes) else prefixes[-1]
+                encoded = self._prepare_input_encoding(x, prefix)
                 params.append(encoded)
 
         # Add static phi parameters if in reservoir mode
@@ -660,7 +723,10 @@ class QuantumLayer(nn.Module):
         builder.add_entangling_layer(depth=1)
 
         # Input encoding across all modes (prefix ``input``)
-        input_modes = list(range(min(input_size, n_modes)))
+        if input_size > n_modes:
+            raise ValueError(ANGLE_ENCODING_MODE_ERROR)
+
+        input_modes = list(range(input_size))
         builder.add_angle_encoding(modes=input_modes, name="input")
 
         # Allocate trainable rotations to match the requested parameter budget

@@ -2,7 +2,13 @@
 Circuit builder for constructing quantum circuits declaratively.
 """
 
+import math
+import numbers
 from typing import List, Optional, Union, Tuple, Dict, Any
+
+ANGLE_ENCODING_MODE_ERROR = (
+    "You cannot encore more features than mode with Builder, try making your own circuit by building your Circuit with Perceval"
+)
 import warnings
 from copy import deepcopy
 from ..core.circuit import Circuit
@@ -51,6 +57,8 @@ class CircuitBuilder:
         self._trainable_prefix_set: set[str] = set()
         self._input_prefixes: List[str] = []
         self._input_prefix_set: set[str] = set()
+        self._angle_encoding_specs: Dict[str, List[Tuple[int, ...]]] = {}
+        self._angle_encoding_scales: Dict[str, Dict[int, float]] = {}
 
     @staticmethod
     def _deduce_prefix(name: Optional[str]) -> Optional[str]:
@@ -187,11 +195,65 @@ class CircuitBuilder:
         self._layer_counter += 1
         return self
 
-    def add_angle_encoding(self, modes: Optional[List[int]] = None, name: Optional[str] = None) -> "CircuitBuilder":
-        """Convenience method for angle-based input encoding."""
+    def add_angle_encoding(
+            self,
+            modes: Optional[List[int]] = None,
+            name: Optional[str] = None,
+            *,
+            scale: float = 1.0,
+    ) -> "CircuitBuilder":
+        """Convenience method for angle-based input encoding.
+
+        Args:
+            modes: Optional list of circuit modes to target. Defaults to all modes.
+            name: Prefix used for generated input parameters. Defaults to ``"px"``.
+            scale: Global scaling factor applied before angle mapping.
+        """
         if name is None:
             name = "px"
-        return self.add_rotation_layer(modes=modes, role=ParameterRole.INPUT, name=name)
+
+        if modes is None:
+            target_modes = list(range(self.n_modes))
+        elif isinstance(modes, ModuleGroup):
+            target_modes = modes.modes
+        else:
+            target_modes = list(modes)
+
+        if not target_modes:
+            return self
+
+        invalid_modes = [mode for mode in target_modes if mode < 0 or mode >= self.n_modes]
+        if invalid_modes:
+            raise ValueError(ANGLE_ENCODING_MODE_ERROR)
+
+        feature_indices = list(target_modes)
+        scale_map = self._normalize_angle_scale(scale, feature_indices)
+        combos = [(idx,) for idx in feature_indices]
+
+        self.add_rotation_layer(modes=target_modes, role=ParameterRole.INPUT, name=name)
+
+        spec_list = self._angle_encoding_specs.setdefault(name, [])
+        spec_list.extend(combos)
+
+        stored_scale = self._angle_encoding_scales.setdefault(name, {})
+        for idx, value in scale_map.items():
+            if idx in stored_scale and not math.isclose(stored_scale[idx], value, rel_tol=1e-9, abs_tol=1e-9):
+                raise ValueError(
+                    f"Conflicting scale for feature index {idx} in angle encoding '{name}': "
+                    f"{stored_scale[idx]} vs {value}"
+                )
+            stored_scale[idx] = value
+
+        return self
+
+    @staticmethod
+    def _normalize_angle_scale(scale: float, feature_indices: List[int]) -> Dict[int, float]:
+        """Normalize scale specification to a per-feature mapping."""
+        if not isinstance(scale, numbers.Real):
+            raise TypeError("scale must be a real number")
+
+        factor = float(scale)
+        return {idx: factor for idx in feature_indices}
 
     def add_superposition(
             self,
@@ -561,3 +623,14 @@ class CircuitBuilder:
     @property
     def input_parameter_prefixes(self) -> List[str]:
         return list(self._input_prefixes)
+
+    @property
+    def angle_encoding_specs(self) -> Dict[str, Dict[str, Any]]:
+        """Return metadata describing configured angle encodings."""
+        return {
+            prefix: {
+                "combinations": list(combos),
+                "scales": dict(self._angle_encoding_scales.get(prefix, {})),
+            }
+            for prefix, combos in self._angle_encoding_specs.items()
+        }
