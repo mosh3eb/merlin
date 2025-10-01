@@ -246,7 +246,9 @@ class ComputationProcess(AbstractComputationProcess):
                 batch_fock_states.append(fock_state)
 
             # Compute batch amplitudes
-            _, batch_amplitudes = self.simulation_graph.compute_batch(unitary, batch_fock_states)
+            _, batch_amplitudes = self.simulation_graph.compute_batch(
+                unitary, batch_fock_states
+            )
             # Stack amplitudes for each input state in the batch
             for k, idx in enumerate(batch_indices):
                 amplitudes[idx, :] = batch_amplitudes[:, :, k]

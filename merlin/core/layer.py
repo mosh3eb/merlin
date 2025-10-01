@@ -494,9 +494,13 @@ class QuantumLayer(nn.Module):
         # Get quantum output
         if type(self.computation_process.input_state) is torch.Tensor:
             if batch:
-                amplitudes = self.computation_process.compute_ebs_simultaneously(params, simultaneous_processes=simultaneous_processes)
+                amplitudes = self.computation_process.compute_ebs_simultaneously(
+                    params, simultaneous_processes=simultaneous_processes
+                )
             else:
-                amplitudes = self.computation_process.compute_superposition_state(params)
+                amplitudes = self.computation_process.compute_superposition_state(
+                    params
+                )
         else:
             amplitudes = self.computation_process.compute(params)
 

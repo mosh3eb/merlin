@@ -206,12 +206,16 @@ def layer_compute_batch(
 
     # Create result tensor with same dtype as input
     result = torch.zeros(
-        (batch_size, next_size, num_input_states), dtype=prev_amplitudes.dtype, device=destinations.device
+        (batch_size, next_size, num_input_states),
+        dtype=prev_amplitudes.dtype,
+        device=destinations.device,
     )
 
     # Scatter add contributions to result
     # Need to expand destinations for all input states
-    destinations_expanded = destinations.unsqueeze(0).unsqueeze(-1).expand(batch_size, -1, num_input_states)
+    destinations_expanded = (
+        destinations.unsqueeze(0).unsqueeze(-1).expand(batch_size, -1, num_input_states)
+    )
     result.scatter_add_(
         1,  # dimension to scatter on (1 for the state indices)
         destinations_expanded.to(destinations.device),
@@ -631,13 +635,13 @@ class SLOSComputeGraph:
                 f"for the graph built with dtype {self.dtype}. Please provide a unitary with the correct dtype "
                 f"or rebuild the graph with a compatible dtype."
             )
-        idx_n = [[] for _ in range(sum(input_states[0]))]
-        self.norm_factor_input = torch.ones((1, 1, len(input_states)))
+        idx_n: list[list[int]] = [[] for _ in range(sum(input_states[0]))]
+        norm_factor_input = torch.ones((1, 1, len(input_states)))
         for j, input_state in enumerate(input_states):
             k = 0
             for i, count in enumerate(input_state):
                 for c in range(count):
-                    self.norm_factor_input[0, 0, j] *= c + 1
+                    norm_factor_input[0, 0, j] *= c + 1
                     idx_n[k].append(i)
                     k += 1
                     if (i > self.index_photons[len(idx_n) - 1][1]) or (
@@ -668,8 +672,10 @@ class SLOSComputeGraph:
                 p,
             )
 
-        amplitudes *= torch.sqrt(self.norm_factor_output.to(amplitudes.device).unsqueeze(0).unsqueeze(2))
-        amplitudes /= torch.sqrt(self.norm_factor_input.to(amplitudes.device))
+        amplitudes *= torch.sqrt(
+            self.norm_factor_output.to(amplitudes.device).unsqueeze(0).unsqueeze(2)
+        )
+        amplitudes /= torch.sqrt(norm_factor_input.to(amplitudes.device))
         self.prev_amplitudes = amplitudes  # type: ignore[assignment]
 
         # Apply output mapping if needed
