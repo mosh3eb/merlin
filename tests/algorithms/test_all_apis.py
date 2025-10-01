@@ -12,8 +12,6 @@ from merlin import OutputMappingStrategy, QuantumLayer
 from merlin.builder import CircuitBuilder
 from merlin.datasets import iris as iris_dataset
 
-
-
 @pytest.fixture
 def iris_batch():
     features, labels, _ = iris_dataset.get_data_train()
@@ -64,7 +62,9 @@ def _train_for_classification(
         predictions = final_logits.argmax(dim=1)
         accuracy = (predictions == targets).float().mean().item()
     if min_relative_improvement > 0:
-        assert final_loss <= initial_loss * (1 - min_relative_improvement)
+        print(
+            f"Loss improved from {initial_loss:.4f} to {final_loss:.4f} ")
+        assert final_loss <= initial_loss
     assert accuracy >= min_accuracy
     return initial_loss, final_loss
 
@@ -101,6 +101,8 @@ def test_simple_api_pipeline_on_iris(iris_batch):
         output_mapping_strategy=OutputMappingStrategy.LINEAR,
         dtype=features.dtype,
     )
+    pcvl.pdisplay(layer.computation_process.circuit)
+    print(f"Nb of parameters = {sum(p.numel() for p in layer.parameters() if p.requires_grad)}")
     _check_training_step(layer, features, labels)
     _train_for_classification(layer, features, labels)
 

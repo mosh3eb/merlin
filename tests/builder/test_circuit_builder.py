@@ -233,6 +233,40 @@ def test_angle_encoding_raises_when_modes_exceeded():
         builder.add_angle_encoding(modes=[0, 1, 2, 3])
 
 
+def test_angle_encoding_tracks_logical_indices_for_sparse_modes():
+    builder = CircuitBuilder(n_modes=6, n_photons=1)
+
+    builder.add_angle_encoding(modes=[0, 2, 4], name="input")
+
+    spec = builder.angle_encoding_specs["input"]
+    # Logical indices should stay compact regardless of which physical modes were used
+    assert spec["combinations"] == [(0,), (1,), (2,)]
+    assert spec["scales"] == {0: 1.0, 1: 1.0, 2: 1.0}
+
+
+def test_trainable_name_deduplication_for_rotation_layer():
+    builder = CircuitBuilder(n_modes=2, n_photons=1)
+
+    builder.add_rotation_layer(modes=[0,1], trainable=True, name="theta")
+    builder.add_rotation_layer(modes=[0,1], trainable=True, name="theta")
+    pcvl.pdisplay(builder.to_pcvl_circuit(pcvl))
+    rotations = [comp for comp in builder.circuit.components if isinstance(comp, Rotation)]
+    assert [rot.custom_name for rot in rotations] == ["theta_0", "theta_1", "theta_0_1", "theta_1_1"]
+    # Prefix list should still expose the user-provided stem
+    assert builder.trainable_parameter_prefixes == ["theta"]
+
+
+def test_trainable_name_deduplication_for_single_rotation():
+    builder = CircuitBuilder(n_modes=2)
+
+    builder.add_rotation(target=0, trainable=True, name="phi")
+    builder.add_rotation(target=1, trainable=True, name="phi")
+
+    rotations = [comp for comp in builder.circuit.components if isinstance(comp, Rotation)]
+    assert [rot.custom_name for rot in rotations] == ["phi", "phi_1"]
+    assert builder.trainable_parameter_prefixes == ["phi"]
+
+
 def test_generic_interferometer_defaults():
     builder = CircuitBuilder(n_modes=4, n_photons=1)
     builder.add_generic_interferometer()

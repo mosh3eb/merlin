@@ -61,16 +61,25 @@ class CircuitBuilder:
         self._input_prefix_set: set[str] = set()
         self._angle_encoding_specs: Dict[str, List[Tuple[int, ...]]] = {}
         self._angle_encoding_scales: Dict[str, Dict[int, float]] = {}
+        self._angle_encoding_counts: Dict[str, int] = {}
+
+        self._trainable_name_counts: Dict[str, int] = {}
+        self._used_trainable_names: set[str] = set()
 
     @staticmethod
     def _deduce_prefix(name: Optional[str]) -> Optional[str]:
         # we want to extract the base prefix from a name to automatically fill-in trainable and input parameters
         if not name:
             return None
-        # remove digits from the end of the name
-        base = name.rstrip('0123456789')
-        while base.endswith('_'):
-            base = base[:-1]
+
+        base = name
+        while True:
+            trimmed = base.rstrip('0123456789')
+            trimmed = trimmed.rstrip('_')
+            if trimmed == base:
+                break
+            base = trimmed
+
         return base or name
 
     def _register_trainable_prefix(self, name: Optional[str]):
@@ -85,6 +94,21 @@ class CircuitBuilder:
             self._input_prefix_set.add(prefix)
             self._input_prefixes.append(prefix)
 
+    def _unique_trainable_name(self, base: str) -> str:
+        """Return a unique trainable identifier derived from ``base``."""
+        count = self._trainable_name_counts.get(base, 0)
+        candidate = base if count == 0 else f"{base}_{count}"
+
+        # Retry with incremented suffix while the candidate is already bound
+        while candidate in self._used_trainable_names:
+            count += 1
+            candidate = f"{base}_{count}"
+
+        # Next request for the same base will continue from the updated count
+        self._trainable_name_counts[base] = count + 1 if candidate != base else 1
+        self._used_trainable_names.add(candidate)
+        return candidate
+
     def add_rotation(
             self,
             target: int,
@@ -95,23 +119,29 @@ class CircuitBuilder:
         """Add a single rotation."""
         role = ParameterRole.TRAINABLE if trainable else ParameterRole.FIXED
 
-        if name is None and trainable:
-            name = f"theta_{self._trainable_counter}"
-            self._trainable_counter += 1
+        if role == ParameterRole.TRAINABLE:
+            if name is None:
+                base_name = f"theta_{self._trainable_counter}"
+                self._trainable_counter += 1
+            else:
+                base_name = name
+            custom_name = self._unique_trainable_name(base_name)
+        else:
+            custom_name = name
 
         rotation = Rotation(
             target=target,
             role=role,
             value=angle,
-            custom_name=name
+            custom_name=custom_name
         )
 
         self.circuit.add(rotation)
 
         if role == ParameterRole.TRAINABLE:
-            self._register_trainable_prefix(name)
+            self._register_trainable_prefix(custom_name)
         elif role == ParameterRole.INPUT:
-            self._register_input_prefix(name)
+            self._register_input_prefix(custom_name or name)
         return self
 
     def add_rotation_layer(
@@ -167,6 +197,9 @@ class CircuitBuilder:
                     # Use global input counter for unique naming
                     custom_name = f"{name}{self._input_counter + 1}"
                     self._input_counter += 1
+                elif final_role == ParameterRole.TRAINABLE:
+                    base_name = f"{name}_{mode}" if len(target_modes) > 1 else name
+                    custom_name = self._unique_trainable_name(base_name)
                 else:
                     # Keep existing naming for non-input params
                     custom_name = f"{name}_{mode}" if len(target_modes) > 1 else name
@@ -175,8 +208,9 @@ class CircuitBuilder:
                 custom_name = f"px{self._input_counter + 1}"
                 self._input_counter += 1
             elif final_role == ParameterRole.TRAINABLE:
-                custom_name = f"theta_{self._trainable_counter}_{mode}"
+                base_name = f"theta_{self._trainable_counter}_{mode}"
                 self._trainable_counter += 1
+                custom_name = self._unique_trainable_name(base_name)
             else:
                 custom_name = None
 
@@ -228,7 +262,11 @@ class CircuitBuilder:
         if invalid_modes:
             raise ValueError(ANGLE_ENCODING_MODE_ERROR)
 
-        feature_indices = list(target_modes)
+        # Assign contiguous logical feature indices so downstream encoders do not rely on physical modes
+        start_idx = self._angle_encoding_counts.get(name, 0)
+        feature_indices = list(range(start_idx, start_idx + len(target_modes)))
+        self._angle_encoding_counts[name] = start_idx + len(target_modes)
+
         scale_map = self._normalize_angle_scale(scale, feature_indices)
         combos = [(idx,) for idx in feature_indices]
 
