@@ -625,6 +625,28 @@ class TestKernelCircuitBuilder:
         expected = torch.tensor([0.05, 0.1, 0.15], dtype=torch.float32)
         assert torch.allclose(encoded.detach(), expected, atol=1e-6)
 
+    def test_kernel_supports_generic_interferometer(self):
+        builder = CircuitBuilder(n_modes=4, n_photons=2)
+        builder.add_generic_interferometer(name="gi")
+        builder.add_angle_encoding(modes=[0, 1, 2, 3], name="input")
+
+        feature_map = FeatureMap(
+            circuit=builder,
+            input_size=4,
+            input_parameters=None,
+        )
+
+        kernel = FidelityKernel(
+            feature_map=feature_map,
+            input_state=[1, 1, 0, 0],
+        )
+
+        x = torch.rand(3, 4)
+        K = kernel(x)
+
+        assert K.shape == (3, 3)
+        assert torch.isfinite(K).all()
+
     def test_builder_missing_input_size(self):
         """Test builder error when input_size is not specified."""
         builder = KernelCircuitBuilder()

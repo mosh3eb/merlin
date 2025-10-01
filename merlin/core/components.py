@@ -75,6 +75,29 @@ class EntanglingBlock:
 
 
 @dataclass
+class GenericInterferometer:
+    """Generic interferometer block spanning multiple modes."""
+
+    start_mode: int
+    span: int
+    trainable: bool = True
+    name_prefix: Optional[str] = None
+
+    def get_params(self) -> Dict[str, Any]:
+        """Return parameter placeholders for trainable interferometers."""
+        if not self.trainable or self.span < 2:
+            return {}
+
+        prefix = self.name_prefix or "gi"
+        count = self.span * (self.span - 1) // 2
+        params: Dict[str, Any] = {}
+        for idx in range(count):
+            params[f"{prefix}_li{idx}"] = None
+            params[f"{prefix}_lo{idx}"] = None
+        return params
+
+
+@dataclass
 class Measurement:
     """Measurement description."""
     targets: List[int]

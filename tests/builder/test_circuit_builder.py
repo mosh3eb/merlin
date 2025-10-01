@@ -15,9 +15,8 @@ os.environ["HOME"] = str(_PCVL_HOME)
 import perceval as pcvl
 from merlin import OutputMappingStrategy, QuantumLayer
 from merlin.builder import CircuitBuilder
-from merlin.core.components import BeamSplitter, EntanglingBlock, ParameterRole, Rotation
+from merlin.core.components import GenericInterferometer, BeamSplitter, EntanglingBlock, ParameterRole, Rotation
 from merlin.pcvl_pytorch.locirc_to_tensor import CircuitConverter
-
 _PS_TYPE = type(pcvl.PS(0.0))
 _BS_TYPE = type(pcvl.BS())
 
@@ -232,3 +231,105 @@ def test_angle_encoding_raises_when_modes_exceeded():
 
     with pytest.raises(ValueError, match="You cannot encore more features than mode with Builder"):
         builder.add_angle_encoding(modes=[0, 1, 2, 3])
+
+
+def test_generic_interferometer_defaults():
+    builder = CircuitBuilder(n_modes=4, n_photons=1)
+    builder.add_generic_interferometer()
+
+    component = builder.circuit.components[-1]
+    assert isinstance(component, GenericInterferometer)
+    assert component.start_mode == 0
+    assert component.span == 4
+    assert component.trainable is True
+    assert any(prefix.startswith("gi") for prefix in builder.trainable_parameter_prefixes)
+
+
+def test_generic_interferometer_mode_range_and_non_trainable():
+    builder = CircuitBuilder(n_modes=5, n_photons=1)
+    builder.add_generic_interferometer(modes=[2], trainable=False)
+
+    component = builder.circuit.components[-1]
+    assert isinstance(component, GenericInterferometer)
+    assert component.start_mode == 2
+    assert component.span == 3
+    assert component.trainable is False
+    assert builder.trainable_parameter_prefixes == []
+
+    builder.add_generic_interferometer(modes=[1, 3], trainable=True, name="block")
+    last = builder.circuit.components[-1]
+    assert last.start_mode == 1 and last.span == 3
+    assert "block" in builder.trainable_parameter_prefixes
+
+
+def test_generic_interferometer_invalid_modes():
+    builder = CircuitBuilder(n_modes=4)
+
+    with pytest.raises(ValueError):
+        builder.add_generic_interferometer(modes=[5])
+
+    with pytest.raises(ValueError):
+        builder.add_generic_interferometer(modes=[1, 1])
+
+    with pytest.raises(ValueError):
+        builder.add_generic_interferometer(modes=[0, 1, 2])
+
+
+def test_generic_interferometer_to_pcvl_registers_parameters():
+    builder = CircuitBuilder(n_modes=4)
+    builder.add_generic_interferometer(name="bridge")
+
+    pcvl_circuit = builder.to_pcvl_circuit(pcvl)
+    params = pcvl_circuit.get_parameters()
+    assert any(p.name.startswith("bridge_li") for p in params)
+    assert any(p.name.startswith("bridge_lo") for p in params)
+
+
+def test_generic_interferometer_layer_trains():
+    builder = CircuitBuilder(n_modes=4, n_photons=1)
+    builder.add_angle_encoding(modes=[0, 1, 2, 3], name="input")
+    builder.add_generic_interferometer(trainable=True, name="gi")
+
+    layer = QuantumLayer(
+        input_size=4,
+        circuit=builder,
+        n_photons=1,
+        output_size=4,
+        output_mapping_strategy=OutputMappingStrategy.LINEAR,
+        dtype=torch.float32,
+    )
+
+    x = torch.rand(5, 4)
+    logits = layer(x)
+    loss = logits.sum()
+    loss.backward()
+    pcvl.pdisplay(layer.computation_process.circuit)
+    assert logits.shape == (5, 4)
+    assert any(p.grad is not None and torch.any(p.grad != 0) for p in layer.parameters())
+
+
+def test_generic_interferometer_with_additional_components_trains():
+    builder = CircuitBuilder(n_modes=5, n_photons=1)
+    builder.add_angle_encoding(modes=[0, 1, 2, 3, 4], name="input")
+    builder.add_generic_interferometer(trainable=True, name="core", modes = [2])
+    builder.add_rotation_layer(trainable=True, name="theta")
+    builder.add_entangling_layer(depth=1)
+
+    layer = QuantumLayer(
+        input_size=5,
+        circuit=builder,
+        n_photons=1,
+        output_size=5,
+        output_mapping_strategy=OutputMappingStrategy.LINEAR,
+        dtype=torch.float32,
+    )
+    pcvl.pdisplay(layer.computation_process.circuit)
+
+    x = torch.rand(3, 5)
+    logits = layer(x)
+    loss = logits.sum()
+    loss.backward()
+
+    assert logits.shape == (3, 5)
+    grads = [p.grad for p in layer.parameters() if p.requires_grad]
+    assert any(g is not None and torch.any(g != 0) for g in grads)

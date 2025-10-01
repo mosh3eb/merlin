@@ -17,6 +17,7 @@ from ..core.components import (
     Rotation,
     BeamSplitter,
     EntanglingBlock,
+    GenericInterferometer,
     Measurement,
     ParameterRole
 )
@@ -45,6 +46,7 @@ class CircuitBuilder:
         self._trainable_counter = 0
         self._input_counter = 0
         self._copy_counter = 0
+        self._generic_counter = 0
 
         # Section tracking for adjoint support
         self._section_markers = []
@@ -254,6 +256,72 @@ class CircuitBuilder:
 
         factor = float(scale)
         return {idx: factor for idx in feature_indices}
+
+    def add_generic_interferometer(
+            self,
+            modes: Optional[List[int]] = None,
+            *,
+            trainable: bool = True,
+            name: Optional[str] = None,
+    ) -> "CircuitBuilder":
+        """Add a generic interferometer spanning a range of modes.
+
+        Args:
+            modes: Optional list describing the span. ``None`` targets all modes;
+                one element targets ``modes[0]`` through the final mode; two elements
+                target the inclusive range ``[modes[0], modes[1]]``.
+            trainable: Whether internal phase shifters should be trainable.
+            name: Optional prefix used for generated parameter names.
+
+        Raises:
+            ValueError: If the provided modes are invalid or span fewer than two modes.
+        """
+        if modes is None:
+            start = 0
+            end = self.n_modes - 1
+        else:
+            if len(modes) == 0:
+                return self
+            if len(modes) == 1:
+                start = modes[0]
+                end = self.n_modes - 1
+            elif len(modes) == 2:
+                start, end = modes
+            else:
+                raise ValueError(
+                    "`modes` must be None, a single index, or a two-element range for generic interferometers."
+                )
+
+        if start > end:
+            start, end = end, start
+
+        if start < 0 or end >= self.n_modes:
+            raise ValueError("Generic interferometer span exceeds available modes")
+
+        span = end - start + 1
+        if span < 2:
+            raise ValueError("Generic interferometer requires at least two modes")
+
+        if name is None:
+            prefix = f"gi_{self._generic_counter}"
+        else:
+            prefix = name
+
+        component = GenericInterferometer(
+            start_mode=start,
+            span=span,
+            trainable=trainable,
+            name_prefix=prefix,
+        )
+
+        self.circuit.add(component)
+
+        if trainable:
+            self._register_trainable_prefix(prefix)
+
+        self._generic_counter += 1
+        self._layer_counter += 1
+        return self
 
     def add_superposition(
             self,
@@ -602,6 +670,33 @@ class CircuitBuilder:
                 for _ in range(component.depth):
                     for left, right in zip(mode_list[:-1], mode_list[1:]):
                         pcvl_circuit.add((left, right), pcvl_module.BS())
+
+            elif isinstance(component, GenericInterferometer):
+                if component.span < 2:
+                    continue
+
+                prefix = component.name_prefix or f"gi_{idx}"
+
+                def _mzi_factory(i: int, *, trainable: bool = component.trainable, base: str = prefix):
+                    if trainable:
+                        phi_inner = pcvl_module.P(f"{base}_li{i}")
+                        phi_outer = pcvl_module.P(f"{base}_lo{i}")
+                    else:
+                        phi_inner = 0.0
+                        phi_outer = 0.0
+                    return (
+                        pcvl_module.BS()
+                        // pcvl_module.PS(phi_inner)
+                        // pcvl_module.BS()
+                        // pcvl_module.PS(phi_outer)
+                    )
+
+                gi = pcvl_module.GenericInterferometer(
+                    component.span,
+                    lambda i, factory=_mzi_factory: factory(i),
+                    shape=pcvl_module.InterferometerShape.RECTANGLE,
+                )
+                pcvl_circuit.add(component.start_mode, gi)
 
             else:
                 # Components like Measurement are metadata only and do not map to a pcvl operation
