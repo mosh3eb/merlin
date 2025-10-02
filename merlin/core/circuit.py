@@ -9,6 +9,7 @@ from typing import Any
 @dataclass
 class Circuit:
     """Simple circuit container."""
+
     n_modes: int
     components: list[Any] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)

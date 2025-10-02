@@ -10,6 +10,7 @@ from merlin.pcvl_pytorch.locirc_to_tensor import CircuitConverter
 
 class Ansatz:
     """Complete configuration for a quantum neural network layer."""
+
     def __init__(
         self,
         PhotonicBackend,
@@ -47,6 +48,7 @@ class Ansatz:
 
 class AnsatzFactory:
     """Factory for creating quantum layer ansatzes."""
+
     @staticmethod
     def create(
         PhotonicBackend,
@@ -68,7 +70,16 @@ class ComputationProcessFactory:
     """Factory for creating computation processes."""
 
     @staticmethod
-    def create(circuit, input_state, trainable_parameters, input_parameters, reservoir_mode, dtype, device, **kwargs):
+    def create(
+        circuit,
+        input_state,
+        trainable_parameters,
+        input_parameters,
+        reservoir_mode,
+        dtype,
+        device,
+        **kwargs,
+    ):
         """Create and return a computation process based on the provided parameters."""
         # Example implementation (replace with actual logic as needed)
         if reservoir_mode:
@@ -79,7 +90,7 @@ class ComputationProcessFactory:
                 input_parameters=input_parameters,
                 dtype=dtype,
                 device=device,
-                **kwargs
+                **kwargs,
             )
         else:
             return StandardComputationProcess(
@@ -89,13 +100,23 @@ class ComputationProcessFactory:
                 input_parameters=input_parameters,
                 dtype=dtype,
                 device=device,
-                **kwargs
+                **kwargs,
             )
 
 
 class ReservoirComputationProcess:
     """Implementation for reservoir computation process."""
-    def __init__(self, circuit, input_state, trainable_parameters, input_parameters, dtype, device, **kwargs):
+
+    def __init__(
+        self,
+        circuit,
+        input_state,
+        trainable_parameters,
+        input_parameters,
+        dtype,
+        device,
+        **kwargs,
+    ):
         self.circuit = circuit
         self.input_state = input_state
         self.trainable_parameters = trainable_parameters
@@ -112,7 +133,17 @@ class ReservoirComputationProcess:
 
 class StandardComputationProcess:
     """Implementation for standard computation process."""
-    def __init__(self, circuit, input_state, trainable_parameters, input_parameters, dtype, device, **kwargs):
+
+    def __init__(
+        self,
+        circuit,
+        input_state,
+        trainable_parameters,
+        input_parameters,
+        dtype,
+        device,
+        **kwargs,
+    ):
         self.circuit = circuit
         self.input_state = input_state
         self.trainable_parameters = trainable_parameters

@@ -9,6 +9,7 @@ from enum import Enum
 
 class PauliBasis(Enum):
     """Pauli measurement bases."""
+
     X = "X"
     Y = "Y"
     Z = "Z"
@@ -23,6 +24,7 @@ class PauliObservable:
     For photonic (no_bunching=True): Z maps to (1-2n̂), giving ±1 eigenvalues
     For qubit: Standard Pauli operators
     """
+
     pauli_string: str  # e.g., "ZZI", "XYZ"
     coefficient: float = 1.0
 
@@ -46,6 +48,7 @@ class NumberOperator:
     Gives actual photon count expectation when no_bunching=False,
     or converts to Z measurement (±1) when no_bunching=True.
     """
+
     mode_index: int
     power: int = 1  # For ⟨n̂^k⟩
     operator_type: str = "number"
@@ -61,6 +64,7 @@ class NumberOperator:
 @dataclass
 class CompositeObservable:
     """Sum of observables (e.g., for Hamiltonians)."""
+
     terms: list[PauliObservable | NumberOperator]
 
     def __iter__(self):
@@ -76,7 +80,9 @@ class CompositeObservable:
         return f"CompositeObservable({terms_str})"
 
 
-def parse_observable(expr: str, n_modes: int | None = None) -> PauliObservable | CompositeObservable | NumberOperator:
+def parse_observable(
+    expr: str, n_modes: int | None = None
+) -> PauliObservable | CompositeObservable | NumberOperator:
     """Convert a string specification into the corresponding observable object.
 
     Args:
@@ -108,7 +114,9 @@ def parse_observable(expr: str, n_modes: int | None = None) -> PauliObservable |
     return _parse_single_term(expr, n_modes)
 
 
-def _parse_single_term(term: str, n_modes: int | None = None) -> PauliObservable | NumberOperator:
+def _parse_single_term(
+    term: str, n_modes: int | None = None
+) -> PauliObservable | NumberOperator:
     """Parse one summand appearing in a composite observable expression.
 
     Args:

@@ -18,7 +18,9 @@ def iris_batch():
     return x, y
 
 
-def _check_training_step(layer: QuantumLayer, inputs: torch.Tensor, targets: torch.Tensor):
+def _check_training_step(
+    layer: QuantumLayer, inputs: torch.Tensor, targets: torch.Tensor
+):
     layer.train()
     layer.zero_grad()
     logits = layer(inputs)
@@ -60,8 +62,7 @@ def _train_for_classification(
         predictions = final_logits.argmax(dim=1)
         accuracy = (predictions == targets).float().mean().item()
     if min_relative_improvement > 0:
-        print(
-            f"Loss improved from {initial_loss:.4f} to {final_loss:.4f} ")
+        print(f"Loss improved from {initial_loss:.4f} to {final_loss:.4f} ")
         assert final_loss <= initial_loss
     assert accuracy >= min_accuracy
     return initial_loss, final_loss
@@ -100,7 +101,9 @@ def test_simple_api_pipeline_on_iris(iris_batch):
         dtype=features.dtype,
     )
     pcvl.pdisplay(layer.computation_process.circuit)
-    print(f"Nb of parameters = {sum(p.numel() for p in layer.parameters() if p.requires_grad)}")
+    print(
+        f"Nb of parameters = {sum(p.numel() for p in layer.parameters() if p.requires_grad)}"
+    )
     _check_training_step(layer, features, labels)
     _train_for_classification(layer, features, labels)
 
@@ -109,22 +112,26 @@ def test_manual_pcvl_circuit_pipeline_on_iris(iris_batch):
     features, labels = iris_batch
 
     wl = pcvl.GenericInterferometer(
-            4,
-            lambda i: pcvl.BS() // pcvl.PS(pcvl.P(f"theta_li{i}")) //
-                    pcvl.BS() // pcvl.PS(pcvl.P(f"theta_lo{i}")),
-            shape=pcvl.InterferometerShape.RECTANGLE
-        )
+        4,
+        lambda i: pcvl.BS()
+        // pcvl.PS(pcvl.P(f"theta_li{i}"))
+        // pcvl.BS()
+        // pcvl.PS(pcvl.P(f"theta_lo{i}")),
+        shape=pcvl.InterferometerShape.RECTANGLE,
+    )
     circuit = pcvl.Circuit(4)
     circuit.add(0, wl)
     for mode in range(4):
         circuit.add(mode, pcvl.PS(pcvl.P(f"input{mode}")))
 
     wr = pcvl.GenericInterferometer(
-            4,
-            lambda i: pcvl.BS() // pcvl.PS(pcvl.P(f"theta_ri{i}")) //
-                    pcvl.BS() // pcvl.PS(pcvl.P(f"theta_ro{i}")),
-            shape=pcvl.InterferometerShape.RECTANGLE
-        )
+        4,
+        lambda i: pcvl.BS()
+        // pcvl.PS(pcvl.P(f"theta_ri{i}"))
+        // pcvl.BS()
+        // pcvl.PS(pcvl.P(f"theta_ro{i}")),
+        shape=pcvl.InterferometerShape.RECTANGLE,
+    )
 
     circuit.add(0, wr)
     layer = QuantumLayer(

@@ -278,9 +278,7 @@ class TestNoBunchingFunctionality:
         n_modes = 3
         n_photons = 4  # More photons than modes
 
-        circuit, _ = CircuitGenerator.generate_circuit(
-            CircuitType.SERIES, n_modes, 2
-        )
+        circuit, _ = CircuitGenerator.generate_circuit(CircuitType.SERIES, n_modes, 2)
         input_state = [1, 1, 1, 1][:n_modes] + [0] * max(0, n_modes - 4)
 
         # This should work but result in empty or minimal space

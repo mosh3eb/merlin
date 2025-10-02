@@ -20,9 +20,7 @@ from ..core.components import (
 )
 from ..core.observables import parse_observable
 
-ANGLE_ENCODING_MODE_ERROR = (
-    "You cannot encore more features than mode with Builder, try making your own circuit by building your Circuit with Perceval"
-)
+ANGLE_ENCODING_MODE_ERROR = "You cannot encore more features than mode with Builder, try making your own circuit by building your Circuit with Perceval"
 
 
 class ModuleGroup:
@@ -56,8 +54,8 @@ class CircuitBuilder:
         self._entangling_counter = 0
 
         # Section tracking for adjoint support
-        self._section_markers = []
-        self._current_section = None
+        self._section_markers: list[Any] = []
+        self._current_section: dict[str, Any] | None = None
 
         # Track components before any sections for "_all_" reference
         self._pre_section_end_idx = 0
@@ -141,11 +139,11 @@ class CircuitBuilder:
         return candidate
 
     def add_rotation(
-            self,
-            target: int,
-            angle: float = 0.0,
-            trainable: bool = False,
-            name: str | None = None
+        self,
+        target: int,
+        angle: float = 0.0,
+        trainable: bool = False,
+        name: str | None = None,
     ) -> "CircuitBuilder":
         """Add a single rotation.
 
@@ -179,10 +177,7 @@ class CircuitBuilder:
             custom_name = name
 
         rotation = Rotation(
-            target=target,
-            role=role,
-            value=angle,
-            custom_name=custom_name
+            target=target, role=role, value=angle, custom_name=custom_name
         )
 
         self.circuit.add(rotation)
@@ -194,15 +189,15 @@ class CircuitBuilder:
         return self
 
     def add_rotation_layer(
-            self,
-            modes: list[int] | ModuleGroup | None = None,
-            *,
-            axis: str = "z",
-            trainable: bool = False,
-            as_input: bool = False,
-            value: float | None = None,
-            name: str | None = None,
-            role: str | ParameterRole | None = None,
+        self,
+        modes: list[int] | ModuleGroup | None = None,
+        *,
+        axis: str = "z",
+        trainable: bool = False,
+        as_input: bool = False,
+        value: float | None = None,
+        name: str | None = None,
+        role: str | ParameterRole | None = None,
     ) -> "CircuitBuilder":
         """Add a rotation layer across a set of modes.
 
@@ -231,7 +226,7 @@ class CircuitBuilder:
                 role_map = {
                     "fixed": ParameterRole.FIXED,
                     "input": ParameterRole.INPUT,
-                    "trainable": ParameterRole.TRAINABLE
+                    "trainable": ParameterRole.TRAINABLE,
                 }
                 final_role = role_map.get(role, ParameterRole.FIXED)
             else:
@@ -279,7 +274,7 @@ class CircuitBuilder:
                 role=final_role,
                 value=final_value,
                 axis=axis,
-                custom_name=custom_name
+                custom_name=custom_name,
             )
             self.circuit.add(rotation)
 
@@ -292,13 +287,13 @@ class CircuitBuilder:
         return self
 
     def add_angle_encoding(
-            self,
-            modes: list[int] | None = None,
-            name: str | None = None,
-            *,
-            scale: float = 1.0,
-            subset_combinations: bool = False,
-            max_order: int | None = None,
+        self,
+        modes: list[int] | None = None,
+        name: str | None = None,
+        *,
+        scale: float = 1.0,
+        subset_combinations: bool = False,
+        max_order: int | None = None,
     ) -> "CircuitBuilder":
         """Convenience method for angle-based input encoding.
 
@@ -328,7 +323,9 @@ class CircuitBuilder:
         if not target_modes:
             return self
 
-        invalid_modes = [mode for mode in target_modes if mode < 0 or mode >= self.n_modes]
+        invalid_modes = [
+            mode for mode in target_modes if mode < 0 or mode >= self.n_modes
+        ]
         if invalid_modes:
             raise ValueError(ANGLE_ENCODING_MODE_ERROR)
 
@@ -361,7 +358,9 @@ class CircuitBuilder:
                 target_modes[(emitted + offset) % len(target_modes)]
                 for offset in range(span)
             ]
-            self.add_rotation_layer(modes=chunk_modes, role=ParameterRole.INPUT, name=name)
+            self.add_rotation_layer(
+                modes=chunk_modes, role=ParameterRole.INPUT, name=name
+            )
             emitted += span
 
         spec_list = self._angle_encoding_specs.setdefault(name, [])
@@ -369,7 +368,9 @@ class CircuitBuilder:
 
         stored_scale = self._angle_encoding_scales.setdefault(name, {})
         for idx, value in scale_map.items():
-            if idx in stored_scale and not math.isclose(stored_scale[idx], value, rel_tol=1e-9, abs_tol=1e-9):
+            if idx in stored_scale and not math.isclose(
+                stored_scale[idx], value, rel_tol=1e-9, abs_tol=1e-9
+            ):
                 raise ValueError(
                     f"Conflicting scale for feature index {idx} in angle encoding '{name}': "
                     f"{stored_scale[idx]} vs {value}"
@@ -379,7 +380,9 @@ class CircuitBuilder:
         return self
 
     @staticmethod
-    def _normalize_angle_scale(scale: float, feature_indices: list[int]) -> dict[int, float]:
+    def _normalize_angle_scale(
+        scale: float, feature_indices: list[int]
+    ) -> dict[int, float]:
         """Normalize scale specification to a per-feature mapping.
 
         Args:
@@ -396,11 +399,11 @@ class CircuitBuilder:
         return dict.fromkeys(feature_indices, factor)
 
     def add_generic_interferometer(
-            self,
-            modes: list[int] | None = None,
-            *,
-            trainable: bool = True,
-            name: str | None = None,
+        self,
+        modes: list[int] | None = None,
+        *,
+        trainable: bool = True,
+        name: str | None = None,
     ) -> "CircuitBuilder":
         """Add a generic interferometer spanning a range of modes.
 
@@ -465,13 +468,13 @@ class CircuitBuilder:
         return self
 
     def add_superposition(
-            self,
-            targets: tuple[int, int],
-            theta: float = 0.785398,
-            phi: float = 0.0,
-            trainable_theta: bool = False,
-            trainable_phi: bool = False,
-            name: str | None = None
+        self,
+        targets: tuple[int, int],
+        theta: float = 0.785398,
+        phi: float = 0.0,
+        trainable_theta: bool = False,
+        trainable_phi: bool = False,
+        name: str | None = None,
     ) -> "CircuitBuilder":
         """Add a beam splitter (superposition component).
 
@@ -499,7 +502,7 @@ class CircuitBuilder:
             theta_role=theta_role,
             phi_role=phi_role,
             theta_name=theta_name,
-            phi_name=phi_name
+            phi_name=phi_name,
         )
 
         self.circuit.add(bs)
@@ -516,10 +519,7 @@ class CircuitBuilder:
         return self
 
     def add_entangling_layer(
-            self,
-            depth: int = 1,
-            trainable: bool = False,
-            name: str | None = None
+        self, depth: int = 1, trainable: bool = False, name: str | None = None
     ) -> "CircuitBuilder":
         """Add entangling layer(s).
 
@@ -535,11 +535,7 @@ class CircuitBuilder:
         Returns:
             CircuitBuilder: ``self`` for chaining additional builder calls.
         """
-        block = EntanglingBlock(
-            depth=depth,
-            trainable=trainable,
-            name_prefix=name
-        )
+        block = EntanglingBlock(depth=depth, trainable=trainable, name_prefix=name)
 
         if trainable:
             base = name or f"eb{self._entangling_counter}"
@@ -552,9 +548,7 @@ class CircuitBuilder:
         return self
 
     def add_measurement(
-            self,
-            observable: str | Any,
-            name: str | None = None
+        self, observable: str | Any, name: str | None = None
     ) -> "CircuitBuilder":
         """Add a measurement to the circuit.
 
@@ -569,7 +563,7 @@ class CircuitBuilder:
         if isinstance(observable, str):
             observable = parse_observable(observable)
 
-        measurement = Measurement(observable=observable, name=name)
+        measurement = Measurement(targets=list(range(self.n_modes)))
         self.circuit.add(measurement)
 
         # Store in metadata
@@ -578,18 +572,18 @@ class CircuitBuilder:
 
         self.circuit.metadata["measurements"].append({
             "observable": observable,
-            "name": name
+            "name": name,
         })
 
         return self
 
     def begin_section(
-            self,
-            name: str,
-            compute_adjoint: bool = False,
-            reference: str | None = None,
-            share_trainable: bool = True,
-            share_input: bool = False
+        self,
+        name: str,
+        compute_adjoint: bool = False,
+        reference: str | None = None,
+        share_trainable: bool = True,
+        share_input: bool = False,
     ) -> "CircuitBuilder":
         """
         Mark the beginning of a circuit section.
@@ -605,7 +599,10 @@ class CircuitBuilder:
             CircuitBuilder: ``self`` so builder calls can be chained.
         """
         if self._current_section is not None:
-            warnings.warn(f"Section '{self._current_section['name']}' was not closed. Closing it now.", stacklevel=2)
+            warnings.warn(
+                f"Section '{self._current_section['name']}' was not closed. Closing it now.",
+                stacklevel=2,
+            )
             self.end_section()
 
         # Update pre-section end index if this is the first section
@@ -618,7 +615,7 @@ class CircuitBuilder:
             "reference": reference,
             "share_trainable": share_trainable,
             "share_input": share_input,
-            "start_idx": len(self.circuit.components)
+            "start_idx": len(self.circuit.components),
         }
 
         # If referencing, copy components now
@@ -632,11 +629,11 @@ class CircuitBuilder:
         return self
 
     def add_adjoint_section(
-            self,
-            name: str,
-            reference: str,
-            share_trainable: bool = True,
-            share_input: bool = True
+        self,
+        name: str,
+        reference: str,
+        share_trainable: bool = True,
+        share_input: bool = True,
     ) -> "CircuitBuilder":
         """Convenience method for adding adjoint of an existing section.
 
@@ -654,7 +651,7 @@ class CircuitBuilder:
             compute_adjoint=True,
             reference=reference,
             share_trainable=share_trainable,
-            share_input=share_input
+            share_input=share_input,
         )
 
     def _copy_from_reference(self, ref_name: str):
@@ -687,7 +684,7 @@ class CircuitBuilder:
             new_comp = self._transform_component(
                 comp,
                 self._current_section["share_trainable"],
-                self._current_section["share_input"]
+                self._current_section["share_input"],
             )
             self.circuit.add(new_comp)
 
@@ -709,11 +706,15 @@ class CircuitBuilder:
                 if not share_trainable:
                     # Generate new trainable parameter name
                     if comp.custom_name:
-                        new_comp.custom_name = f"{comp.custom_name}_copy{self._copy_counter}"
+                        new_comp.custom_name = (
+                            f"{comp.custom_name}_copy{self._copy_counter}"
+                        )
                     else:
                         new_comp.custom_name = f"theta_copy_{self._copy_counter}"
                     self._copy_counter += 1
-                self._register_trainable_prefix(new_comp.custom_name or comp.custom_name)
+                self._register_trainable_prefix(
+                    new_comp.custom_name or comp.custom_name
+                )
             elif comp.role == ParameterRole.INPUT:
                 if not share_input:
                     # Generate new input parameter name
@@ -793,7 +794,10 @@ class CircuitBuilder:
         """
         # Close any open section
         if self._current_section is not None:
-            warnings.warn(f"Section '{self._current_section['name']}' was not closed. Closing it now.", stacklevel=2)
+            warnings.warn(
+                f"Section '{self._current_section['name']}' was not closed. Closing it now.",
+                stacklevel=2,
+            )
             self.end_section()
 
         # Finalize the circuit to ensure metadata is complete
@@ -825,7 +829,9 @@ class CircuitBuilder:
         if pcvl_module is None:
             try:
                 import perceval as pcvl_module  # type: ignore
-            except ImportError as exc:  # pragma: no cover - exercised when dependency missing
+            except (
+                ImportError
+            ) as exc:  # pragma: no cover - exercised when dependency missing
                 raise ImportError(
                     "perceval is required to convert a circuit to a Perceval representation. "
                     "Install perceval-quandela or provide a custom module via 'pcvl_module'."
@@ -839,7 +845,9 @@ class CircuitBuilder:
                 if component.role == ParameterRole.FIXED:
                     phi = component.value
                 else:
-                    custom_name = component.custom_name or f"theta_{component.target}_{idx}"
+                    custom_name = (
+                        component.custom_name or f"theta_{component.target}_{idx}"
+                    )
                     phi = pcvl_module.P(custom_name)
                 pcvl_circuit.add(component.target, pcvl_module.PS(phi))
 
@@ -856,7 +864,9 @@ class CircuitBuilder:
                     phi_name = component.phi_name or f"phi_bs_{idx}"
                     phi_tr = pcvl_module.P(phi_name)
 
-                pcvl_circuit.add(component.targets, pcvl_module.BS(theta=theta, phi_tr=phi_tr))
+                pcvl_circuit.add(
+                    component.targets, pcvl_module.BS(theta=theta, phi_tr=phi_tr)
+                )
 
             elif isinstance(component, EntanglingBlock):
                 if component.targets == "all":
@@ -879,7 +889,8 @@ class CircuitBuilder:
                             phi_tr = pcvl_module.P(phi_name)
                             pair_index += 1
                             pcvl_circuit.add(
-                                (left, right), pcvl_module.BS(theta=theta, phi_tr=phi_tr)
+                                (left, right),
+                                pcvl_module.BS(theta=theta, phi_tr=phi_tr),
                             )
                         else:
                             pcvl_circuit.add((left, right), pcvl_module.BS())
@@ -890,7 +901,9 @@ class CircuitBuilder:
 
                 prefix = component.name_prefix or f"gi_{idx}"
 
-                def _mzi_factory(i: int, *, trainable: bool = component.trainable, base: str = prefix):
+                def _mzi_factory(
+                    i: int, *, trainable: bool = component.trainable, base: str = prefix
+                ):
                     """Build a Mach-Zehnder interferometer optionally parameterised per index."""
                     if trainable:
                         phi_inner = pcvl_module.P(f"{base}_li{i}")

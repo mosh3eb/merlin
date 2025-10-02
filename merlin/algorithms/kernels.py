@@ -210,8 +210,12 @@ class FeatureMap:
         combos = spec.get("combinations", [])
         scales = spec.get("scales", {})
 
-        if not isinstance(combos, list) or not all(isinstance(c, tuple) for c in combos):
-            raise ValueError("Invalid angle encoding metadata: 'combinations' must be a list of tuples")
+        if not isinstance(combos, list) or not all(
+            isinstance(c, tuple) for c in combos
+        ):
+            raise ValueError(
+                "Invalid angle encoding metadata: 'combinations' must be a list of tuples"
+            )
 
         if not isinstance(scales, dict):
             raise ValueError("Invalid angle encoding metadata: 'scales' must be a dict")

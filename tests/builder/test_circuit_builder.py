@@ -22,9 +22,9 @@ _BS_TYPE = type(pcvl.BS())
 
 
 _PCVL_HOME = Path(__file__).resolve().parents[2] / ".pcvl_home"
-(_PCVL_HOME / "Library" / "Application Support" / "perceval-quandela" / "job_group").mkdir(
-    parents=True, exist_ok=True
-)
+(
+    _PCVL_HOME / "Library" / "Application Support" / "perceval-quandela" / "job_group"
+).mkdir(parents=True, exist_ok=True)
 os.environ["HOME"] = str(_PCVL_HOME)
 
 
@@ -108,11 +108,19 @@ def test_complex_builder_pipeline_exports_pcvl_circuit():
     assert isinstance(pcvl_circuit, pcvl.Circuit)
     assert pcvl_circuit.m == 3
 
-    ps_ops = [gate for _, gate in pcvl_circuit._components if isinstance(gate, _PS_TYPE)]
+    ps_ops = [
+        gate for _, gate in pcvl_circuit._components if isinstance(gate, _PS_TYPE)
+    ]
     assert ps_ops, "Input encoding should add phase shifters"
-    assert any(param.name.startswith("input") for gate in ps_ops for param in gate.get_parameters())
+    assert any(
+        param.name.startswith("input")
+        for gate in ps_ops
+        for param in gate.get_parameters()
+    )
 
-    entangling_ops = [gate for _, gate in pcvl_circuit._components if isinstance(gate, _BS_TYPE)]
+    entangling_ops = [
+        gate for _, gate in pcvl_circuit._components if isinstance(gate, _BS_TYPE)
+    ]
     assert entangling_ops, "Entangling layer should contribute beam splitters"
 
 
@@ -145,7 +153,9 @@ def test_to_pcvl_circuit_supports_gradient_backpropagation():
     total_params = sum(len(params) for params in converter.spec_mappings.values())
     assert total_params == 4
 
-    theta_params = torch.tensor([0.1, -0.2, 0.3], dtype=torch.float32, requires_grad=True)
+    theta_params = torch.tensor(
+        [0.1, -0.2, 0.3], dtype=torch.float32, requires_grad=True
+    )
     phi_params = torch.tensor([0.4], dtype=torch.float32, requires_grad=True)
 
     unitary = converter.to_tensor(theta_params, phi_params)
@@ -301,7 +311,9 @@ def test_angle_encoding_subset_combinations_in_quantum_layer():
 def test_angle_encoding_raises_when_modes_exceeded():
     builder = CircuitBuilder(n_modes=3)
 
-    with pytest.raises(ValueError, match="You cannot encore more features than mode with Builder"):
+    with pytest.raises(
+        ValueError, match="You cannot encore more features than mode with Builder"
+    ):
         builder.add_angle_encoding(modes=[0, 1, 2, 3])
 
 
@@ -322,8 +334,15 @@ def test_trainable_name_deduplication_for_rotation_layer():
     builder.add_rotation_layer(modes=[0, 1], trainable=True, name="theta")
     builder.add_rotation_layer(modes=[0, 1], trainable=True, name="theta")
     pcvl.pdisplay(builder.to_pcvl_circuit(pcvl))
-    rotations = [comp for comp in builder.circuit.components if isinstance(comp, Rotation)]
-    assert [rot.custom_name for rot in rotations] == ["theta_0", "theta_1", "theta_0_1", "theta_1_1"]
+    rotations = [
+        comp for comp in builder.circuit.components if isinstance(comp, Rotation)
+    ]
+    assert [rot.custom_name for rot in rotations] == [
+        "theta_0",
+        "theta_1",
+        "theta_0_1",
+        "theta_1_1",
+    ]
     # Prefix list should still expose the user-provided stem
     assert builder.trainable_parameter_prefixes == ["theta"]
 
@@ -334,7 +353,9 @@ def test_trainable_name_deduplication_for_single_rotation():
     builder.add_rotation(target=0, trainable=True, name="phi")
     builder.add_rotation(target=1, trainable=True, name="phi")
 
-    rotations = [comp for comp in builder.circuit.components if isinstance(comp, Rotation)]
+    rotations = [
+        comp for comp in builder.circuit.components if isinstance(comp, Rotation)
+    ]
     assert [rot.custom_name for rot in rotations] == ["phi", "phi_1"]
     assert builder.trainable_parameter_prefixes == ["phi"]
 
@@ -348,7 +369,9 @@ def test_generic_interferometer_defaults():
     assert component.start_mode == 0
     assert component.span == 4
     assert component.trainable is True
-    assert any(prefix.startswith("gi") for prefix in builder.trainable_parameter_prefixes)
+    assert any(
+        prefix.startswith("gi") for prefix in builder.trainable_parameter_prefixes
+    )
 
 
 def test_generic_interferometer_mode_range_and_non_trainable():
@@ -411,7 +434,9 @@ def test_generic_interferometer_layer_trains():
     loss.backward()
     pcvl.pdisplay(layer.computation_process.circuit)
     assert logits.shape == (5, 4)
-    assert any(p.grad is not None and torch.any(p.grad != 0) for p in layer.parameters())
+    assert any(
+        p.grad is not None and torch.any(p.grad != 0) for p in layer.parameters()
+    )
 
 
 def test_generic_interferometer_with_additional_components_trains():

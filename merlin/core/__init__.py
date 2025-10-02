@@ -43,5 +43,5 @@ __all__ = [
     "BeamSplitter",
     "EntanglingBlock",
     "Measurement",
-    "Circuit"
+    "Circuit",
 ]

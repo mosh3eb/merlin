@@ -454,7 +454,9 @@ class QuantumLayer(nn.Module):
 
         return params  # type: ignore[return-value]
 
-    def _prepare_input_encoding(self, x: torch.Tensor, prefix: str | None = None) -> torch.Tensor:
+    def _prepare_input_encoding(
+        self, x: torch.Tensor, prefix: str | None = None
+    ) -> torch.Tensor:
         """Prepare input encoding based on mode."""
         if self.auto_generation_mode:
             # Use FeatureEncoder for auto-generated circuits
@@ -479,7 +481,9 @@ class QuantumLayer(nn.Module):
         # For custom circuits without explicit encoding metadata, apply π scaling
         return x * torch.pi
 
-    def _apply_angle_encoding(self, x: torch.Tensor, spec: dict[str, Any]) -> torch.Tensor:
+    def _apply_angle_encoding(
+        self, x: torch.Tensor, spec: dict[str, Any]
+    ) -> torch.Tensor:
         """Apply custom angle encoding using stored metadata."""
         combos: list[tuple[int, ...]] = spec.get("combinations", [])
         scale_map: dict[int, float] = spec.get("scales", {})
@@ -515,7 +519,11 @@ class QuantumLayer(nn.Module):
             value = (selected * scale_tensor).sum(dim=1, keepdim=True)
             encoded_cols.append(value)
 
-        encoded = torch.cat(encoded_cols, dim=1) if encoded_cols else x_batch.new_zeros((x_batch.shape[0], 0))
+        encoded = (
+            torch.cat(encoded_cols, dim=1)
+            if encoded_cols
+            else x_batch.new_zeros((x_batch.shape[0], 0))
+        )
 
         if squeeze:
             return encoded.squeeze(0)
@@ -740,7 +748,8 @@ class QuantumLayer(nn.Module):
                 f"{generic_params} trainable parameters, exceeding the requested "
                 f"budget of {requested_params}. The simple layer will expose "
                 f"{generic_params} trainable parameters.",
-                RuntimeWarning, stacklevel=2
+                RuntimeWarning,
+                stacklevel=2,
             )
 
         if input_size > n_modes:

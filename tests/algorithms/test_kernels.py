@@ -353,7 +353,9 @@ class TestFeatureMapFactoryMethods:
     def test_from_pcvl_circuit(self):
         """FeatureMap can be built directly from a pcvl.Circuit."""
         x1, x2 = pcvl.P("x1"), pcvl.P("x2")
-        circuit = pcvl.Circuit(2) // pcvl.PS(x1) // pcvl.BS() // pcvl.PS(x2) // pcvl.BS()
+        circuit = (
+            pcvl.Circuit(2) // pcvl.PS(x1) // pcvl.BS() // pcvl.PS(x2) // pcvl.BS()
+        )
 
         feature_map = FeatureMap(
             circuit=circuit,
@@ -422,7 +424,9 @@ class TestFidelityKernelFactoryMethods:
     def test_from_feature_map_pcvl_circuit(self):
         """FidelityKernel can wrap a FeatureMap built from pcvl.Circuit."""
         x1, x2 = pcvl.P("x1"), pcvl.P("x2")
-        circuit = pcvl.Circuit(2) // pcvl.PS(x1) // pcvl.BS() // pcvl.PS(x2) // pcvl.BS()
+        circuit = (
+            pcvl.Circuit(2) // pcvl.PS(x1) // pcvl.BS() // pcvl.PS(x2) // pcvl.BS()
+        )
         feature_map = FeatureMap(
             circuit=circuit,
             input_size=2,
@@ -496,10 +500,7 @@ class TestKernelCircuitBuilder:
         """Builder can enable or disable training dynamically."""
         builder = KernelCircuitBuilder()
         feature_map = (
-            builder.input_size(2)
-            .n_modes(4)
-            .trainable(False)
-            .build_feature_map()
+            builder.input_size(2).n_modes(4).trainable(False).build_feature_map()
         )
 
         assert feature_map.input_size == 2
@@ -643,9 +644,7 @@ class TestKernelConstructionConsistency:
 
         # Method 3: KernelCircuitBuilder
         builder = KernelCircuitBuilder()
-        fm_builder = (
-            builder.input_size(2).n_modes(3).build_feature_map()
-        )
+        fm_builder = builder.input_size(2).n_modes(3).build_feature_map()
         print("Builder API circuit:")
         pcvl.pdisplay(fm_builder.circuit)
 
@@ -693,8 +692,16 @@ class TestKernelConstructionConsistency:
             == k_builder.feature_map.circuit.m
             == 4
         )
-        assert len(k_manual.input_state) == len(k_simple.input_state) == len(k_builder.input_state)
-        assert sum(k_manual.input_state) == sum(k_simple.input_state) == sum(k_builder.input_state)
+        assert (
+            len(k_manual.input_state)
+            == len(k_simple.input_state)
+            == len(k_builder.input_state)
+        )
+        assert (
+            sum(k_manual.input_state)
+            == sum(k_simple.input_state)
+            == sum(k_builder.input_state)
+        )
 
         X = torch.tensor([[0.1, 0.2]], dtype=torch.float32)
         for kernel in (k_manual, k_simple, k_builder):
@@ -1203,9 +1210,7 @@ def test_iris_with_supported_constructors():
         print("✅ IRIS classification with supported constructors successful!")
         return results
     else:
-        print(
-            "⚠️ Some constructor issues detected, but structure creation works"
-        )
+        print("⚠️ Some constructor issues detected, but structure creation works")
         return results
 
 
@@ -1257,9 +1262,7 @@ def test_kernel_constructor_performance_comparison():
 
     # Time Method 1: Simple factory
     start = time.time()
-    kernel1 = FidelityKernel.simple(
-        input_size=3, n_modes=4, trainable=False
-    )
+    kernel1 = FidelityKernel.simple(input_size=3, n_modes=4, trainable=False)
     time1 = time.time() - start
     methods.append("FidelityKernel.simple()")
     times.append(time1)
@@ -1288,12 +1291,7 @@ def test_kernel_constructor_performance_comparison():
     # Time Method 3: Builder pattern
     start = time.time()
     builder = KernelCircuitBuilder()
-    kernel3 = (
-        builder.input_size(3)
-        .n_modes(4)
-        .trainable(False)
-        .build_fidelity_kernel()
-    )
+    kernel3 = builder.input_size(3).n_modes(4).trainable(False).build_fidelity_kernel()
     time3 = time.time() - start
     methods.append("KernelCircuitBuilder")
     times.append(time3)
@@ -1364,10 +1362,7 @@ def test_fidelity_kernel_gpu_execution_all_constructors(cuda_device, constructor
     else:  # "builder"
         builder = KernelCircuitBuilder()
         kernel = (
-            builder.input_size(4)
-            .n_modes(4)
-            .trainable(False)
-            .build_fidelity_kernel()
+            builder.input_size(4).n_modes(4).trainable(False).build_fidelity_kernel()
         )
 
     # Ensure kernel is on the correct device

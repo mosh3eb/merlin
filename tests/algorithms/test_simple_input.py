@@ -11,9 +11,9 @@ import torch.nn as nn
 from merlin import OutputMappingStrategy, QuantumLayer
 
 _PCVL_HOME = Path(__file__).resolve().parents[2] / ".pcvl_home"
-(_PCVL_HOME / "Library" / "Application Support" / "perceval-quandela" / "job_group").mkdir(
-    parents=True, exist_ok=True
-)
+(
+    _PCVL_HOME / "Library" / "Application Support" / "perceval-quandela" / "job_group"
+).mkdir(parents=True, exist_ok=True)
 os.environ["HOME"] = str(_PCVL_HOME)
 
 
@@ -108,7 +108,9 @@ def test_linear_strategy_creates_linear_mapping(quantum_layer_api):
 def test_default_strategy_is_none(quantum_layer_api):
     QuantumLayer, _ = quantum_layer_api
     sig = inspect.signature(QuantumLayer.simple)
-    assert sig.parameters["output_mapping_strategy"].default == OutputMappingStrategy.NONE
+    assert (
+        sig.parameters["output_mapping_strategy"].default == OutputMappingStrategy.NONE
+    )
 
 
 def test_trainable_parameter_budget_matches_request(quantum_layer_api):
@@ -156,8 +158,7 @@ def test_gradient_flow_for_strategies(quantum_layer_api):
     loss = layer_linear(x).sum()
     loss.backward()
     assert any(
-        p.grad is not None and torch.any(p.grad != 0)
-        for p in layer_linear.parameters()
+        p.grad is not None and torch.any(p.grad != 0) for p in layer_linear.parameters()
     )
 
     layer_none = QuantumLayer.simple(
@@ -170,8 +171,7 @@ def test_gradient_flow_for_strategies(quantum_layer_api):
     loss = layer_none(x).sum()
     loss.backward()
     assert any(
-        p.grad is not None and torch.any(p.grad != 0)
-        for p in layer_none.parameters()
+        p.grad is not None and torch.any(p.grad != 0) for p in layer_none.parameters()
     )
     theta_param_count = sum(
         param.numel()

@@ -7,4 +7,10 @@ from .kernels import FeatureMap, FidelityKernel
 from .layer import QuantumLayer
 from .loss import NKernelAlignment
 
-__all__ = ["FeatureMap", "FidelityKernel", "NKernelAlignment", "QuantumLayer", "FeedForwardBlock"]
+__all__ = [
+    "FeatureMap",
+    "FidelityKernel",
+    "NKernelAlignment",
+    "QuantumLayer",
+    "FeedForwardBlock",
+]
