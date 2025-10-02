@@ -31,7 +31,15 @@ class Rotation:
     custom_name: Optional[str] = None
 
     def get_params(self) -> Dict[str, Any]:
-        """Get parameters (for compatibility)."""
+        """Return declared parameter placeholders for the rotation.
+
+        Non-fixed rotations expose either their custom name or the automatically
+        generated identifier so that downstream tooling can bind data or trainable
+        tensors to the gate.
+
+        Returns:
+            Dict[str, Any]: Mapping from parameter name to placeholder value.
+        """
         if self.custom_name and self.role != ParameterRole.FIXED:
             return {self.custom_name: self.value if self.role == ParameterRole.FIXED else None}
         return {}
@@ -51,7 +59,11 @@ class BeamSplitter:
     phi_name: Optional[str] = None
 
     def get_params(self) -> Dict[str, Any]:
-        """Get parameters (for compatibility)."""
+        """Describe which phase shifter angles should be exposed as parameters.
+
+        Returns:
+            Dict[str, Any]: Parameter placeholders keyed by their symbolic names.
+        """
         params = {}
         if self.theta_name and self.theta_role != ParameterRole.FIXED:
             params[self.theta_name] = None
@@ -70,7 +82,11 @@ class EntanglingBlock:
     name_prefix: Optional[str] = None
 
     def get_params(self) -> Dict[str, Any]:
-        """Get parameters (for compatibility)."""
+        """Entangling blocks themselves carry no direct parameters.
+
+        Returns:
+            Dict[str, Any]: Always empty because entangling blocks are metadata-only.
+        """
         return {}
 
 
@@ -84,7 +100,11 @@ class GenericInterferometer:
     name_prefix: Optional[str] = None
 
     def get_params(self) -> Dict[str, Any]:
-        """Return parameter placeholders for trainable interferometers."""
+        """Return placeholder names for every internal interferometer parameter.
+
+        Returns:
+            Dict[str, Any]: Mapping of generated parameter names to ``None`` placeholders.
+        """
         if not self.trainable or self.span < 2:
             return {}
 
@@ -104,7 +124,11 @@ class Measurement:
     basis: str = "computational"
 
     def get_params(self) -> Dict[str, Any]:
-        """Get parameters (for compatibility)."""
+        """Measurements are descriptive only and expose no tunable parameters.
+
+        Returns:
+            Dict[str, Any]: Always empty because measurements introduce no parameters.
+        """
         return {}
 
 
@@ -123,7 +147,19 @@ def adapt_old_rotation(
         as_input: Optional[bool] = False,
         value: Optional[float] = None,
 ) -> Rotation:
-    """Adapt old-style rotation to new format."""
+    """Translate legacy rotation arguments into the structured :class:`Rotation`.
+
+    Args:
+        target: Circuit mode acted on by the rotation.
+        angle: Either a literal rotation angle or the legacy symbolic name.
+        axis: Axis of rotation in the Bloch sphere convention.
+        trainable: Whether the rotation should be promoted to a trainable parameter.
+        as_input: Whether the rotation angle should be provided by data at runtime.
+        value: Optional fallback numeric value when ``angle`` is symbolic or omitted.
+
+    Returns:
+        Rotation: Dataclass describing the rotation with updated naming semantics.
+    """
     # Determine role from old flags
     if as_input:
         role = ParameterRole.INPUT

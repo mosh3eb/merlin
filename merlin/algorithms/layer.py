@@ -27,6 +27,7 @@ Main QuantumLayer implementation with bug fixes and index_photons support.
 from __future__ import annotations
 
 import math
+import warnings
 from typing import Any
 
 import numpy as np
@@ -35,6 +36,7 @@ import torch
 import torch.nn as nn
 
 from ..core.generators import CircuitType, StatePattern
+from ..core.components import GenericInterferometer
 from ..core.photonicbackend import PhotonicBackend as Experiment
 from ..core.process import ComputationProcessFactory
 from ..sampling.autodiff import AutoDiffProcess
@@ -580,6 +582,7 @@ class QuantumLayer(nn.Module):
             and torch.is_grad_enabled()
             and any(p.requires_grad for p in self.parameters())
         )
+        #TODO/CAUTION: if needs_gradient is True and shots>0, the code raises a warning and casts apply_sampling = False and shots = 0
         apply_sampling, shots = self.autodiff_process.autodiff_backend(
             needs_gradient, apply_sampling or False, shots or self.shots
         )
@@ -693,10 +696,11 @@ class QuantumLayer(nn.Module):
 
         The circuit is assembled via :class:`CircuitBuilder` with the following layout:
 
-        1. An initial entangling layer to correlate the modes;
-        2. A full input encoding layer spanning all modes;
-        3. Enough trainable rotation layers to expose exactly ``n_params`` trainable angles;
-        4. A final entangling layer to remix the modes prior to measurement.
+        1. A fully trainable generic interferometer acting on all modes;
+        2. A full input encoding layer spanning all encoded features;
+        3. A non-trainable entangling layer that redistributes encoded information;
+        4. Optional trainable rotation layers to reach the requested ``n_params`` budget;
+        5. A final entangling layer prior to measurement.
 
         Args:
             input_size: Size of the classical input vector.
@@ -719,46 +723,68 @@ class QuantumLayer(nn.Module):
 
         builder = CircuitBuilder(n_modes=n_modes)
 
-        # Pre-encoding entanglement
-        builder.add_entangling_layer(depth=1)
+        # Trainable generic interferometer before encoding
+        builder.add_generic_interferometer(trainable=True, name="gi_simple")
+        generic_component = builder.circuit.components[-1]
+        generic_params = 0
+        if (
+            isinstance(generic_component, GenericInterferometer)
+            and generic_component.trainable
+            and generic_component.span >= 2
+        ):
+            mzi_count = generic_component.span * (generic_component.span - 1) // 2
+            generic_params = 2 * mzi_count
 
-        # Input encoding across all modes (prefix ``input``)
+        requested_params = max(int(n_params), 0)
+        if generic_params > requested_params:
+            warnings.warn(
+                "Generic interferometer introduces "
+                f"{generic_params} trainable parameters, exceeding the requested "
+                f"budget of {requested_params}. The simple layer will expose "
+                f"{generic_params} trainable parameters.",
+                RuntimeWarning,
+            )
+
         if input_size > n_modes:
             raise ValueError(ANGLE_ENCODING_MODE_ERROR)
 
         input_modes = list(range(input_size))
-        builder.add_angle_encoding(modes=input_modes, name="input")
+        builder.add_angle_encoding(
+            modes=input_modes,
+            name="input",
+            subset_combinations=True,
+        )
 
-        # Allocate trainable rotations to match the requested parameter budget
-        remaining = max(int(n_params), 0)
+        builder.add_entangling_layer(depth=1)
+
+        # Allocate additional trainable rotations only if the budget exceeds the interferometer
+        remaining = max(requested_params - generic_params, 0)
         layer_idx = 0
+        added_rotation_params = 0
 
         while remaining > 0:
             prefix = f"theta_layer{layer_idx}"
             if remaining >= n_modes:
                 builder.add_rotation_layer(trainable=True, name=prefix)
                 remaining -= n_modes
+                added_rotation_params += n_modes
             else:
                 modes = list(range(remaining))
                 builder.add_rotation_layer(modes=modes, trainable=True, name=prefix)
+                added_rotation_params += remaining
                 remaining = 0
             layer_idx += 1
 
-        # Post-encoding entanglement
+        # Post-rotation entanglement
         builder.add_entangling_layer(depth=1)
 
-        if n_params > 0:
-            pcvl_circuit = builder.to_pcvl_circuit(pcvl)
-            param_names = [p.name for p in pcvl_circuit.get_parameters()]
-            trainable_count = sum(
-                1
-                for name in param_names
-                if any(name.startswith(prefix) for prefix in builder.trainable_parameter_prefixes)
+        total_trainable = generic_params + added_rotation_params
+        expected_trainable = max(requested_params, generic_params)
+        if total_trainable != expected_trainable:
+            raise ValueError(
+                "Constructed circuit exposes "
+                f"{total_trainable} trainable parameters but {expected_trainable} were expected."
             )
-            if trainable_count != n_params:
-                raise ValueError(
-                    f"Requested {n_params} trainable parameters but constructed circuit exposes {trainable_count}."
-                )
 
         return cls(
             input_size=input_size,

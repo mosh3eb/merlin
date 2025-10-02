@@ -115,18 +115,30 @@ def test_trainable_parameter_budget_matches_request(quantum_layer_api):
     QuantumLayer, OutputMappingStrategy = quantum_layer_api
 
     requested_params = 37
-    layer = QuantumLayer.simple(
-        input_size=3,
-        n_params=requested_params,
-        output_mapping_strategy=OutputMappingStrategy.NONE,
-    )
+    with pytest.warns(RuntimeWarning):
+        layer = QuantumLayer.simple(
+            input_size=3,
+            n_params=requested_params,
+            output_mapping_strategy=OutputMappingStrategy.NONE,
+        )
 
     theta_param_count = sum(
         param.numel()
         for name, param in layer.named_parameters()
         if name.startswith("theta")
     )
-    assert theta_param_count == requested_params
+    interferometer_param_count = sum(
+        param.numel()
+        for name, param in layer.named_parameters()
+        if name.startswith("gi_simple")
+    )
+
+    total_trainable = theta_param_count + interferometer_param_count
+    expected_total = max(requested_params, interferometer_param_count)
+    expected_theta = max(requested_params - interferometer_param_count, 0)
+
+    assert total_trainable == expected_total
+    assert theta_param_count == expected_theta
 
 
 def test_gradient_flow_for_strategies(quantum_layer_api):
@@ -161,7 +173,23 @@ def test_gradient_flow_for_strategies(quantum_layer_api):
         p.grad is not None and torch.any(p.grad != 0)
         for p in layer_none.parameters()
     )
-    assert sum(p.numel() for p in layer_none.parameters()) == nb_params
+    theta_param_count = sum(
+        param.numel()
+        for name, param in layer_none.named_parameters()
+        if name.startswith("theta")
+    )
+    interferometer_param_count = sum(
+        param.numel()
+        for name, param in layer_none.named_parameters()
+        if name.startswith("gi_simple")
+    )
+
+    total_trainable = theta_param_count + interferometer_param_count
+    expected_total = max(nb_params, interferometer_param_count)
+    expected_theta = max(nb_params - interferometer_param_count, 0)
+
+    assert total_trainable == expected_total
+    assert theta_param_count == expected_theta
 
 
 def test_quantum_layer_simple_raises_when_input_exceeds_modes(quantum_layer_api):

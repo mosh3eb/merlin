@@ -109,6 +109,18 @@ def test_complex_builder_pipeline_exports_pcvl_circuit():
     assert entangling_ops, "Entangling layer should contribute beam splitters"
 
 
+def test_trainable_entangling_layer_generates_parameterised_mixers():
+    builder = CircuitBuilder(n_modes=4)
+    builder.add_entangling_layer(depth=1, trainable=True, name="mix")
+
+    circuit = builder.to_pcvl_circuit(pcvl)
+    param_names = {param.name for param in circuit.get_parameters()}
+
+    assert any(name.startswith("mix_theta_") for name in param_names)
+    assert any(name.startswith("mix_phi_") for name in param_names)
+    assert "mix" in builder.trainable_parameter_prefixes
+
+
 def test_to_pcvl_circuit_supports_gradient_backpropagation():
     builder = CircuitBuilder(n_modes=2)
     builder.add_rotation_layer(trainable=True, name="theta")
@@ -194,6 +206,31 @@ def test_angle_encoding_metadata_and_scaling():
     assert len(rotations) == len(combos)
 
 
+def test_angle_encoding_subset_combinations_extend_metadata():
+    builder = CircuitBuilder(n_modes=6)
+    builder.add_angle_encoding(
+        modes=[0, 1, 2],
+        name="input",
+        subset_combinations=True,
+        max_order=2,
+    )
+
+    spec = builder.angle_encoding_specs["input"]
+    combos = spec["combinations"]
+
+    # First entries keep singleton order, higher-order combos are appended
+    assert combos[:3] == [(0,), (1,), (2,)]
+    assert (0, 1) in combos
+    assert (1, 2) in combos
+
+    rotations = [
+        comp
+        for comp in builder.circuit.components
+        if isinstance(comp, Rotation) and comp.role == ParameterRole.INPUT
+    ]
+    assert len(rotations) == len(combos)
+
+
 def test_angle_encoding_applies_scaling_in_quantum_layer():
     builder = CircuitBuilder(n_modes=4)
     builder.add_angle_encoding(
@@ -221,6 +258,37 @@ def test_angle_encoding_applies_scaling_in_quantum_layer():
     expected_singles = torch.tensor([0.05, 0.1, 0.15], dtype=torch.float32)
     assert torch.allclose(singles, expected_singles, atol=1e-6)
 
+
+def test_angle_encoding_subset_combinations_in_quantum_layer():
+    builder = CircuitBuilder(n_modes=8)
+    builder.add_angle_encoding(
+        modes=[0, 1, 2],
+        name="input",
+        subset_combinations=True,
+        max_order=2,
+    )
+
+    layer = QuantumLayer(
+        input_size=3,
+        circuit=builder,
+        n_photons=1,
+        output_size=3,
+        output_mapping_strategy=OutputMappingStrategy.LINEAR,
+        dtype=torch.float32,
+    )
+
+    x = torch.tensor([[0.2, 0.3, 0.4]], dtype=torch.float32)
+    encoded = layer.prepare_parameters([x])[-1]
+
+    combos = builder.angle_encoding_specs["input"]["combinations"]
+    assert encoded.shape[1] == len(combos)
+
+    assert torch.allclose(encoded[0, 0], x[0, 0])
+    assert torch.allclose(encoded[0, 1], x[0, 1])
+    assert torch.allclose(encoded[0, 2], x[0, 2])
+
+    pair_idx = combos.index((0, 1))
+    assert torch.allclose(encoded[0, pair_idx], x[0, 0] + x[0, 1])
 
 
 def test_angle_encoding_raises_when_modes_exceeded():

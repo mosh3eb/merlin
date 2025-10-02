@@ -4,6 +4,7 @@ Circuit builder for constructing quantum circuits declaratively.
 
 import math
 import numbers
+from itertools import combinations
 from typing import List, Optional, Union, Tuple, Dict, Any
 
 ANGLE_ENCODING_MODE_ERROR = (
@@ -28,6 +29,7 @@ class ModuleGroup:
     """Helper class for grouping modules."""
 
     def __init__(self, modes: List[int]):
+        """Store the list of modes spanned by the grouped module."""
         self.modes = modes
 
 
@@ -37,6 +39,11 @@ class CircuitBuilder:
     """
 
     def __init__(self, n_modes: int):
+        """Initialise bookkeeping structures for a circuit with ``n_modes`` modes.
+
+        Args:
+            n_modes: Number of photonic modes available in the circuit.
+        """
         self.n_modes = n_modes
         self.circuit = Circuit(n_modes)
 
@@ -46,6 +53,7 @@ class CircuitBuilder:
         self._input_counter = 0
         self._copy_counter = 0
         self._generic_counter = 0
+        self._entangling_counter = 0
 
         # Section tracking for adjoint support
         self._section_markers = []
@@ -67,7 +75,14 @@ class CircuitBuilder:
 
     @staticmethod
     def _deduce_prefix(name: Optional[str]) -> Optional[str]:
-        # we want to extract the base prefix from a name to automatically fill-in trainable and input parameters
+        """Strip numeric suffixes so we can reuse the textual stem as a prefix.
+
+        Args:
+            name: Full parameter name provided by the user or generator.
+
+        Returns:
+            Optional[str]: The textual stem without trailing digits or underscores.
+        """
         if not name:
             return None
 
@@ -82,19 +97,36 @@ class CircuitBuilder:
         return base or name
 
     def _register_trainable_prefix(self, name: Optional[str]):
+        """Record the stem of a trainable parameter for later discovery calls.
+
+        Args:
+            name: Newly created trainable parameter name whose stem should be tracked.
+        """
         prefix = self._deduce_prefix(name)
         if prefix and prefix not in self._trainable_prefix_set:
             self._trainable_prefix_set.add(prefix)
             self._trainable_prefixes.append(prefix)
 
     def _register_input_prefix(self, name: Optional[str]):
+        """Track stems used for data-driven parameters (angle encodings).
+
+        Args:
+            name: Input parameter name emitted while constructing an encoding layer.
+        """
         prefix = self._deduce_prefix(name)
         if prefix and prefix not in self._input_prefix_set:
             self._input_prefix_set.add(prefix)
             self._input_prefixes.append(prefix)
 
     def _unique_trainable_name(self, base: str) -> str:
-        """Return a unique trainable identifier derived from ``base``."""
+        """Return a unique trainable identifier derived from ``base``.
+
+        Args:
+            base: Desired stem for the parameter name (may collide with earlier ones).
+
+        Returns:
+            str: Collision-free parameter name derived from ``base``.
+        """
         count = self._trainable_name_counts.get(base, 0)
         candidate = base if count == 0 else f"{base}_{count}"
 
@@ -115,7 +147,25 @@ class CircuitBuilder:
             trainable: bool = False,
             name: Optional[str] = None
     ) -> "CircuitBuilder":
-        """Add a single rotation."""
+        """Add a single rotation.
+
+        The builder keeps rotations in an abstract form by appending a
+        :class:`~merlin.core.components.Rotation` entry to its internal
+        :class:`~merlin.core.circuit.Circuit`. The actual photonic primitive is
+        created later in :meth:`to_pcvl_circuit`, where each rotation is
+        materialised as a Perceval phase shifter ``pcvl.PS``. Fixed rotations use
+        the numeric ``angle`` provided here, while trainable ones are assigned a
+        symbolic ``pcvl.P`` that Perceval treats as an optimisable parameter.
+
+        Args:
+            target: Circuit mode index receiving the phase shifter.
+            angle: Initial numeric value used when the rotation is fixed.
+            trainable: Whether to expose the rotation angle as a learnable parameter.
+            name: Optional custom stem for the underlying parameter name.
+
+        Returns:
+            CircuitBuilder: ``self`` to allow method chaining.
+        """
         role = ParameterRole.TRAINABLE if trainable else ParameterRole.FIXED
 
         if role == ParameterRole.TRAINABLE:
@@ -154,8 +204,19 @@ class CircuitBuilder:
             name: Optional[str] = None,
             role: Optional[Union[str, ParameterRole]] = None,
     ) -> "CircuitBuilder":
-        """
-        Add rotation layer with clear role specification.
+        """Add a rotation layer across a set of modes.
+
+        Args:
+            modes: Modes (or module group) receiving the rotations; defaults to all modes.
+            axis: Axis of rotation to apply on each mode.
+            trainable: Promote every rotation in the layer to trainable parameters.
+            as_input: Mark the rotations as data-driven inputs (legacy convenience flag).
+            value: Default fixed value assigned when the layer is not trainable/input.
+            name: Optional stem used when generating parameter names per mode.
+            role: Explicit :class:`ParameterRole` taking precedence over other flags.
+
+        Returns:
+            CircuitBuilder: ``self`` to facilitate fluent chaining.
         """
         if modes is None:
             target_modes = list(range(self.n_modes))
@@ -236,6 +297,8 @@ class CircuitBuilder:
             name: Optional[str] = None,
             *,
             scale: float = 1.0,
+            subset_combinations: bool = False,
+            max_order: Optional[int] = None,
     ) -> "CircuitBuilder":
         """Convenience method for angle-based input encoding.
 
@@ -243,6 +306,14 @@ class CircuitBuilder:
             modes: Optional list of circuit modes to target. Defaults to all modes.
             name: Prefix used for generated input parameters. Defaults to ``"px"``.
             scale: Global scaling factor applied before angle mapping.
+            subset_combinations: When ``True``, generate higher-order feature
+                combinations (up to ``max_order``) similar to the legacy
+                ``FeatureEncoder``.
+            max_order: Optional cap on the size of feature combinations when
+                ``subset_combinations`` is enabled. ``None`` uses all orders.
+
+        Returns:
+            CircuitBuilder: ``self`` for fluent chaining.
         """
         if name is None:
             name = "px"
@@ -267,9 +338,31 @@ class CircuitBuilder:
         self._angle_encoding_counts[name] = start_idx + len(target_modes)
 
         scale_map = self._normalize_angle_scale(scale, feature_indices)
-        combos = [(idx,) for idx in feature_indices]
 
-        self.add_rotation_layer(modes=target_modes, role=ParameterRole.INPUT, name=name)
+        combos: List[Tuple[int, ...]] = []
+        if subset_combinations and feature_indices:
+            max_subset_order = len(feature_indices) if max_order is None else max_order
+            max_subset_order = max(1, min(max_subset_order, len(feature_indices)))
+
+            for order in range(1, max_subset_order + 1):
+                for combo in combinations(feature_indices, order):
+                    combos.append(combo)
+        else:
+            combos = [(idx,) for idx in feature_indices]
+
+        if not combos:
+            combos = [(idx,) for idx in feature_indices]
+
+        required_rotations = len(combos)
+        emitted = 0
+        while emitted < required_rotations:
+            span = min(len(target_modes), required_rotations - emitted)
+            chunk_modes = [
+                target_modes[(emitted + offset) % len(target_modes)]
+                for offset in range(span)
+            ]
+            self.add_rotation_layer(modes=chunk_modes, role=ParameterRole.INPUT, name=name)
+            emitted += span
 
         spec_list = self._angle_encoding_specs.setdefault(name, [])
         spec_list.extend(combos)
@@ -287,7 +380,15 @@ class CircuitBuilder:
 
     @staticmethod
     def _normalize_angle_scale(scale: float, feature_indices: List[int]) -> Dict[int, float]:
-        """Normalize scale specification to a per-feature mapping."""
+        """Normalize scale specification to a per-feature mapping.
+
+        Args:
+            scale: Global scaling factor supplied by the caller.
+            feature_indices: Logical feature indices requiring a per-feature scale.
+
+        Returns:
+            Dict[int, float]: Mapping from logical feature index to scale factor.
+        """
         if not isinstance(scale, numbers.Real):
             raise TypeError("scale must be a real number")
 
@@ -312,6 +413,9 @@ class CircuitBuilder:
 
         Raises:
             ValueError: If the provided modes are invalid or span fewer than two modes.
+
+        Returns:
+            CircuitBuilder: ``self`` for fluent chaining.
         """
         if modes is None:
             start = 0
@@ -369,7 +473,19 @@ class CircuitBuilder:
             trainable_phi: bool = False,
             name: Optional[str] = None
     ) -> "CircuitBuilder":
-        """Add a beam splitter (superposition component)."""
+        """Add a beam splitter (superposition component).
+
+        Args:
+            targets: Pair of mode indices connected by the beam splitter.
+            theta: Fixed mixing angle used when ``trainable_theta`` is ``False``.
+            phi: Fixed relative phase applied when ``trainable_phi`` is ``False``.
+            trainable_theta: Promote the mixing angle to a trainable parameter.
+            trainable_phi: Promote the relative phase to a trainable parameter.
+            name: Optional stem used to generate parameter names for this component.
+
+        Returns:
+            CircuitBuilder: ``self`` to allow chaining additional builder calls.
+        """
         theta_role = ParameterRole.TRAINABLE if trainable_theta else ParameterRole.FIXED
         phi_role = ParameterRole.TRAINABLE if trainable_phi else ParameterRole.FIXED
 
@@ -405,12 +521,32 @@ class CircuitBuilder:
             trainable: bool = False,
             name: Optional[str] = None
     ) -> "CircuitBuilder":
-        """Add entangling layer(s)."""
+        """Add entangling layer(s).
+
+        When ``trainable`` is ``True`` the block is converted into parameterized beam
+        splitters during ``to_pcvl_circuit`` so that interferometric mixing can be
+        optimised. Generated parameters share a common prefix derived from ``name``.
+
+        Args:
+            depth: Number of successive nearest-neighbour passes to add.
+            trainable: Whether to expose the internal beam splitters as parameters.
+            name: Optional stem used for generated parameter names when trainable.
+
+        Returns:
+            CircuitBuilder: ``self`` for chaining additional builder calls.
+        """
         block = EntanglingBlock(
             depth=depth,
             trainable=trainable,
             name_prefix=name
         )
+
+        if trainable:
+            base = name or f"eb{self._entangling_counter}"
+            self._entangling_counter += 1
+            prefix = self._unique_trainable_name(base)
+            block.name_prefix = prefix
+            self._register_trainable_prefix(prefix)
 
         self.circuit.add(block)
         return self
@@ -420,12 +556,14 @@ class CircuitBuilder:
             observable: Union[str, Any],
             name: Optional[str] = None
     ) -> "CircuitBuilder":
-        """
-        Add a measurement to the circuit.
+        """Add a measurement to the circuit.
 
         Args:
-            observable: String representation or observable object
-            name: Optional name for the measurement
+            observable: String representation or observable object describing the POVM.
+            name: Optional label stored in circuit metadata for later retrieval.
+
+        Returns:
+            CircuitBuilder: ``self`` for fluent chaining.
         """
         # Parse string observables
         if isinstance(observable, str):
@@ -464,7 +602,7 @@ class CircuitBuilder:
             share_input: Whether to share input parameters from reference
 
         Returns:
-            self for chaining
+            CircuitBuilder: ``self`` so builder calls can be chained.
         """
         if self._current_section is not None:
             warnings.warn(f"Section '{self._current_section['name']}' was not closed. Closing it now.")
@@ -500,7 +638,17 @@ class CircuitBuilder:
             share_trainable: bool = True,
             share_input: bool = True
     ) -> "CircuitBuilder":
-        """Convenience method for adding adjoint of existing section."""
+        """Convenience method for adding adjoint of an existing section.
+
+        Args:
+            name: Name assigned to the new adjoint section.
+            reference: Existing section to mirror.
+            share_trainable: Whether to reuse the referenced trainable parameters.
+            share_input: Whether to reuse the referenced input parameters.
+
+        Returns:
+            CircuitBuilder: ``self`` for fluent chaining.
+        """
         return self.begin_section(
             name=name,
             compute_adjoint=True,
@@ -510,7 +658,11 @@ class CircuitBuilder:
         )
 
     def _copy_from_reference(self, ref_name: str):
-        """Copy components from referenced section with parameter sharing rules."""
+        """Copy components from referenced section with parameter sharing rules.
+
+        Args:
+            ref_name: Name of the section (or ``"_all_"`` for the pre-section content) to copy.
+        """
         if ref_name == "_all_":
             # Copy everything before sections started
             start_idx = 0
@@ -540,7 +692,16 @@ class CircuitBuilder:
             self.circuit.add(new_comp)
 
     def _transform_component(self, comp, share_trainable, share_input):
-        """Transform component based on sharing rules."""
+        """Transform a copied component according to sharing rules.
+
+        Args:
+            comp: Original component instance to duplicate.
+            share_trainable: Whether trainable parameters should be reused.
+            share_input: Whether input-parameter names should be reused.
+
+        Returns:
+            Any: Deep-copied component with adjusted parameter naming.
+        """
         new_comp = deepcopy(comp)
 
         if isinstance(comp, Rotation):
@@ -611,11 +772,10 @@ class CircuitBuilder:
         return new_comp
 
     def end_section(self) -> "CircuitBuilder":
-        """
-        Mark the end of a circuit section.
+        """Mark the end of the current circuit section.
 
         Returns:
-            self for chaining
+            CircuitBuilder: ``self`` so builder calls can be chained.
         """
         if self._current_section:
             self._current_section['end_idx'] = len(self.circuit.components)
@@ -626,11 +786,10 @@ class CircuitBuilder:
         return self
 
     def build(self) -> Circuit:
-        """
-        Build and return the circuit.
+        """Build and return the circuit, finalising any open sections.
 
         Returns:
-            The constructed circuit with metadata
+            Circuit: Circuit instance populated with components and metadata.
         """
         # Close any open section
         if self._current_section is not None:
@@ -644,6 +803,11 @@ class CircuitBuilder:
         return self.finalize_circuit()
 
     def finalize_circuit(self):
+        """Ensure metadata reflects defined sections before returning the circuit.
+
+        Returns:
+            Circuit: Circuit with updated section metadata.
+        """
         # Ensure 'sections' key is always added to metadata
         self.circuit.metadata["sections"] = self._section_markers or []
 
@@ -706,9 +870,22 @@ class CircuitBuilder:
                 if len(mode_list) < 2:
                     continue
 
+                prefix = component.name_prefix or f"eb_{idx}"
+                pair_index = 0
+
                 for _ in range(component.depth):
                     for left, right in zip(mode_list[:-1], mode_list[1:]):
-                        pcvl_circuit.add((left, right), pcvl_module.BS())
+                        if component.trainable:
+                            theta_name = f"{prefix}_theta_{pair_index}"
+                            phi_name = f"{prefix}_phi_{pair_index}"
+                            theta = pcvl_module.P(theta_name)
+                            phi_tr = pcvl_module.P(phi_name)
+                            pair_index += 1
+                            pcvl_circuit.add(
+                                (left, right), pcvl_module.BS(theta=theta, phi_tr=phi_tr)
+                            )
+                        else:
+                            pcvl_circuit.add((left, right), pcvl_module.BS())
 
             elif isinstance(component, GenericInterferometer):
                 if component.span < 2:
@@ -717,6 +894,7 @@ class CircuitBuilder:
                 prefix = component.name_prefix or f"gi_{idx}"
 
                 def _mzi_factory(i: int, *, trainable: bool = component.trainable, base: str = prefix):
+                    """Build a Mach-Zehnder interferometer optionally parameterised per index."""
                     if trainable:
                         phi_inner = pcvl_module.P(f"{base}_li{i}")
                         phi_outer = pcvl_module.P(f"{base}_lo{i}")
@@ -745,22 +923,43 @@ class CircuitBuilder:
 
     @classmethod
     def from_circuit(cls, circuit: Circuit) -> "CircuitBuilder":
-        """Create a builder from an existing circuit."""
+        """Create a builder from an existing circuit.
+
+        Args:
+            circuit: Circuit object whose components should seed the builder.
+
+        Returns:
+            CircuitBuilder: A new builder instance wrapping the provided circuit.
+        """
         builder = cls(circuit.n_modes)
         builder.circuit = circuit
         return builder
 
     @property
     def trainable_parameter_prefixes(self) -> List[str]:
+        """Expose the unique set of trainable prefixes in insertion order.
+
+        Returns:
+            List[str]: Trainable parameter stems discovered so far.
+        """
         return list(self._trainable_prefixes)
 
     @property
     def input_parameter_prefixes(self) -> List[str]:
+        """Expose the order-preserving set of input prefixes.
+
+        Returns:
+            List[str]: Input parameter stems emitted during encoding.
+        """
         return list(self._input_prefixes)
 
     @property
     def angle_encoding_specs(self) -> Dict[str, Dict[str, Any]]:
-        """Return metadata describing configured angle encodings."""
+        """Return metadata describing configured angle encodings.
+
+        Returns:
+            Dict[str, Dict[str, Any]]: Mapping from encoding prefix to combination metadata.
+        """
         return {
             prefix: {
                 "combinations": list(combos),

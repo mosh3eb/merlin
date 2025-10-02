@@ -39,10 +39,11 @@ class FeatureMap:
     FeatureMap embeds a datapoint within a quantum circuit and
     computes the associated unitary for quantum kernel methods.
 
-    :param circuit: Circuit with data-embedding parameters.
-    :param input_parameters: Parameters which encode each datapoint.
-    :param dtype: Data type for generated unitary.
-    :param device: Device on which to calculate the unitary.
+    Args:
+        circuit: Circuit or builder containing the data-encoding gates.
+        input_parameters: Parameter prefix(es) that host the classical data.
+        dtype: Torch dtype used when constructing the unitary.
+        device: Torch device on which unitaries are evaluated.
     """
 
     def __init__(
@@ -108,13 +109,20 @@ class FeatureMap:
             self._training_dict[param_name] = torch.nn.Parameter(p)
 
     def _px_len(self) -> int:
-        """Number of circuit input-parameter slots (e.g. 'px') required by the circuit."""
+        """Return how many angle-encoding slots the underlying circuit expects."""
         return len(self._circuit_graph.spec_mappings.get(self.input_parameters, []))
 
     def _subset_sum_expand(self, x: Tensor, k: int) -> Tensor:
         """
         Deterministic series-style expansion: non-empty subset sums of x in
         increasing subset-size order, truncated/padded to length k.
+
+        Args:
+            x: Input feature tensor expected to be one-dimensional.
+            k: Desired number of encoded features to return.
+
+        Returns:
+            Tensor: Encoded tensor of length ``k`` on the configured device/dtype.
         """
         x = x.to(dtype=self.dtype, device=self.device).reshape(-1)
         d = x.shape[0]
@@ -138,9 +146,18 @@ class FeatureMap:
         )
 
     def _encode_x(self, x: Tensor) -> Tensor:
-        """
-        Encode raw features x (length = input_size) to match px_len.
-        Tries a user-provided encoder first; falls back to subset-sum expansion.
+        """Map raw features to the circuit's required parameter shape.
+
+        Preference order:
+        1. Builder-provided combination metadata (from :class:`CircuitBuilder`).
+        2. A user-supplied encoder callable.
+        3. The deterministic subset-sum expansion used by legacy feature maps.
+
+        Args:
+            x: Input feature tensor to be embedded.
+
+        Returns:
+            Tensor: Encoded tensor matching the circuit's expected parameter length.
         """
         x = x.to(dtype=self.dtype, device=self.device).reshape(-1)
         px_len = self._px_len()
@@ -181,7 +198,15 @@ class FeatureMap:
         return x[:px_len]
 
     def _encode_with_specs(self, x: Tensor, spec: dict[str, object]) -> Tensor:
-        """Encode input vector using builder-provided angle encoding metadata."""
+        """Encode input vector using builder-provided angle encoding metadata.
+
+        Args:
+            x: Flattened input feature tensor.
+            spec: Metadata describing combinations and scales produced by the builder.
+
+        Returns:
+            Tensor: Encoded tensor obeying the combination rules.
+        """
         combos = spec.get("combinations", [])
         scales = spec.get("scales", {})
 
@@ -218,8 +243,14 @@ class FeatureMap:
     def compute_unitary(
         self, x: Tensor | np.ndarray | float, *training_parameters: Tensor
     ) -> Tensor:
-        """
-        Computes the unitary associated with the feature map and given datapoint.
+        """Generate the circuit unitary after encoding ``x`` and applying trainables.
+
+        Args:
+            x: Single datapoint to embed; accepts scalars, numpy arrays, or tensors.
+            *training_parameters: Optional overriding trainable tensors.
+
+        Returns:
+            Tensor: Complex unitary matrix representing the prepared circuit.
         """
         # Normalize input to tensor on correct device/dtype
         if isinstance(x, torch.Tensor):
@@ -249,7 +280,14 @@ class FeatureMap:
         return self._circuit_graph.to_tensor(x_encoded, *params_to_use)
 
     def is_datapoint(self, x: Tensor | np.ndarray | float | int) -> bool:
-        """Checks whether an input data is a singular datapoint or dataset."""
+        """Determine if ``x`` describes one sample or a batch.
+
+        Args:
+            x: Candidate input data.
+
+        Returns:
+            bool: ``True`` when ``x`` corresponds to a single datapoint.
+        """
         if isinstance(x, (float, int)):
             if self.input_size == 1:
                 return True
@@ -312,6 +350,9 @@ class FeatureMap:
             angle_encoding_scale: Global scaling applied to angle encoding features.
             trainable: Whether to expose a trainable rotation layer.
             trainable_prefix: Prefix used for the generated trainable parameter names.
+
+        Returns:
+            FeatureMap: Configured feature-map instance.
         """
         if n_photons is None:
             n_photons = input_size

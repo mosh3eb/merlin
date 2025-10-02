@@ -14,23 +14,30 @@ class Circuit:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def add(self, component: Any) -> "Circuit":
-        """Add a component."""
+        """Append a component and return the circuit for chained calls.
+
+        Args:
+            component: Circuit element (rotation, beam splitter, measurement, etc.).
+
+        Returns:
+            Circuit: ``self`` to support fluent-style chaining.
+        """
         self.components.append(component)
         return self
 
     def clear(self):
-        """Clear all components."""
+        """Remove every component and metadata entry from the circuit."""
         self.components.clear()
         self.metadata.clear()
 
     @property
     def num_components(self) -> int:
-        """Number of components in circuit."""
+        """Return the count of registered components."""
         return len(self.components)
 
     @property
     def depth(self) -> int:
-        """Estimate circuit depth."""
+        """Estimate logical depth by summing component depths when available."""
         depth = 0
         for comp in self.components:
             if hasattr(comp, 'depth'):
@@ -40,7 +47,11 @@ class Circuit:
         return depth
 
     def get_parameters(self) -> Dict[str, Any]:
-        """Extract all parameters from circuit."""
+        """Collect parameter placeholders exposed by each component.
+
+        Returns:
+            Dict[str, Any]: Mapping from parameter name to default value (or ``None``).
+        """
         params = {}
         for comp in self.components:
             if hasattr(comp, 'get_params'):
