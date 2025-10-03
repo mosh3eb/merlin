@@ -17,7 +17,6 @@ components_mod = load_merlin_module("merlin.core.components")
 Rotation = components_mod.Rotation
 BeamSplitter = components_mod.BeamSplitter
 EntanglingBlock = components_mod.EntanglingBlock
-Measurement = components_mod.Measurement
 ParameterRole = components_mod.ParameterRole
 
 
@@ -42,13 +41,6 @@ def test_beam_splitter_get_params_exposes_non_fixed_names():
         phi_name="phi",
     )
     assert beam_splitter.get_params() == {"theta": None, "phi": None}
-
-
-def test_measurement_defaults_are_preserved():
-    measurement = Measurement(targets=[0, 1])
-    assert measurement.targets == [0, 1]
-    assert measurement.basis == "computational"
-    assert measurement.get_params() == {}
 
 
 def test_entangling_block_exposes_no_parameters():

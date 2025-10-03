@@ -15,7 +15,6 @@ The `merlin.core.components` module defines the fundamental building blocks for 
 - **BeamSplitter**: Represents a two-mode mixing operation, with tunable mixing angle (theta) and phase (phi), both of which can be fixed or trainable.
 - **EntanglingBlock**: Specifies a block of entangling operations (e.g., nearest-neighbor beam splitters) to increase circuit expressivity.
 - **GenericInterferometer**: Encodes a universal linear optical transformation over multiple modes, optionally trainable.
-- **Measurement**: Marks the measurement of specific modes in a chosen basis, for extracting classical information from the quantum state.
 
 These components are used by higher-level tools (like `CircuitBuilder`) to assemble, manipulate, and compile quantum circuits for simulation or execution.
 

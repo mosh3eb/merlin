@@ -15,7 +15,7 @@ Merlin bridges the gap between physical quantum circuits and high-level machine 
 2. **Photonic Backend**: Mathematical models of quantum circuits with configurable components
 3. **Ansatz** (:mod:`merlin.builder.ansatz`): Logical circuit templates that define shape of quantum circuits to be implemented on the backend
 4. **Encoding**: Strategies for mapping classical features to quantum parameters
-5. **Output Mapping**: Methods for converting quantum measurements to classical outputs
+5. **Output Mapping**: Methods for converting quantum states to classical outputs
 6. **QuantumLayer**: High-level PyTorch interface that combines all these concepts
 
 Let's explore each level in detail.
@@ -47,7 +47,6 @@ Key responsibilities:
 
 - **State Evolution**: Computing how quantum states change through the circuit
 - **Parameter Management**: Tracking which components are configurable vs. fixed
-- **Measurement Simulation**: Converting quantum states to probability distributions
 
 
 

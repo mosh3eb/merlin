@@ -125,22 +125,6 @@ class GenericInterferometer:
         return params
 
 
-@dataclass
-class Measurement:
-    """Measurement description."""
-
-    targets: list[int]
-    basis: str = "computational"
-
-    def get_params(self) -> dict[str, Any]:
-        """Measurements are descriptive only and expose no tunable parameters.
-
-        Returns:
-            Dict[str, Any]: Always empty because measurements introduce no parameters.
-        """
-        return {}
-
-
 # For backward compatibility, keep old interface but map to new
 class Component:
     """Base class for backward compatibility."""

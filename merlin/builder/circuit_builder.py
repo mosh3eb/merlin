@@ -14,7 +14,6 @@ from ..core.components import (
     BeamSplitter,
     EntanglingBlock,
     GenericInterferometer,
-    Measurement,
     ParameterRole,
     Rotation,
 )
@@ -545,36 +544,6 @@ class CircuitBuilder:
             self._register_trainable_prefix(prefix)
 
         self.circuit.add(block)
-        return self
-
-    def add_measurement(
-        self, observable: str | Any, name: str | None = None
-    ) -> "CircuitBuilder":
-        """Add a measurement to the circuit.
-
-        Args:
-            observable: String representation or observable object describing the POVM.
-            name: Optional label stored in circuit metadata for later retrieval.
-
-        Returns:
-            CircuitBuilder: ``self`` for fluent chaining.
-        """
-        # Parse string observables
-        if isinstance(observable, str):
-            observable = parse_observable(observable)
-
-        measurement = Measurement(targets=list(range(self.n_modes)))
-        self.circuit.add(measurement)
-
-        # Store in metadata
-        if "measurements" not in self.circuit.metadata:
-            self.circuit.metadata["measurements"] = []
-
-        self.circuit.metadata["measurements"].append({
-            "observable": observable,
-            "name": name,
-        })
-
         return self
 
     def begin_section(

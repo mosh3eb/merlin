@@ -68,7 +68,6 @@ Other building blocks in the CircuitBuilder include:
 - **add_generic_interferometer**: Insert a generic, multi-mode interferometer block, optionally trainable, for universal linear mixing.
 - **add_superposition**: Add a beam splitter (superposition) between two modes, with configurable mixing and phase parameters (fixed or trainable).
 - **add_entangling_layer**: Add one or more layers of entangling blocks (nearest-neighbor beam splitters), optionally trainable, to increase circuit expressivity.
-- **add_measurement**: Append a measurement component to the circuit, specifying the observable or basis for readout.
 - **begin_section / end_section / add_adjoint_section**: Define modular circuit sections, optionally with adjoint (inverse) structure and parameter sharing for advanced workflows.
 
 # Example: Manual Perceval circuit (more control)
