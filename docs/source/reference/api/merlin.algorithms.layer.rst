@@ -19,7 +19,7 @@ merlin.algorithms.layer module
     )
     # Train and evaluate as a standard torch.nn.Module
 
-.. image:: ../_static/img/Circ_simple.png
+.. image:: docs/source/_static/img/Circ_simple.png
    :alt: A Perceval Circuit built with QuantumLayer.simple
    :width: 600px
    :align: center
@@ -49,6 +49,10 @@ The simple quantum layer above implements a circuit of 10 modes and 5 photons wi
     )
     # Train and evaluate as a standard torch.nn.Module
 
+.. image:: docs/source/_static/img/Circ_builder.png
+   :alt: A Perceval Circuit built with the CircuitBuilder
+   :width: 600px
+   :align: center
 
 The circuit builder allows you to build your circuit layer by layer, with a high-level API. The example above implements a circuit of 6 modes and 3 photons.
 This circuit is made of:
@@ -103,3 +107,8 @@ Other building blocks in the CircuitBuilder include:
     # Train and evaluate as a standard torch.nn.Module
 
 # See the User guide and Notebooks for more advanced usage and training routines !
+
+.. image:: docs/source/_static/img/Circ_manual.png
+   :alt: A Perceval Circuit built with the Perceval API
+   :width: 600px
+   :align: center
