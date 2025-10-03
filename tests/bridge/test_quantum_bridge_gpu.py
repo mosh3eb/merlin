@@ -1,10 +1,9 @@
+import perceval as pcvl
 import pytest
 import torch
-import perceval as pcvl
 
-from merlin import QuantumLayer, OutputMappingStrategy
-from merlin.bridge.QuantumBridge import QuantumBridge
-
+from merlin import OutputMappingStrategy, QuantumLayer
+from merlin.bridge.quantum_bridge import QuantumBridge
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available(), reason="CUDA GPU not available"

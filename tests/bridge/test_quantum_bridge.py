@@ -1,11 +1,11 @@
 import math
 
-import torch
 import perceval as pcvl
 import pytest
+import torch
 
-from merlin import QuantumLayer, OutputMappingStrategy
-from merlin.bridge.QuantumBridge import QuantumBridge, to_fock_state
+from merlin import OutputMappingStrategy, QuantumLayer
+from merlin.bridge.quantum_bridge import QuantumBridge, to_fock_state
 
 
 def make_identity_layer(m: int, n_photons: int) -> QuantumLayer:
@@ -24,9 +24,9 @@ def make_identity_layer(m: int, n_photons: int) -> QuantumLayer:
 
 def find_key_index(layer: QuantumLayer, basic_state: pcvl.BasicState) -> int:
     keys = layer.computation_process.simulation_graph.mapped_keys
-    target = tuple(list(basic_state))
+    target = tuple(basic_state)
     for i, k in enumerate(keys):
-        kt = tuple(list(k))
+        kt = tuple(k)
         if kt == target:
             return i
     raise AssertionError(f"BasicState {target} not found in mapped_keys")
