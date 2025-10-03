@@ -22,10 +22,10 @@
 
 """Sampling and autodiff utilities."""
 
+from ..torch_utils.torch_codes import LexGroupingMapper, ModGroupingMapper, OutputMapper
 from .autodiff import AutoDiffProcess
 from .process import SamplingProcess
 from .strategies import OutputMappingStrategy
-from ..torch_utils.torch_codes import LexGroupingMapper, ModGroupingMapper, OutputMapper
 
 __all__ = [
     "OutputMappingStrategy",
@@ -33,5 +33,5 @@ __all__ = [
     "AutoDiffProcess",
     "LexGroupingMapper",
     "ModGroupingMapper",
-    "OutputMapper"
+    "OutputMapper",
 ]
