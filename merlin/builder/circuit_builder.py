@@ -17,7 +17,6 @@ from ..core.components import (
     ParameterRole,
     Rotation,
 )
-from ..core.observables import parse_observable
 
 ANGLE_ENCODING_MODE_ERROR = "You cannot encore more features than mode with Builder, try making your own circuit by building your Circuit with Perceval"
 
