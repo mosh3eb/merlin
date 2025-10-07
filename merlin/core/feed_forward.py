@@ -469,9 +469,6 @@ class FeedForwardBlock(torch.nn.Module):
         print(f"New input size: {self.input_size}")
 
 
-import torch
-import perceval as pcvl  # Assuming 'pcvl' refers to Perceval quantum photonic framework
-
 class PoolingFeedForward(torch.nn.Module):
     """
     A quantum-inspired pooling module that aggregates amplitude information
@@ -602,10 +599,12 @@ class PoolingFeedForward(torch.nn.Module):
         )
 
         # Normalize to preserve total probability
-        sum_probs = output.abs().pow(2).sum(-1).sqrt()
+        sum_probs = output.abs().pow(2).sum(dim=-1, keepdim=True).sqrt()
         return output / sum_probs
 
-    def match_tuples(self, keys_in: list, keys_out: list, pooling_modes: list[list[int]]):
+    def match_tuples(
+        self, keys_in: list, keys_out: list, pooling_modes: list[list[int]]
+    ):
         """
         Matches input and output Fock state tuples based on pooling configuration.
 
