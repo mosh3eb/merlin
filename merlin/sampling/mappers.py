@@ -27,8 +27,9 @@ Output mapping implementations for quantum-to-classical conversion.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import warnings
 
-from .strategies import OutputMappingStrategy
+from .strategies import OutputMappingStrategy, MeasurementStrategy
 
 
 class OutputMapper:
@@ -40,12 +41,12 @@ class OutputMapper:
 
     @staticmethod
     def create_mapping(
-        strategy: OutputMappingStrategy, input_size: int, output_size: int
+        strategy: OutputMappingStrategy | MeasurementStrategy, input_size: int, output_size: int
     ):
         """Create an output mapping based on the specified strategy.
 
         Args:
-            strategy: The output mapping strategy to use
+            strategy: The measurement mapping strategy to use
             input_size: Size of the input probability distribution
             output_size: Desired size of the output tensor
 
@@ -54,7 +55,16 @@ class OutputMapper:
 
         Raises:
             ValueError: If strategy is unknown or sizes are incompatible for 'none' strategy
+            DeprecationWarning: If strategy is an OutputMappingStrategy
         """
+        if type(strategy) == OutputMappingStrategy:
+            warnings.warn('OutputMappingStrategy is deprecated and will be removed in version 0.3. '
+                  'Use MeasurementStrategy instead. Switching to MeasurementStrategy.FockDistribution by default.',
+                          DeprecationWarning, stacklevel=2)
+            strategy = MeasurementStrategy.FockDistribution
+
+        if strategy == MeasurementStrategy.FockDistribution:
+
         if strategy == OutputMappingStrategy.LINEAR:
             return nn.Linear(input_size, output_size)
         elif strategy in [
