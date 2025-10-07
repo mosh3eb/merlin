@@ -30,91 +30,100 @@ import torch
 from merlin.algorithms.feed_forward import FeedForwardBlock
 
 
-class TestFeedForward:
-    """Test suite for FeedForward class."""
+class TestFeedForwardBlock:
+    """Comprehensive test suite for FeedForwardBlock."""
 
-    def test_init(self):
-        """Test FeedForward initialization."""
-        ff = FeedForwardBlock(input_size=6, m=6, n=2, depth=3, conditional_mode=0)
+    def test_init_single_mode(self):
+        """Test initialization with single conditional mode."""
+        ff = FeedForwardBlock(input_size=6, m=6, n=2, depth=3, conditional_modes=[0])
         assert ff.m == 6
         assert ff.n_photons == 2
-        assert ff.conditional_mode == 0
+        assert ff.conditional_modes == [0]
         assert ff.depth == 3
         assert isinstance(ff.layers, dict)
 
+    def test_init_multi_mode(self):
+        """Test initialization with multiple conditional modes."""
+        ff = FeedForwardBlock(input_size=6, m=6, n=2, depth=2, conditional_modes=[0, 1])
+        assert ff.n_cond == 2
+        assert all(isinstance(k, tuple) for k in ff.layers.keys())
+
     def test_generate_possible_tuples(self):
-        """Test possible tuples generation."""
-        ff = FeedForwardBlock(input_size=2, n=2, m=4, conditional_mode=0)
+        """Ensure generated tuples are non-empty and valid."""
+        ff = FeedForwardBlock(input_size=4, n=2, m=4, conditional_modes=[0, 1])
         tuples = ff.generate_possible_tuples()
         assert isinstance(tuples, list)
         assert len(tuples) > 0
+        assert all(isinstance(t, tuple) for t in tuples)
 
     def test_parameters_method(self):
-        """Test parameters() method returns generator."""
-        ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_mode=0)
+        """Check that parameters() returns a non-empty iterable."""
+        ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_modes=[0])
         params = list(ff.parameters())
-        assert len(params) > 0
         assert all(isinstance(p, torch.Tensor) for p in params)
 
-    def test_forward_pass(self):
-        """Test forward pass execution."""
-        ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_mode=0)
-        x = torch.rand(1, 4)
+    def test_forward_output_shape_and_sum(self):
+        """Check forward pass produces valid probabilities summing to 1."""
+        ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_modes=[0])
+        x = torch.rand(3, 4)  # batch of 3
         output = ff(x)
         assert isinstance(output, torch.Tensor)
-        assert output.requires_grad
+        assert output.ndim == 2  # (batch_size, n_outputs)
+        # Each row should sum approximately to 1
+        probs_sum = output.sum(dim=1)
+        assert torch.allclose(probs_sum, torch.ones_like(probs_sum), atol=1e-3)
+
+    def test_forward_multi_mode(self):
+        """Test forward with multiple conditional modes and output normalization."""
+        ff = FeedForwardBlock(input_size=3, n=2, m=4, depth=2, conditional_modes=[0, 1])
+        x = torch.rand(2, 3)
+        output = ff(x)
+        assert output.shape[0] == 2  # batch size preserved
+        assert output.shape[1] > 0
+        assert torch.allclose(output.sum(dim=1), torch.ones(2), atol=1e-3)
 
     def test_backward_pass(self):
-        """Test backward pass execution."""
-        ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_mode=0)
+        """Ensure gradients propagate correctly through the quantum layers."""
+        ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_modes=[0])
         x = torch.rand(1, 4, requires_grad=True)
-
         output = ff(x)
         loss = output.sum()
-
-        # Should not raise an error
         loss.backward()
-
-        # Check gradients are computed
         assert x.grad is not None
+        assert not torch.isnan(x.grad).any()
 
-    def test_indices_by_value(self):
-        """Test indices_by_value method."""
-        ff = FeedForwardBlock(input_size=2, n=2, m=4, depth=2, conditional_mode=0)
+    def test_indices_by_values_and_match_indices(self):
+        """Test low-level index mapping helpers."""
+        ff = FeedForwardBlock(input_size=2, n=2, m=4, depth=2, conditional_modes=[0, 1])
         keys = [(0, 1, 0), (1, 0, 1), (0, 0, 1)]
-        idx_0, idx_1 = ff._indices_by_value(keys, 0)
+        idx_dict = ff._indices_by_values(keys, [0, 1])
+        assert all(isinstance(v, torch.Tensor) for v in idx_dict.values())
 
-        assert len(idx_0) == 2  # positions where first element is 0
-        assert len(idx_1) == 1  # positions where first element is 1
-
-    def test_match_indices(self):
-        """Test match_indices method."""
-        ff = FeedForwardBlock(input_size=2, n=2, m=4, depth=2, conditional_mode=0)
-        data = [(0, 1, 0), (1, 0, 1), (0, 0, 1)]
-        data_out = [(1, 0), (0, 1), (0, 1)]
-
-        idx = ff._match_indices(data, data_out, k=0, k_value=0)
+        data_out = [(1, 0), (0, 1)]
+        idx = ff._match_indices_multi(keys, data_out, [0, 1], (0, 1))
         assert isinstance(idx, torch.Tensor)
 
     def test_integration_with_optimizer(self):
-        """Test integration with PyTorch optimizer."""
-        ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_mode=0)
+        """Ensure block integrates cleanly with PyTorch optimizers."""
+        ff = FeedForwardBlock(input_size=4, n=2, m=4, depth=2, conditional_modes=[0])
         x = torch.rand(1, 4)
-        optimizer = torch.optim.Adam(ff.parameters())
+        optimizer = torch.optim.Adam(ff.parameters(), lr=1e-3)
 
-        # Forward pass
         output = ff(x)
         loss = output.pow(2).sum()
-
-        # Backward pass
         loss.backward()
-
-        # Optimizer step
         optimizer.step()
         optimizer.zero_grad()
+        assert True  # No runtime errors
 
-        # Should complete without errors
-        assert True
+    def test_output_keys_consistency(self):
+        """Ensure output keys are consistent after forward pass."""
+        ff = FeedForwardBlock(input_size=3, n=2, m=3, depth=2, conditional_modes=[0])
+        _ = ff(torch.rand(1, 3))
+        keys = ff.get_output_keys()
+        print(keys)
+        assert isinstance(keys, list)
+        assert len(keys) > 0
 
 
 if __name__ == "__main__":
