@@ -40,7 +40,6 @@ from ..builder.circuit_builder import (
     ANGLE_ENCODING_MODE_ERROR,
     CircuitBuilder,
 )
-from ..core.components import GenericInterferometer
 from ..core.process import ComputationProcessFactory
 from ..sampling.autodiff import AutoDiffProcess
 from ..sampling.strategies import OutputMappingStrategy
@@ -736,9 +735,8 @@ class QuantumLayer(nn.Module):
 
         # Trainable entangling layer before encoding
         builder.add_entangling_layer(trainable=True, name="gi_simple")
-        entangling_component = builder.circuit.components[-1]
         entangling_params = n_modes * (n_modes - 1)
-        
+
         requested_params = max(int(n_params), 0)
         if entangling_params > requested_params:
             warnings.warn(
@@ -762,7 +760,7 @@ class QuantumLayer(nn.Module):
 
         # Allocate additional trainable rotations only if the budget exceeds the entangling layer
         remaining = max(requested_params - entangling_params, 0)
-        
+
         layer_idx = 0
         added_rotation_params = 0
 

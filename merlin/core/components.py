@@ -114,7 +114,9 @@ class GenericInterferometer:
             raise TypeError("GenericInterferometer model must be provided as a string")
         normalized = (self.model or "mzi").lower()
         if normalized not in {"mzi", "bell"}:
-            raise ValueError("GenericInterferometer model must be either 'mzi' or 'bell'")
+            raise ValueError(
+                "GenericInterferometer model must be either 'mzi' or 'bell'"
+            )
         self.model = normalized
 
     def get_params(self) -> dict[str, Any]:

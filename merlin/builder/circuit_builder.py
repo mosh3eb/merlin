@@ -184,7 +184,9 @@ class CircuitBuilder:
         else:
             resolved_role = ParameterRole.FIXED
 
-        final_value = angle if angle is not None else (value if value is not None else 0.0)
+        final_value = (
+            angle if angle is not None else (value if value is not None else 0.0)
+        )
 
         for current_mode in target_modes:
             if current_mode < 0 or current_mode >= self.n_modes:
@@ -195,10 +197,14 @@ class CircuitBuilder:
                     custom_name = f"{name}{self._input_counter + 1}"
                     self._input_counter += 1
                 elif resolved_role == ParameterRole.TRAINABLE:
-                    base_name = f"{name}_{current_mode}" if len(target_modes) > 1 else name
+                    base_name = (
+                        f"{name}_{current_mode}" if len(target_modes) > 1 else name
+                    )
                     custom_name = self._unique_trainable_name(base_name)
                 else:
-                    custom_name = f"{name}_{current_mode}" if len(target_modes) > 1 else name
+                    custom_name = (
+                        f"{name}_{current_mode}" if len(target_modes) > 1 else name
+                    )
             elif resolved_role == ParameterRole.INPUT:
                 custom_name = f"px{self._input_counter + 1}"
                 self._input_counter += 1
@@ -298,9 +304,7 @@ class CircuitBuilder:
                 target_modes[(emitted + offset) % len(target_modes)]
                 for offset in range(span)
             ]
-            self.add_rotations(
-                modes=chunk_modes, role=ParameterRole.INPUT, name=name
-            )
+            self.add_rotations(modes=chunk_modes, role=ParameterRole.INPUT, name=name)
             emitted += span
 
         spec_list = self._angle_encoding_specs.setdefault(name, [])
@@ -481,9 +485,7 @@ class CircuitBuilder:
             if trainable_phi is not None:
                 phi_flag = trainable_phi
 
-            theta_role = (
-                ParameterRole.TRAINABLE if theta_flag else ParameterRole.FIXED
-            )
+            theta_role = ParameterRole.TRAINABLE if theta_flag else ParameterRole.FIXED
             phi_role = ParameterRole.TRAINABLE if phi_flag else ParameterRole.FIXED
 
             total_components = depth * len(resolved_pairs)
@@ -499,14 +501,16 @@ class CircuitBuilder:
                 phi_base = f"{name}_phi"
 
             component_index = 0
-            for depth_idx in range(depth):
-                for pair_idx, pair in enumerate(resolved_pairs):
+            for _depth_idx in range(depth):
+                for _pair_idx, pair in enumerate(resolved_pairs):
                     suffix = "" if single_component else f"_{component_index}"
                     theta_name = None
                     phi_name = None
 
                     if theta_role == ParameterRole.TRAINABLE:
-                        base_name = theta_base if not suffix else f"{theta_base}{suffix}"
+                        base_name = (
+                            theta_base if not suffix else f"{theta_base}{suffix}"
+                        )
                         theta_name = self._unique_trainable_name(base_name)
                         self._register_trainable_prefix(theta_name)
 
@@ -661,8 +665,12 @@ class CircuitBuilder:
                 model = getattr(component, "model", "mzi")
 
                 if model == "mzi":
+
                     def _mzi_factory(
-                        i: int, *, trainable: bool = component.trainable, base: str = prefix
+                        i: int,
+                        *,
+                        trainable: bool = component.trainable,
+                        base: str = prefix,
                     ):
                         """Build a Mach-Zehnder interferometer optionally parameterised per index."""
                         if trainable:
@@ -686,8 +694,12 @@ class CircuitBuilder:
                     pcvl_circuit.add(component.start_mode, gi)
 
                 elif model == "bell":
+
                     def _bell_factory(
-                        i: int, *, trainable: bool = component.trainable, base: str = prefix
+                        i: int,
+                        *,
+                        trainable: bool = component.trainable,
+                        base: str = prefix,
                     ):
                         """Build a Mach-Zehnder interferometer optionally parameterised per index."""
                         if trainable:
@@ -696,13 +708,13 @@ class CircuitBuilder:
                         else:
                             phi_inner = 0.0
                             phi_outer = 0.0
-                        
+
                         circuit = pcvl_module.Circuit(2)
                         circuit.add(0, pcvl_module.BS())
                         circuit.add(0, pcvl_module.PS(phi_inner))
                         circuit.add(1, pcvl_module.PS(phi_outer))
                         circuit.add(0, pcvl_module.BS())
-                        
+
                         return circuit
 
                     gi = pcvl_module.GenericInterferometer(
