@@ -26,7 +26,7 @@ Example: Quickstart QuantumLayer
    :align: center
 
 The simple quantum layer above implements a circuit of 10 modes and 5 photons with at least 90 trainable parameters. This circuit is made of:
-- A first generic interferometer (trainable)
+- A first entangling layer (trainable)
 - Angle encoding on the first N modes (for N input parameters with `input_size <= n_modes`)
 - Add rotations to match the correct number of trainable parameters
 
@@ -37,7 +37,7 @@ Example: Declarative builder API
 
     from merlin.builder import CircuitBuilder
     builder = CircuitBuilder(n_modes=6)
-    builder.add_generic_interferometer(trainable=True, name="U1")
+    builder.add_entangling_layer(trainable=True, name="U1")
     builder.add_angle_encoding(modes=list(range(4)), name="input")
     builder.add_rotations(trainable=True, name="theta")
     builder.add_superpositions(depth=1)
@@ -58,7 +58,7 @@ Example: Declarative builder API
 
 The circuit builder allows you to build your circuit layer by layer, with a high-level API. The example above implements a circuit of 6 modes and 3 photons.
 This circuit is made of:
-- A first generic interferometer (trainable)
+- A first entangling layer (trainable)
 - Angle encoding on the first 4 modes (for 4 input parameters with the name "input")
 - A trainable rotation layer to add more trainable parameters
 - An entangling layer to add more expressivity
@@ -67,7 +67,7 @@ Other building blocks in the CircuitBuilder include:
 
 - **add_rotations**: Add single or multiple phase shifters (rotations) to specific modes. Rotations can be fixed, trainable, or data-driven (input-encoded).
 - **add_angle_encoding**: Encode classical data as quantum rotation angles, supporting higher-order feature combinations for expressive input encoding.
-- **add_generic_interferometer**: Insert a generic, multi-mode interferometer block, optionally trainable, for universal linear mixing.
+- **add_entangling_layer**: Insert a multi-mode entangling layer (implemented via a generic interferometer), optionally trainable, for universal linear mixing.
 - **add_superpositions**: Add one or more beam splitters (superposition layers) with configurable targets, depth, and trainability.
 - **begin_section / end_section / add_adjoint_section**: Define modular circuit sections, optionally with adjoint (inverse) structure and parameter sharing for advanced workflows.
 

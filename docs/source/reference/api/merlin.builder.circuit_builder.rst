@@ -53,29 +53,29 @@ Below are the components available in the `CircuitBuilder` class:
 
 This will show as a rotation layer as data is encoded in phase shifters.
 
-3. **add_generic_interferometer**:
-   - Adds a generic interferometer spanning a range of modes.
+3. **add_entangling_layer**:
+   - Adds an entangling layer spanning a range of modes (implemented with a generic interferometer).
    - Arguments:
      - `modes` (list[int]): Modes to span.
-     - `trainable` (bool): Whether the interferometer is trainable.
+     - `trainable` (bool): Whether the entangling layer is trainable.
      - `name` (str): Optional prefix for parameter names.
 
 .. code-block:: python
    builder = CircuitBuilder(n_modes=6)
-   builder.add_generic_interferometer(trainable=True, name="U1")
+   builder.add_entangling_layer(trainable=True, name="U1")
 
 .. image:: ../../_static/img/builder_layer/generic.png
-   :alt: A Generic Interferometer built with CircuitBuilder
+   :alt: An entangling layer built with CircuitBuilder
    :width: 200px
    :align: center
 
 And to span it on different modes
 .. code-block:: python
    builder = CircuitBuilder(n_modes=6)
-   builder.add_generic_interferometer(trainable=True, name="U1", modes = [0,3])
+   builder.add_entangling_layer(trainable=True, name="U1", modes = [0,3])
 
 .. image:: ../../_static/img/builder_layer/generic_0_3.png
-   :alt: A Generic Interferometer built with CircuitBuilder
+   :alt: An entangling layer built with CircuitBuilder
    :width: 200px
    :align: center
 

@@ -360,9 +360,9 @@ def test_trainable_name_deduplication_for_single_rotation():
     assert builder.trainable_parameter_prefixes == ["phi"]
 
 
-def test_generic_interferometer_defaults():
+def test_entangling_layer_defaults():
     builder = CircuitBuilder(n_modes=4)
-    builder.add_generic_interferometer()
+    builder.add_entangling_layer()
 
     component = builder.circuit.components[-1]
     assert isinstance(component, GenericInterferometer)
@@ -370,13 +370,13 @@ def test_generic_interferometer_defaults():
     assert component.span == 4
     assert component.trainable is True
     assert any(
-        prefix.startswith("gi") for prefix in builder.trainable_parameter_prefixes
+        prefix.startswith("el") for prefix in builder.trainable_parameter_prefixes
     )
 
 
-def test_generic_interferometer_mode_range_and_non_trainable():
+def test_entangling_layer_mode_range_and_non_trainable():
     builder = CircuitBuilder(n_modes=5)
-    builder.add_generic_interferometer(modes=[2], trainable=False)
+    builder.add_entangling_layer(modes=[2], trainable=False)
 
     component = builder.circuit.components[-1]
     assert isinstance(component, GenericInterferometer)
@@ -385,28 +385,28 @@ def test_generic_interferometer_mode_range_and_non_trainable():
     assert component.trainable is False
     assert builder.trainable_parameter_prefixes == []
 
-    builder.add_generic_interferometer(modes=[1, 3], trainable=True, name="block")
+    builder.add_entangling_layer(modes=[1, 3], trainable=True, name="block")
     last = builder.circuit.components[-1]
     assert last.start_mode == 1 and last.span == 3
     assert "block" in builder.trainable_parameter_prefixes
 
 
-def test_generic_interferometer_invalid_modes():
+def test_entangling_layer_invalid_modes():
     builder = CircuitBuilder(n_modes=4)
 
     with pytest.raises(ValueError):
-        builder.add_generic_interferometer(modes=[5])
+        builder.add_entangling_layer(modes=[5])
 
     with pytest.raises(ValueError):
-        builder.add_generic_interferometer(modes=[1, 1])
+        builder.add_entangling_layer(modes=[1, 1])
 
     with pytest.raises(ValueError):
-        builder.add_generic_interferometer(modes=[0, 1, 2])
+        builder.add_entangling_layer(modes=[0, 1, 2])
 
 
-def test_generic_interferometer_to_pcvl_registers_parameters():
+def test_entangling_layer_to_pcvl_registers_parameters():
     builder = CircuitBuilder(n_modes=4)
-    builder.add_generic_interferometer(name="bridge")
+    builder.add_entangling_layer(name="bridge")
 
     pcvl_circuit = builder.to_pcvl_circuit(pcvl)
     params = pcvl_circuit.get_parameters()
@@ -414,10 +414,10 @@ def test_generic_interferometer_to_pcvl_registers_parameters():
     assert any(p.name.startswith("bridge_lo") for p in params)
 
 
-def test_generic_interferometer_layer_trains():
+def test_entangling_layer_layer_trains():
     builder = CircuitBuilder(n_modes=4)
     builder.add_angle_encoding(modes=[0, 1, 2, 3], name="input")
-    builder.add_generic_interferometer(trainable=True, name="gi")
+    builder.add_entangling_layer(trainable=True, name="gi")
 
     layer = QuantumLayer(
         input_size=4,
@@ -439,10 +439,10 @@ def test_generic_interferometer_layer_trains():
     )
 
 
-def test_generic_interferometer_with_additional_components_trains():
+def test_entangling_layer_with_additional_components_trains():
     builder = CircuitBuilder(n_modes=5)
     builder.add_angle_encoding(modes=[0, 1, 2, 3, 4], name="input")
-    builder.add_generic_interferometer(trainable=True, name="core", modes=[2])
+    builder.add_entangling_layer(trainable=True, name="core", modes=[2])
     builder.add_rotations(trainable=True, name="theta")
     builder.add_superpositions(depth=1)
 

@@ -48,7 +48,7 @@ class CircuitBuilder:
         self._trainable_counter = 0
         self._input_counter = 0
         self._copy_counter = 0
-        self._generic_counter = 0
+        self._entangling_layer_counter = 0
         self._superposition_counter = 0
         self._entangling_counter = 0
 
@@ -348,14 +348,14 @@ class CircuitBuilder:
         factor = float(scale)
         return dict.fromkeys(feature_indices, factor)
 
-    def add_generic_interferometer(
+    def add_entangling_layer(
         self,
         modes: list[int] | None = None,
         *,
         trainable: bool = True,
         name: str | None = None,
     ) -> "CircuitBuilder":
-        """Add a generic interferometer spanning a range of modes.
+        """Add an entangling layer spanning a range of modes.
 
         Args:
             modes: Optional list describing the span. ``None`` targets all modes;
@@ -383,21 +383,21 @@ class CircuitBuilder:
                 start, end = modes
             else:
                 raise ValueError(
-                    "`modes` must be None, a single index, or a two-element range for generic interferometers."
+                    "`modes` must be None, a single index, or a two-element range for entangling layers."
                 )
 
         if start > end:
             start, end = end, start
 
         if start < 0 or end >= self.n_modes:
-            raise ValueError("Generic interferometer span exceeds available modes")
+            raise ValueError("Entangling layer span exceeds available modes")
 
         span = end - start + 1
         if span < 2:
-            raise ValueError("Generic interferometer requires at least two modes")
+            raise ValueError("Entangling layer requires at least two modes")
 
         if name is None:
-            prefix = f"gi_{self._generic_counter}"
+            prefix = f"el_{self._entangling_layer_counter}"
         else:
             prefix = name
 
@@ -413,7 +413,7 @@ class CircuitBuilder:
         if trainable:
             self._register_trainable_prefix(prefix)
 
-        self._generic_counter += 1
+        self._entangling_layer_counter += 1
         self._layer_counter += 1
         return self
 

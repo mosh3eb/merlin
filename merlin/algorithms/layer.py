@@ -707,7 +707,7 @@ class QuantumLayer(nn.Module):
 
         The circuit is assembled via :class:`CircuitBuilder` with the following layout:
 
-        1. A fully trainable generic interferometer acting on all modes;
+        1. A fully trainable entangling layer acting on all modes;
         2. A full input encoding layer spanning all encoded features;
         3. A non-trainable entangling layer that redistributes encoded information;
         4. Optional trainable rotation layers to reach the requested ``n_params`` budget;
@@ -734,25 +734,18 @@ class QuantumLayer(nn.Module):
 
         builder = CircuitBuilder(n_modes=n_modes)
 
-        # Trainable generic interferometer before encoding
-        builder.add_generic_interferometer(trainable=True, name="gi_simple")
-        generic_component = builder.circuit.components[-1]
-        generic_params = 0
-        if (
-            isinstance(generic_component, GenericInterferometer)
-            and generic_component.trainable
-            and generic_component.span >= 2
-        ):
-            mzi_count = generic_component.span * (generic_component.span - 1) // 2
-            generic_params = 2 * mzi_count
-
+        # Trainable entangling layer before encoding
+        builder.add_entangling_layer(trainable=True, name="gi_simple")
+        entangling_component = builder.circuit.components[-1]
+        entangling_params = n_modes * (n_modes - 1)
+        
         requested_params = max(int(n_params), 0)
-        if generic_params > requested_params:
+        if entangling_params > requested_params:
             warnings.warn(
-                "Generic interferometer introduces "
-                f"{generic_params} trainable parameters, exceeding the requested "
+                "Entangling layer introduces "
+                f"{entangling_params} trainable parameters, exceeding the requested "
                 f"budget of {requested_params}. The simple layer will expose "
-                f"{generic_params} trainable parameters.",
+                f"{entangling_params} trainable parameters.",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -767,10 +760,9 @@ class QuantumLayer(nn.Module):
             subset_combinations=False,
         )
 
-        builder.add_superpositions(depth=1)
-
-        # Allocate additional trainable rotations only if the budget exceeds the interferometer
-        remaining = max(requested_params - generic_params, 0)
+        # Allocate additional trainable rotations only if the budget exceeds the entangling layer
+        remaining = max(requested_params - entangling_params, 0)
+        
         layer_idx = 0
         added_rotation_params = 0
 
@@ -788,10 +780,10 @@ class QuantumLayer(nn.Module):
             layer_idx += 1
 
         # Post-rotation entanglement
-        builder.add_superpositions(depth=1)
+        builder.add_superpositions()
 
-        total_trainable = generic_params + added_rotation_params
-        expected_trainable = max(requested_params, generic_params)
+        total_trainable = entangling_params + added_rotation_params
+        expected_trainable = max(requested_params, entangling_params)
         if total_trainable != expected_trainable:
             raise ValueError(
                 "Constructed circuit exposes "
