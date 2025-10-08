@@ -4,8 +4,6 @@ Circuit builder for constructing quantum circuits declaratively.
 
 import math
 import numbers
-import warnings
-from copy import deepcopy
 from itertools import combinations
 from typing import Any
 
@@ -47,17 +45,9 @@ class CircuitBuilder:
         self._layer_counter = 0
         self._trainable_counter = 0
         self._input_counter = 0
-        self._copy_counter = 0
         self._entangling_layer_counter = 0
         self._superposition_counter = 0
         self._entangling_counter = 0
-
-        # Section tracking for adjoint support
-        self._section_markers: list[Any] = []
-        self._current_section: dict[str, Any] | None = None
-
-        # Track components before any sections for "_all_" reference
-        self._pre_section_end_idx = 0
 
         self._trainable_prefixes: list[str] = []
         self._trainable_prefix_set: set[str] = set()
@@ -574,241 +564,12 @@ class CircuitBuilder:
         self.circuit.add(block)
         return self
 
-    def begin_section(
-        self,
-        name: str,
-        compute_adjoint: bool = False,
-        reference: str | None = None,
-        share_trainable: bool = True,
-        share_input: bool = False,
-    ) -> "CircuitBuilder":
-        """
-        Mark the beginning of a circuit section.
-
-        Args:
-            name: Name of the section
-            compute_adjoint: Whether to compute the adjoint of this section
-            reference: Name of section to copy structure from (or "_all_" for all preceding)
-            share_trainable: Whether to share trainable parameters from reference
-            share_input: Whether to share input parameters from reference
-
-        Returns:
-            CircuitBuilder: ``self`` so builder calls can be chained.
-        """
-        if self._current_section is not None:
-            warnings.warn(
-                f"Section '{self._current_section['name']}' was not closed. Closing it now.",
-                stacklevel=2,
-            )
-            self.end_section()
-
-        # Update pre-section end index if this is the first section
-        if not self._section_markers and reference != "_all_":
-            self._pre_section_end_idx = len(self.circuit.components)
-
-        self._current_section = {
-            "name": name,
-            "compute_adjoint": compute_adjoint,
-            "reference": reference,
-            "share_trainable": share_trainable,
-            "share_input": share_input,
-            "start_idx": len(self.circuit.components),
-        }
-
-        # If referencing, copy components now
-        if reference:
-            self._copy_from_reference(reference)
-            # End section immediately after copying
-            self._current_section["end_idx"] = len(self.circuit.components)
-            self._section_markers.append(self._current_section)
-            self._current_section = None
-
-        return self
-
-    def add_adjoint_section(
-        self,
-        name: str,
-        reference: str,
-        share_trainable: bool = True,
-        share_input: bool = True,
-    ) -> "CircuitBuilder":
-        """Convenience method for adding adjoint of an existing section.
-
-        Args:
-            name: Name assigned to the new adjoint section.
-            reference: Existing section to mirror.
-            share_trainable: Whether to reuse the referenced trainable parameters.
-            share_input: Whether to reuse the referenced input parameters.
-
-        Returns:
-            CircuitBuilder: ``self`` for fluent chaining.
-        """
-        return self.begin_section(
-            name=name,
-            compute_adjoint=True,
-            reference=reference,
-            share_trainable=share_trainable,
-            share_input=share_input,
-        )
-
-    def _copy_from_reference(self, ref_name: str):
-        """Copy components from referenced section with parameter sharing rules.
-
-        Args:
-            ref_name: Name of the section (or ``"_all_"`` for the pre-section content) to copy.
-        """
-        if ref_name == "_all_":
-            # Copy everything before sections started
-            start_idx = 0
-            end_idx = self._pre_section_end_idx
-        else:
-            # Find the referenced section
-            ref_section = None
-            for section in self._section_markers:
-                if section["name"] == ref_name:
-                    ref_section = section
-                    break
-
-            if not ref_section:
-                raise ValueError(f"Section '{ref_name}' not found")
-
-            start_idx = ref_section["start_idx"]
-            end_idx = ref_section["end_idx"]
-
-        # Copy components with parameter transformation
-        for idx in range(start_idx, end_idx):
-            comp = self.circuit.components[idx]
-            new_comp = self._transform_component(
-                comp,
-                self._current_section["share_trainable"],
-                self._current_section["share_input"],
-            )
-            self.circuit.add(new_comp)
-
-    def _transform_component(self, comp, share_trainable, share_input):
-        """Transform a copied component according to sharing rules.
-
-        Args:
-            comp: Original component instance to duplicate.
-            share_trainable: Whether trainable parameters should be reused.
-            share_input: Whether input-parameter names should be reused.
-
-        Returns:
-            Any: Deep-copied component with adjusted parameter naming.
-        """
-        new_comp = deepcopy(comp)
-
-        if isinstance(comp, Rotation):
-            if comp.role == ParameterRole.TRAINABLE:
-                if not share_trainable:
-                    # Generate new trainable parameter name
-                    if comp.custom_name:
-                        new_comp.custom_name = (
-                            f"{comp.custom_name}_copy{self._copy_counter}"
-                        )
-                    else:
-                        new_comp.custom_name = f"theta_copy_{self._copy_counter}"
-                    self._copy_counter += 1
-                self._register_trainable_prefix(
-                    new_comp.custom_name or comp.custom_name
-                )
-            elif comp.role == ParameterRole.INPUT:
-                if not share_input:
-                    # Generate new input parameter name
-                    if comp.custom_name:
-                        base_name = comp.custom_name.rstrip("0123456789")
-                    else:
-                        base_name = "px"
-                    new_comp.custom_name = f"{base_name}{self._input_counter}"
-                    self._input_counter += 1
-                self._register_input_prefix(new_comp.custom_name or comp.custom_name)
-
-        elif isinstance(comp, BeamSplitter):
-            # Handle beam splitter parameter transformation
-            if comp.theta_role == ParameterRole.TRAINABLE and not share_trainable:
-                if comp.theta_name:
-                    new_comp.theta_name = f"{comp.theta_name}_copy{self._copy_counter}"
-                else:
-                    new_comp.theta_name = f"theta_bs_copy_{self._copy_counter}"
-                self._copy_counter += 1
-            if comp.theta_role == ParameterRole.TRAINABLE:
-                self._register_trainable_prefix(new_comp.theta_name or comp.theta_name)
-            elif comp.theta_role == ParameterRole.INPUT and not share_input:
-                if comp.theta_name:
-                    base_name = comp.theta_name.rstrip("0123456789")
-                else:
-                    base_name = "x_bs"
-                new_comp.theta_name = f"{base_name}{self._input_counter}"
-                self._input_counter += 1
-                self._register_input_prefix(new_comp.theta_name)
-            elif comp.theta_role == ParameterRole.INPUT:
-                self._register_input_prefix(comp.theta_name)
-
-            # Same for phi
-            if comp.phi_role == ParameterRole.TRAINABLE and not share_trainable:
-                if comp.phi_name:
-                    new_comp.phi_name = f"{comp.phi_name}_copy{self._copy_counter}"
-                else:
-                    new_comp.phi_name = f"phi_bs_copy_{self._copy_counter}"
-                self._copy_counter += 1
-            if comp.phi_role == ParameterRole.TRAINABLE:
-                self._register_trainable_prefix(new_comp.phi_name or comp.phi_name)
-            elif comp.phi_role == ParameterRole.INPUT and not share_input:
-                if comp.phi_name:
-                    base_name = comp.phi_name.rstrip("0123456789")
-                else:
-                    base_name = "x_phi"
-                new_comp.phi_name = f"{base_name}{self._input_counter}"
-                self._input_counter += 1
-                self._register_input_prefix(new_comp.phi_name)
-            elif comp.phi_role == ParameterRole.INPUT:
-                self._register_input_prefix(comp.phi_name)
-
-        # EntanglingBlock doesn't need special handling as its parameters
-        # are generated during compilation
-
-        return new_comp
-
-    def end_section(self) -> "CircuitBuilder":
-        """Mark the end of the current circuit section.
-
-        Returns:
-            CircuitBuilder: ``self`` so builder calls can be chained.
-        """
-        if self._current_section:
-            self._current_section["end_idx"] = len(self.circuit.components)
-            self._section_markers.append(self._current_section)
-            self._current_section = None
-        else:
-            warnings.warn("No section to end", stacklevel=2)
-        return self
-
     def build(self) -> Circuit:
-        """Build and return the circuit, finalising any open sections.
+        """Build and return the circuit.
 
         Returns:
-            Circuit: Circuit instance populated with components and metadata.
+            Circuit: Circuit instance populated with components.
         """
-        # Close any open section
-        if self._current_section is not None:
-            warnings.warn(
-                f"Section '{self._current_section['name']}' was not closed. Closing it now.",
-                stacklevel=2,
-            )
-            self.end_section()
-
-        # Finalize the circuit to ensure metadata is complete
-        return self.finalize_circuit()
-
-    def finalize_circuit(self):
-        """Ensure metadata reflects defined sections before returning the circuit.
-
-        Returns:
-            Circuit: Circuit with updated section metadata.
-        """
-        # Ensure 'sections' key is always added to metadata
-        self.circuit.metadata["sections"] = self._section_markers or []
-
         return self.circuit
 
     def to_pcvl_circuit(self, pcvl_module=None):

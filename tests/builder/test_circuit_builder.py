@@ -9,12 +9,7 @@ import torch
 
 from merlin import OutputMappingStrategy, QuantumLayer
 from merlin.builder import CircuitBuilder
-from merlin.core.components import (
-    BeamSplitter,
-    GenericInterferometer,
-    ParameterRole,
-    Rotation,
-)
+from merlin.core.components import GenericInterferometer, ParameterRole, Rotation
 from merlin.pcvl_pytorch.locirc_to_tensor import CircuitConverter
 
 _PS_TYPE = type(pcvl.PS(0.0))
@@ -56,46 +51,6 @@ def test_add_rotations_input_custom_prefix_uses_global_counter():
     assert [rotation.target for rotation in rotations] == [1, 3]
     assert [rotation.custom_name for rotation in rotations] == ["feature1", "feature2"]
     assert all(rotation.role == ParameterRole.INPUT for rotation in rotations)
-
-
-def test_section_reference_copies_components_without_sharing_trainables():
-    builder = CircuitBuilder(n_modes=2)
-    builder.add_rotations(trainable=True, name="theta")
-
-    builder.begin_section("first")
-    builder.add_superpositions(
-        targets=(0, 1),
-        theta=0.25,
-        trainable_theta=True,
-        name="bs",
-    )
-    builder.end_section()
-
-    builder.begin_section("second", reference="first", share_trainable=False)
-
-    original, cloned = builder.circuit.components[-2:]
-    assert isinstance(original, BeamSplitter)
-    assert isinstance(cloned, BeamSplitter)
-    assert cloned is not original
-    assert cloned.theta_role == ParameterRole.TRAINABLE
-    assert cloned.theta_name == "bs_theta_copy0"
-    assert cloned.theta_value == pytest.approx(original.theta_value)
-
-
-def test_build_closes_open_sections_and_sets_metadata():
-    builder = CircuitBuilder(n_modes=1)
-    builder.begin_section("encoder", compute_adjoint=True)
-    builder.add_rotations(modes=0)
-
-    with pytest.warns(UserWarning):
-        circuit = builder.build()
-    sections = circuit.metadata["sections"]
-    assert len(sections) == 1
-    section = sections[0]
-    assert section["name"] == "encoder"
-    assert section["compute_adjoint"] is True
-    assert section["start_idx"] == 0
-    assert section["end_idx"] == len(circuit.components)
 
 
 def test_complex_builder_pipeline_exports_pcvl_circuit():

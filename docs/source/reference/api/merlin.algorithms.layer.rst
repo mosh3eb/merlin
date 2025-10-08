@@ -69,7 +69,6 @@ Other building blocks in the CircuitBuilder include:
 - **add_angle_encoding**: Encode classical data as quantum rotation angles, supporting higher-order feature combinations for expressive input encoding.
 - **add_entangling_layer**: Insert a multi-mode entangling layer (implemented via a generic interferometer), optionally trainable, and tune its internal template with the ``model`` argument (``"mzi"`` or ``"bell"``) for different mixing behaviours.
 - **add_superpositions**: Add one or more beam splitters (superposition layers) with configurable targets, depth, and trainability.
-- **begin_section / end_section / add_adjoint_section**: Define modular circuit sections, optionally with adjoint (inverse) structure and parameter sharing for advanced workflows.
 
 Example: Manual Perceval circuit (more control)
 -----------------------------------------------

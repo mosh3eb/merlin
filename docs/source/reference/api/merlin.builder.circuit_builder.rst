@@ -116,48 +116,5 @@ Switching to a Bell-style interferometer is as simple as:
    :width: 200px
    :align: center
 
-5. **begin_section**:
-   - Marks the beginning of a circuit section.
-   - Arguments:
-     - `name` (str): Name of the section.
-     - `compute_adjoint` (bool): Whether to compute the adjoint of this section.
-     - `reference` (str): Name of the section to copy structure from.
-     - `share_trainable` (bool): Whether to share trainable parameters from the reference.
-     - `share_input` (bool): Whether to share input parameters from the reference.
-
-6. **end_section**:
-   - Marks the end of the current circuit section.
-
-.. code-block:: python
-   builder = CircuitBuilder(n_modes=6)
-   builder.begin_section(name="encoding", compute_adjoint=False)
-   builder.add_angle_encoding(modes=list(range(X_train.shape[1])), name="input")
-   builder.end_section()
-
-.. image:: ../../_static/img/builder_layer/with_1_section.png
-   :alt: A Section with an encoding layer
-   :width: 200px
-   :align: center
-
-7. **add_adjoint_section**:
-   - Adds the adjoint of an existing section.
-   - Arguments:
-     - `name` (str): Name of the new adjoint section.
-     - `reference` (str): Existing section to mirror.
-     - `share_trainable` (bool): Whether to reuse trainable parameters.
-     - `share_input` (bool): Whether to reuse input parameters.
-
-.. code-block:: python
-   builder = CircuitBuilder(n_modes=6)
-   builder.begin_section(name="trainable", compute_adjoint=False)
-   builder.add_rotations(trainable=True, name="theta")
-   builder.end_section()
-   builder.add_adjoint_section(name="adjoint_trainable", reference="trainable", share_trainable=False, share_input=False)
-
-.. image:: ../../_static/img/builder_layer/with_adjoint_sections.png
-   :alt: A Section with an adjoint section
-   :width: 200px
-   :align: center
-
-8. **build**:
+5. **build**:
     - Finalizes and returns the constructed circuit.
