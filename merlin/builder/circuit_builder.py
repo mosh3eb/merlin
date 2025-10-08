@@ -629,7 +629,7 @@ class CircuitBuilder:
                 if component.phi_role == ParameterRole.FIXED:
                     phi_tr = component.phi_value
                 else:
-                    phi_name = component.phi_name or f"theta_bs_{idx}"
+                    phi_name = component.phi_name or f"phi_bs_{idx}"
                     phi_tr = pcvl_module.P(phi_name)
 
                 pcvl_circuit.add(

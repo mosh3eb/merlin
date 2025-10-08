@@ -9,7 +9,12 @@ import torch
 
 from merlin import OutputMappingStrategy, QuantumLayer
 from merlin.builder import CircuitBuilder
-from merlin.core.components import GenericInterferometer, ParameterRole, Rotation
+from merlin.core.components import (
+    BeamSplitter,
+    GenericInterferometer,
+    ParameterRole,
+    Rotation,
+)
 from merlin.pcvl_pytorch.locirc_to_tensor import CircuitConverter
 
 _PS_TYPE = type(pcvl.PS(0.0))
@@ -89,6 +94,24 @@ def test_trainable_entangling_layer_generates_parameterised_mixers():
     assert any(name.startswith("mix_theta_") for name in param_names)
     assert any(name.startswith("mix_phi_") for name in param_names)
     assert "mix" in builder.trainable_parameter_prefixes
+
+
+def test_pcvl_export_keeps_theta_and_phi_fallback_names_distinct():
+    builder = CircuitBuilder(n_modes=2)
+    builder.circuit.add(
+        BeamSplitter(
+            targets=(0, 1),
+            theta_role=ParameterRole.TRAINABLE,
+            phi_role=ParameterRole.TRAINABLE,
+        )
+    )
+
+    circuit = builder.to_pcvl_circuit(pcvl)
+    param_names = {param.name for param in circuit.get_parameters()}
+
+    assert any(name.startswith("theta_bs_") for name in param_names)
+    assert any(name.startswith("phi_bs_") for name in param_names)
+    assert len(param_names) == 2
 
 
 def test_to_pcvl_circuit_supports_gradient_backpropagation():
