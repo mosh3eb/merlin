@@ -159,51 +159,43 @@ class FeedForwardBlock(torch.nn.Module):
         conditional_modes: list[int] = None,
         layers: list = None,
         circuit_type=None,
+        device=None,
     ):
         super().__init__()
 
-        # Basic physical and architecture parameters
-        self.m = m  # number of modes
-        self.n_photons = n  # number of photons
+        self.m = m
+        self.n_photons = n
         self.input_size = input_size
         self.state_injection = state_injection
+        self.device = device or torch.device("cpu")
 
-        # Conditional measurement modes (defines branching factor)
         self.conditional_modes = conditional_modes or [0]
         self.n_cond = len(self.conditional_modes)
-
-        # Depth of feedforward recursion (default = m - 1)
         self.depth = depth if depth is not None else (self.m - 1)
 
-        # Dictionary storing quantum layers for each conditional tuple
         self.layers = {}
-
-        # Track the mapping between layer input sizes and global input vector
         self.input_segments = {}
         self.output_keys = None
 
-        # Initialize quantum layers (either provided or auto-defined)
         if layers is None:
             self.define_layers(circuit_type)
         else:
-            # If user passes explicit layers, associate them with tuples
             tuples = self.generate_possible_tuples()
             self.tuples = tuples
             assert len(tuples) == len(layers), (
                 "Mismatch between number of tuples and provided layers."
             )
-
-            # Map each tuple (leaf of the tree) to a QuantumLayer instance
             self.layers = {tuples[k]: layers[k] for k in range(len(layers))}
 
-            # Define segment indexing for slicing the classical input vector
             start = 0
             for tup in tuples:
                 input_size = self.layers[tup].input_size
                 self.input_segments[tup] = (start, start + input_size)
                 start += input_size
-
             assert start == self.input_size, f"Input size mismatch: {start}"
+
+        # Move everything to device immediately
+        self.to(self.device)
 
     # =======================================================================
     #  Tuple and Layer Definition Utilities
@@ -296,6 +288,27 @@ class FeedForwardBlock(torch.nn.Module):
             start += local_input
 
         assert input_size == 0, f"Remaining unallocated input size: {input_size}"
+
+    def to(self, device):
+        """
+        Moves the FeedForwardBlock and all its QuantumLayers to the specified device.
+
+        Args:
+            device (str or torch.device): Target device ('cpu', 'cuda', 'mps', etc.)
+        """
+        device = torch.device(device)
+        self.device = device
+        super().to(device)
+
+        # Move all quantum layers and their parameters
+        for _, layer in self.layers.items():
+            if hasattr(layer, "to"):
+                layer.to(device)
+            elif hasattr(layer, "parameters"):
+                for p in layer.parameters():
+                    p.data = p.data.to(device)
+
+        return self
 
     # =======================================================================
     #  Recursive Feedforward Computation
