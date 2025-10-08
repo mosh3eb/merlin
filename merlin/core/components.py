@@ -106,6 +106,16 @@ class GenericInterferometer:
     span: int
     trainable: bool = True
     name_prefix: str | None = None
+    model: str = "mzi"
+
+    def __post_init__(self):
+        """Validate and normalise the interferometer model."""
+        if not isinstance(self.model, str):
+            raise TypeError("GenericInterferometer model must be provided as a string")
+        normalized = (self.model or "mzi").lower()
+        if normalized not in {"mzi", "bell"}:
+            raise ValueError("GenericInterferometer model must be either 'mzi' or 'bell'")
+        self.model = normalized
 
     def get_params(self) -> dict[str, Any]:
         """Return placeholder names for every internal interferometer parameter.

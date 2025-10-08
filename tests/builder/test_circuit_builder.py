@@ -369,6 +369,7 @@ def test_entangling_layer_defaults():
     assert component.start_mode == 0
     assert component.span == 4
     assert component.trainable is True
+    assert component.model == "mzi"
     assert any(
         prefix.startswith("el") for prefix in builder.trainable_parameter_prefixes
     )
@@ -388,6 +389,7 @@ def test_entangling_layer_mode_range_and_non_trainable():
     builder.add_entangling_layer(modes=[1, 3], trainable=True, name="block")
     last = builder.circuit.components[-1]
     assert last.start_mode == 1 and last.span == 3
+    assert last.model == "mzi"
     assert "block" in builder.trainable_parameter_prefixes
 
 
@@ -402,6 +404,53 @@ def test_entangling_layer_invalid_modes():
 
     with pytest.raises(ValueError):
         builder.add_entangling_layer(modes=[0, 1, 2])
+
+
+def test_entangling_layer_invalid_model():
+    builder = CircuitBuilder(n_modes=3)
+    with pytest.raises(ValueError, match="model must be either 'mzi' or 'bell'"):
+        builder.add_entangling_layer(model="xyz")
+
+
+@pytest.mark.parametrize("model", ["mzi", "bell"])
+def test_entangling_layer_model_selection_to_pcvl(model):
+    builder = CircuitBuilder(n_modes=4)
+    builder.add_entangling_layer(model=model, name="custom")
+
+    component = builder.circuit.components[-1]
+    assert component.model == model
+
+    pcvl_circuit = builder.to_pcvl_circuit(pcvl)
+    params = pcvl_circuit.get_parameters()
+    assert any(p.name.startswith("custom_li") for p in params)
+    assert any(p.name.startswith("custom_lo") for p in params)
+
+
+@pytest.mark.parametrize("model", ["mzi", "bell"])
+def test_entangling_layer_models_forward_backward(model):
+    builder = CircuitBuilder(n_modes=4)
+    builder.add_angle_encoding(modes=[0, 1, 2, 3], name="input")
+    builder.add_entangling_layer(model=model, trainable=True, name=f"{model}_ent")
+    builder.add_rotations(trainable=True, name="theta")
+    builder.add_superpositions(depth=1)
+
+    layer = QuantumLayer(
+        input_size=4,
+        circuit=builder,
+        n_photons=1,
+        output_size=4,
+        output_mapping_strategy=OutputMappingStrategy.LINEAR,
+        dtype=torch.float32,
+    )
+
+    x = torch.rand(2, 4)
+    logits = layer(x)
+    loss = logits.sum()
+    loss.backward()
+
+    assert logits.shape == (2, 4)
+    grads = [p.grad for p in layer.parameters() if p.requires_grad]
+    assert any(g is not None and torch.any(g != 0) for g in grads)
 
 
 def test_entangling_layer_to_pcvl_registers_parameters():
@@ -466,31 +515,33 @@ def test_entangling_layer_with_additional_components_trains():
     assert any(g is not None and torch.any(g != 0) for g in grads)
 
 
-def test_builder_functionality_on_gpu():
+@pytest.mark.parametrize("model", ["mzi", "bell"])
+def test_entangling_layer_models_on_gpu(model):
     if not torch.cuda.is_available():
-        pytest.skip("CUDA is not available, skipping GPU test.")
+        pytest.skip("CUDA is not available, skipping GPU entangling-layer test.")
 
     device = torch.device("cuda")
-
-    builder = CircuitBuilder(n_modes=3)
-    builder.add_angle_encoding(name="input")
+    builder = CircuitBuilder(n_modes=4)
+    builder.add_angle_encoding(modes=[0, 1, 2, 3], name="input")
+    builder.add_entangling_layer(model=model, trainable=True, name=f"{model}_ent")
     builder.add_rotations(trainable=True, name="theta")
     builder.add_superpositions(depth=1)
 
     layer = QuantumLayer(
-        input_size=3,
+        input_size=4,
         circuit=builder,
         n_photons=1,
-        output_size=3,
+        output_size=4,
         output_mapping_strategy=OutputMappingStrategy.LINEAR,
         dtype=torch.float32,
     ).to(device)
 
-    x = torch.rand(4, 3, device=device)
+    x = torch.rand(2, 4, device=device)
     logits = layer(x)
     loss = logits.sum()
     loss.backward()
 
-    assert logits.device.type == device.type and logits.device.type == x.device.type
-    assert logits.shape == (4, 3)
-    assert any(p.grad is not None for p in layer.parameters() if p.requires_grad)
+    assert logits.device == device
+    assert logits.shape == (2, 4)
+    grads = [p.grad for p in layer.parameters() if p.requires_grad]
+    assert any(g is not None and torch.any(g != 0) for g in grads if g is not None)

@@ -353,6 +353,7 @@ class CircuitBuilder:
         modes: list[int] | None = None,
         *,
         trainable: bool = True,
+        model: str = "mzi",
         name: str | None = None,
     ) -> "CircuitBuilder":
         """Add an entangling layer spanning a range of modes.
@@ -362,6 +363,7 @@ class CircuitBuilder:
                 one element targets ``modes[0]`` through the final mode; two elements
                 target the inclusive range ``[modes[0], modes[1]]``.
             trainable: Whether internal phase shifters should be trainable.
+            model: ``\"mzi\"`` or ``\"bell\"`` to select the internal interferometer template.
             name: Optional prefix used for generated parameter names.
 
         Raises:
@@ -385,6 +387,11 @@ class CircuitBuilder:
                 raise ValueError(
                     "`modes` must be None, a single index, or a two-element range for entangling layers."
                 )
+        if not isinstance(model, str):
+            raise TypeError("model must be a string")
+        normalized_model = model.lower()
+        if normalized_model not in {"mzi", "bell"}:
+            raise ValueError("model must be either 'mzi' or 'bell'")
 
         if start > end:
             start, end = end, start
@@ -406,6 +413,7 @@ class CircuitBuilder:
             span=span,
             trainable=trainable,
             name_prefix=prefix,
+            model=normalized_model,
         )
 
         self.circuit.add(component)
@@ -889,30 +897,61 @@ class CircuitBuilder:
                     continue
 
                 prefix = component.name_prefix or f"gi_{idx}"
+                model = getattr(component, "model", "mzi")
 
-                def _mzi_factory(
-                    i: int, *, trainable: bool = component.trainable, base: str = prefix
-                ):
-                    """Build a Mach-Zehnder interferometer optionally parameterised per index."""
-                    if trainable:
-                        phi_inner = pcvl_module.P(f"{base}_li{i}")
-                        phi_outer = pcvl_module.P(f"{base}_lo{i}")
-                    else:
-                        phi_inner = 0.0
-                        phi_outer = 0.0
-                    return (
-                        pcvl_module.BS()
-                        // pcvl_module.PS(phi_inner)
-                        // pcvl_module.BS()
-                        // pcvl_module.PS(phi_outer)
+                if model == "mzi":
+                    def _mzi_factory(
+                        i: int, *, trainable: bool = component.trainable, base: str = prefix
+                    ):
+                        """Build a Mach-Zehnder interferometer optionally parameterised per index."""
+                        if trainable:
+                            phi_inner = pcvl_module.P(f"{base}_li{i}")
+                            phi_outer = pcvl_module.P(f"{base}_lo{i}")
+                        else:
+                            phi_inner = 0.0
+                            phi_outer = 0.0
+                        return (
+                            pcvl_module.BS()
+                            // pcvl_module.PS(phi_inner)
+                            // pcvl_module.BS()
+                            // pcvl_module.PS(phi_outer)
+                        )
+
+                    gi = pcvl_module.GenericInterferometer(
+                        component.span,
+                        lambda i, factory=_mzi_factory: factory(i),
+                        shape=pcvl_module.InterferometerShape.RECTANGLE,
                     )
+                    pcvl_circuit.add(component.start_mode, gi)
 
-                gi = pcvl_module.GenericInterferometer(
-                    component.span,
-                    lambda i, factory=_mzi_factory: factory(i),
-                    shape=pcvl_module.InterferometerShape.RECTANGLE,
-                )
-                pcvl_circuit.add(component.start_mode, gi)
+                elif model == "bell":
+                    def _bell_factory(
+                        i: int, *, trainable: bool = component.trainable, base: str = prefix
+                    ):
+                        """Build a Mach-Zehnder interferometer optionally parameterised per index."""
+                        if trainable:
+                            phi_inner = pcvl_module.P(f"{base}_li{i}")
+                            phi_outer = pcvl_module.P(f"{base}_lo{i}")
+                        else:
+                            phi_inner = 0.0
+                            phi_outer = 0.0
+                        
+                        circuit = pcvl_module.Circuit(2)
+                        circuit.add(0, pcvl_module.BS())
+                        circuit.add(0, pcvl_module.PS(phi_inner))
+                        circuit.add(1, pcvl_module.PS(phi_outer))
+                        circuit.add(0, pcvl_module.BS())
+                        
+                        return circuit
+
+                    gi = pcvl_module.GenericInterferometer(
+                        component.span,
+                        lambda i, factory=_bell_factory: factory(i),
+                        shape=pcvl_module.InterferometerShape.RECTANGLE,
+                    )
+                    pcvl_circuit.add(component.start_mode, gi)
+                else:
+                    raise ValueError(f"{model} not implemented yet")
 
             else:
                 # Components like Measurement are metadata only and do not map to a pcvl operation

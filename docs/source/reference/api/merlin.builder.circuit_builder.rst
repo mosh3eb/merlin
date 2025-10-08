@@ -58,6 +58,7 @@ This will show as a rotation layer as data is encoded in phase shifters.
    - Arguments:
      - `modes` (list[int]): Modes to span.
      - `trainable` (bool): Whether the entangling layer is trainable.
+     - `model` (str): Choose `"mzi"` (default) or `"bell"` to select the interferometer template.
      - `name` (str): Optional prefix for parameter names.
 
 .. code-block:: python
@@ -73,6 +74,11 @@ And to span it on different modes
 .. code-block:: python
    builder = CircuitBuilder(n_modes=6)
    builder.add_entangling_layer(trainable=True, name="U1", modes = [0,3])
+
+Switching to a Bell-style interferometer is as simple as:
+
+.. code-block:: python
+   builder.add_entangling_layer(model="bell", name="bell_block")
 
 .. image:: ../../_static/img/builder_layer/generic_0_3.png
    :alt: An entangling layer built with CircuitBuilder
