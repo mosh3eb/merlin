@@ -152,9 +152,7 @@ def test_trainable_parameter_budget_matches_request(quantum_layer_api):
 def test_simple_rejects_odd_mzi_budget(quantum_layer_api):
     QuantumLayer, OutputMappingStrategy = quantum_layer_api
 
-    with pytest.raises(
-        ValueError, match="Additional parameter budget must be even"
-    ):
+    with pytest.raises(ValueError, match="Additional parameter budget must be even"):
         QuantumLayer.simple(
             input_size=3,
             n_params=95,
