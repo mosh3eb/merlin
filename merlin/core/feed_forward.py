@@ -578,7 +578,7 @@ class PoolingFeedForward(torch.nn.Module):
         """
         batch_size = amplitudes.shape[0]
         device = amplitudes.device
-        if device != amplitudes.device:
+        if device != self.match_indices.device:
             self.match_indices = self.match_indices.to(device)
         output = torch.zeros(
             batch_size,
