@@ -23,7 +23,7 @@
 """
 Output mapping strategy definitions.
 """
-import warnings
+
 from enum import Enum
 
 
@@ -39,22 +39,20 @@ class OutputMappingStrategy(Enum):
     LEXGROUPING = "lexgrouping"
     MODGROUPING = "modgrouping"
     NONE = "none"
-    warnings.warn('OutputMappingStrategy is deprecated and will be removed in version 0.3. '
-                  'Use MeasurementStrategy instead.', DeprecationWarning, stacklevel=2)
 
 
 class MeasurementStrategy(Enum):
     """Strategy for measuring quantum states or counts and possibly apply mapping to classical outputs."""
 
-    FockDistribution = "fockdistribution"
-    FockGrouping = "fockgrouping"
-    ModeExpectation = "modeexpectation"
-    StateVector = "statevector"
-    CustomObservable = "customobservable"
+    FOCKDISTRIBUTION = "fockdistribution"
+    FOCKGROUPING = "fockgrouping"
+    MODEEXPECTATION = "modeexpectation"
+    STATEVECTOR = "statevector"
+    CUSTOMOBSERVABLE = "customobservable"
 
 
 class GroupingPolicy(Enum):
     """Policy for the grouping of quantum probability distributions to classical outputs."""
 
-    ModGrouping = "modgrouping"
-    LexGrouping = "lexgrouping"
+    MODGROUPING = "modgrouping"
+    LEXGROUPING = "lexgrouping"

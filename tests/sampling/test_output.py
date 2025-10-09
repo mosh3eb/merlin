@@ -33,57 +33,65 @@ class TestOutputMapper:
 
     def test_linear_mapping_creation(self):
         """Test creation of linear output mapping."""
-        mapping = ML.OutputMapper.create_mapping(
-            ML.OutputMappingStrategy.LINEAR, input_size=6, output_size=3
+        fock_distribution = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKDISTRIBUTION, input_size=6, output_size=6
         )
-
-        assert isinstance(mapping, nn.Linear)
-        assert mapping.in_features == 6
-        assert mapping.out_features == 3
+        mapping = torch.nn.Sequential(fock_distribution, nn.Linear(6, 3))
+        assert isinstance(mapping[-1], nn.Linear)
+        assert mapping[-1].in_features == 6
+        assert mapping[-1].out_features == 3
 
     def test_lexgrouping_mapping_creation(self):
         """Test creation of lexicographical grouping mapping."""
         mapping = ML.OutputMapper.create_mapping(
-            ML.OutputMappingStrategy.LEXGROUPING, input_size=8, output_size=4
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=8,
+            output_size=4,
+            grouping_policy=ML.GroupingPolicy.LEXGROUPING,
         )
-
-        assert isinstance(mapping, ML.LexGroupingMapper)
+        assert isinstance(mapping, ML.FockGrouping)
         assert mapping.input_size == 8
         assert mapping.output_size == 4
 
     def test_modgrouping_mapping_creation(self):
         """Test creation of modulo grouping mapping."""
         mapping = ML.OutputMapper.create_mapping(
-            ML.OutputMappingStrategy.MODGROUPING, input_size=10, output_size=3
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=10,
+            output_size=3,
+            grouping_policy=ML.GroupingPolicy.MODGROUPING,
         )
-
-        assert isinstance(mapping, ML.ModGroupingMapper)
+        assert isinstance(mapping, ML.FockGrouping)
         assert mapping.input_size == 10
         assert mapping.output_size == 3
 
     def test_none_mapping_creation_valid(self):
         """Test creation of identity mapping with matching sizes."""
         mapping = ML.OutputMapper.create_mapping(
-            ML.OutputMappingStrategy.NONE, input_size=5, output_size=5
+            ML.MeasurementStrategy.STATEVECTOR, input_size=5, output_size=5
         )
+        batch_size = 4
+        input_amps = torch.rand(batch_size, 5)
+        output_amps = mapping(input_amps)
+        assert torch.allclose(input_amps, output_amps, atol=1e-6)
 
-        assert isinstance(mapping, nn.Identity)
-
-    def test_none_mapping_creation_invalid(self):
-        """Test that NONE strategy with mismatched sizes raises error."""
+    def test_fock_distribution_mapping_creation_invalid(self):
+        """Test that FockDistribution strategy with mismatched sizes raises error."""
         with pytest.raises(
             ValueError, match="Distribution size .* must equal output size"
         ):
             ML.OutputMapper.create_mapping(
-                ML.OutputMappingStrategy.NONE, input_size=5, output_size=3
+                ML.MeasurementStrategy.FOCKDISTRIBUTION, input_size=5, output_size=3
             )
 
     def test_invalid_strategy(self):
         """Test that invalid strategy raises error."""
-        with pytest.raises(ValueError, match="Unknown output mapping strategy"):
-            ML.OutputMapper.create_mapping(
-                "invalid_strategy", input_size=5, output_size=3
-            )
+
+        class FakeStrategy:
+            pass
+
+        with pytest.raises(ValueError, match="Unknown measurement strategy"):
+            ML.OutputMapper.create_mapping(FakeStrategy(), input_size=5, output_size=3)
 
 
 class TestLexGroupingMapper:
@@ -91,7 +99,12 @@ class TestLexGroupingMapper:
 
     def test_lexgrouping_exact_division(self):
         """Test lexicographical grouping with exact division."""
-        mapper = ML.LexGroupingMapper(input_size=8, output_size=4)
+        mapper = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=8,
+            output_size=4,
+            grouping_policy=ML.GroupingPolicy.LEXGROUPING,
+        )
 
         # Input: 8 elements, should group into 4 buckets of 2 each
         input_dist = torch.tensor([0.1, 0.2, 0.3, 0.1, 0.05, 0.15, 0.05, 0.05])
@@ -106,7 +119,12 @@ class TestLexGroupingMapper:
 
     def test_lexgrouping_with_padding(self):
         """Test lexicographical grouping with padding."""
-        mapper = ML.LexGroupingMapper(input_size=7, output_size=4)
+        mapper = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=7,
+            output_size=4,
+            grouping_policy=ML.GroupingPolicy.LEXGROUPING,
+        )
 
         # Input: 7 elements, needs 1 padding to make 8, then group into 4 buckets
         input_dist = torch.tensor([0.1, 0.2, 0.3, 0.1, 0.1, 0.1, 0.1])
@@ -116,24 +134,36 @@ class TestLexGroupingMapper:
         assert output.shape == (4,)
         assert torch.allclose(output.sum(), input_dist.sum(), atol=1e-6)
 
+    # TODO change this test because new mapper takes amplitudes or counts
     def test_lexgrouping_batched(self):
         """Test lexicographical grouping with batched input."""
-        mapper = ML.LexGroupingMapper(input_size=6, output_size=3)
+        mapper = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=6,
+            output_size=3,
+            grouping_policy=ML.GroupingPolicy.LEXGROUPING,
+        )
 
         batch_size = 4
+        # Equivalent of counts as input distribution
         input_dist = torch.rand(batch_size, 6)
-
+        # Converted to probabilities and grouped
         output = mapper(input_dist)
 
         assert output.shape == (batch_size, 3)
 
-        # Each batch should preserve total probability
+        # Each output batch should sum up to 1
         for i in range(batch_size):
-            assert torch.allclose(output[i].sum(), input_dist[i].sum(), atol=1e-6)
+            assert torch.allclose(output[i].sum(), torch.tensor(1.0), atol=1e-6)
 
     def test_lexgrouping_no_padding_needed(self):
         """Test lexicographical grouping when no padding is needed."""
-        mapper = ML.LexGroupingMapper(input_size=6, output_size=3)
+        mapper = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=6,
+            output_size=3,
+            grouping_policy=ML.GroupingPolicy.LEXGROUPING,
+        )
 
         input_dist = torch.tensor([0.1, 0.2, 0.15, 0.25, 0.2, 0.1])
 
@@ -143,19 +173,31 @@ class TestLexGroupingMapper:
         expected = torch.tensor([0.3, 0.4, 0.3])
         assert torch.allclose(output, expected, atol=1e-6)
 
+    # TODO change this test because new mapper takes amplitudes or counts
     def test_lexgrouping_single_input(self):
         """Test lexicographical grouping with single input dimension."""
-        mapper = ML.LexGroupingMapper(input_size=1, output_size=1)
-
+        mapper = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=1,
+            output_size=1,
+            grouping_policy=ML.GroupingPolicy.LEXGROUPING,
+        )
+        # Equivalent of count as input distribution
         input_dist = torch.tensor([0.8])
+        # Converted to probability and grouped (not grouped here since single value)
         output = mapper(input_dist)
 
         assert output.shape == (1,)
-        assert torch.allclose(output, input_dist, atol=1e-6)
+        assert torch.allclose(output, torch.tensor(1.0), atol=1e-6)
 
     def test_lexgrouping_gradient_flow(self):
         """Test that gradients flow through lexicographical grouping."""
-        mapper = ML.LexGroupingMapper(input_size=6, output_size=3)
+        mapper = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=6,
+            output_size=3,
+            grouping_policy=ML.GroupingPolicy.LEXGROUPING,
+        )
 
         input_dist = torch.rand(2, 6, requires_grad=True)
 
@@ -172,7 +214,12 @@ class TestModGroupingMapper:
 
     def test_modgrouping_basic(self):
         """Test basic modulo grouping."""
-        mapper = ML.ModGroupingMapper(input_size=6, output_size=3)
+        mapper = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=6,
+            output_size=3,
+            grouping_policy=ML.GroupingPolicy.MODGROUPING,
+        )
 
         # Indices: 0,1,2,3,4,5 -> groups: 0,1,2,0,1,2
         input_dist = torch.tensor([0.1, 0.2, 0.3, 0.15, 0.1, 0.15])
@@ -189,7 +236,12 @@ class TestModGroupingMapper:
 
     def test_modgrouping_larger_output_than_input(self):
         """Test modulo grouping when output size > input size."""
-        mapper = ML.ModGroupingMapper(input_size=3, output_size=5)
+        mapper = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=3,
+            output_size=5,
+            grouping_policy=ML.GroupingPolicy.MODGROUPING,
+        )
 
         input_dist = torch.tensor([0.3, 0.4, 0.3])
 
@@ -201,25 +253,37 @@ class TestModGroupingMapper:
         expected = torch.tensor([0.3, 0.4, 0.3, 0.0, 0.0])
         assert torch.allclose(output, expected, atol=1e-6)
 
+    # TODO change this test because new mapper takes amplitudes or counts
     def test_modgrouping_batched(self):
         """Test modulo grouping with batched input."""
-        mapper = ML.ModGroupingMapper(input_size=8, output_size=3)
+        mapper = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=8,
+            output_size=3,
+            grouping_policy=ML.GroupingPolicy.MODGROUPING,
+        )
 
         batch_size = 3
+        # Equivalent of counts as input distribution
         input_dist = torch.rand(batch_size, 8)
-
+        # Converted to probabilities and grouped
         output = mapper(input_dist)
 
         assert output.shape == (batch_size, 3)
 
-        # Check each batch individually
+        # Check each output batch individually
         for i in range(batch_size):
-            # Total probability should be preserved
-            assert torch.allclose(output[i].sum(), input_dist[i].sum(), atol=1e-6)
+            # Total probability should sum to 1
+            assert torch.allclose(output[i].sum(), torch.tensor(1.0), atol=1e-6)
 
     def test_modgrouping_single_output(self):
         """Test modulo grouping with single output dimension."""
-        mapper = ML.ModGroupingMapper(input_size=5, output_size=1)
+        mapper = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=5,
+            output_size=1,
+            grouping_policy=ML.GroupingPolicy.MODGROUPING,
+        )
 
         input_dist = torch.tensor([0.2, 0.3, 0.1, 0.25, 0.15])
 
@@ -231,7 +295,12 @@ class TestModGroupingMapper:
 
     def test_modgrouping_equal_sizes(self):
         """Test modulo grouping when input and output sizes are equal."""
-        mapper = ML.ModGroupingMapper(input_size=4, output_size=4)
+        mapper = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=4,
+            output_size=4,
+            grouping_policy=ML.GroupingPolicy.MODGROUPING,
+        )
 
         input_dist = torch.tensor([0.25, 0.35, 0.2, 0.2])
 
@@ -243,12 +312,18 @@ class TestModGroupingMapper:
 
     def test_modgrouping_gradient_flow(self):
         """Test that gradients flow through modulo grouping."""
-        mapper = ML.ModGroupingMapper(input_size=6, output_size=3)
+        mapper = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING,
+            input_size=6,
+            output_size=3,
+            grouping_policy=ML.GroupingPolicy.MODGROUPING,
+        )
 
         input_dist = torch.rand(4, 6, requires_grad=True)
 
         output = mapper(input_dist)
-        loss = output.sum()
+        target = torch.ones(4, 3)
+        loss = (target - output).pow(2).sum()
         loss.backward()
 
         assert input_dist.grad is not None
@@ -267,14 +342,14 @@ class TestOutputMappingIntegration:
         ansatz = ML.AnsatzFactory.create(
             PhotonicBackend=experiment,
             input_size=2,
-            output_size=3,
-            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+            measurement_strategy=ML.MeasurementStrategy.FOCKDISTRIBUTION,
         )
 
         layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
+        model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 3))
 
         x = torch.rand(5, 2)
-        output = layer(x)
+        output = model(x)
 
         assert output.shape == (5, 3)
         assert torch.all(torch.isfinite(output))
@@ -289,7 +364,8 @@ class TestOutputMappingIntegration:
             PhotonicBackend=experiment,
             input_size=2,
             output_size=4,
-            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING,
+            measurement_strategy=ML.MeasurementStrategy.FOCKGROUPING,
+            grouping_policy=ML.GroupingPolicy.LEXGROUPING,
         )
 
         layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
@@ -310,7 +386,8 @@ class TestOutputMappingIntegration:
             PhotonicBackend=experiment,
             input_size=2,
             output_size=3,
-            output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING,
+            measurement_strategy=ML.MeasurementStrategy.FOCKGROUPING,
+            grouping_policy=ML.GroupingPolicy.MODGROUPING,
         )
 
         layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
@@ -328,23 +405,32 @@ class TestOutputMappingIntegration:
         )
 
         strategies = [
-            ML.OutputMappingStrategy.LINEAR,
-            ML.OutputMappingStrategy.LEXGROUPING,
-            ML.OutputMappingStrategy.MODGROUPING,
+            (ML.MeasurementStrategy.FOCKDISTRIBUTION, None),
+            (ML.MeasurementStrategy.FOCKGROUPING, ML.GroupingPolicy.LEXGROUPING),
+            (ML.MeasurementStrategy.FOCKGROUPING, ML.GroupingPolicy.MODGROUPING),
         ]
 
-        for strategy in strategies:
-            ansatz = ML.AnsatzFactory.create(
-                PhotonicBackend=experiment,
-                input_size=2,
-                output_size=3,
-                output_mapping_strategy=strategy,
-            )
+        for strategy, grouping_policy in strategies:
+            if grouping_policy is not None:
+                ansatz = ML.AnsatzFactory.create(
+                    PhotonicBackend=experiment,
+                    input_size=2,
+                    output_size=3,
+                    measurement_strategy=strategy,
+                    grouping_policy=grouping_policy,
+                )
+            else:
+                ansatz = ML.AnsatzFactory.create(
+                    PhotonicBackend=experiment,
+                    input_size=2,
+                    measurement_strategy=strategy,
+                )
 
             layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
+            model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 3))
 
             x = torch.rand(2, 2, requires_grad=True)
-            output = layer(x)
+            output = model(x)
 
             # Use MSE loss instead of sum for better gradient flow
             target = torch.ones_like(output)
@@ -369,11 +455,11 @@ class TestOutputMappingIntegration:
         ansatz_linear = ML.AnsatzFactory.create(
             PhotonicBackend=experiment,
             input_size=2,
-            output_size=3,
-            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+            measurement_strategy=ML.MeasurementStrategy.FOCKDISTRIBUTION,
         )
-        layer_linear = ML.QuantumLayer(input_size=2, ansatz=ansatz_linear)
-        output_linear = layer_linear(x)
+        layer = ML.QuantumLayer(input_size=2, ansatz=ansatz_linear)
+        model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 3))
+        output_linear = model(x)
         assert torch.all(torch.isfinite(output_linear))
 
         # LEXGROUPING mapping - should preserve probability mass
@@ -381,7 +467,8 @@ class TestOutputMappingIntegration:
             PhotonicBackend=experiment,
             input_size=2,
             output_size=4,
-            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING,
+            measurement_strategy=ML.MeasurementStrategy.FOCKGROUPING,
+            grouping_policy=ML.GroupingPolicy.LEXGROUPING,
         )
         layer_lex = ML.QuantumLayer(input_size=2, ansatz=ansatz_lex)
         output_lex = layer_lex(x)
@@ -392,7 +479,8 @@ class TestOutputMappingIntegration:
             PhotonicBackend=experiment,
             input_size=2,
             output_size=3,
-            output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING,
+            measurement_strategy=ML.MeasurementStrategy.FOCKGROUPING,
+            grouping_policy=ML.GroupingPolicy.MODGROUPING,
         )
         layer_mod = ML.QuantumLayer(input_size=2, ansatz=ansatz_mod)
         output_mod = layer_mod(x)
@@ -408,15 +496,17 @@ class TestOutputMappingIntegration:
             ansatz = ML.AnsatzFactory.create(
                 PhotonicBackend=experiment,
                 input_size=2,
-                output_size=3,
-                output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+                measurement_strategy=ML.MeasurementStrategy.FOCKDISTRIBUTION,
                 dtype=dtype,
             )
 
             layer = ML.QuantumLayer(input_size=2, ansatz=ansatz, dtype=dtype)
+            model = torch.nn.Sequential(
+                layer, torch.nn.Linear(layer.output_size, 3, dtype=dtype)
+            )
 
             x = torch.rand(3, 2, dtype=dtype)
-            output = layer(x)
+            output = model(x)
 
             # Output should be finite and have reasonable values
             assert torch.all(torch.isfinite(output))
@@ -434,7 +524,8 @@ class TestOutputMappingIntegration:
             PhotonicBackend=experiment,
             input_size=4,
             output_size=8,
-            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING,
+            measurement_strategy=ML.MeasurementStrategy.FOCKGROUPING,
+            grouping_policy=ML.GroupingPolicy.LEXGROUPING,
         )
 
         layer = ML.QuantumLayer(input_size=4, ansatz=ansatz)
@@ -455,14 +546,14 @@ class TestOutputMappingIntegration:
         ansatz = ML.AnsatzFactory.create(
             PhotonicBackend=experiment,
             input_size=1,
-            output_size=1,
-            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+            measurement_strategy=ML.MeasurementStrategy.FOCKDISTRIBUTION,
         )
 
         layer = ML.QuantumLayer(input_size=1, ansatz=ansatz)
+        model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 1))
 
         x = torch.rand(5, 1)
-        output = layer(x)
+        output = model(x)
 
         assert output.shape == (5, 1)
         assert torch.all(torch.isfinite(output))
@@ -477,7 +568,8 @@ class TestOutputMappingIntegration:
             PhotonicBackend=experiment,
             input_size=2,
             output_size=3,
-            output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING,
+            measurement_strategy=ML.MeasurementStrategy.FOCKGROUPING,
+            grouping_policy=ML.GroupingPolicy.MODGROUPING,
         )
 
         layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)

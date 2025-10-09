@@ -38,15 +38,21 @@ from .builder.ansatz import Ansatz, AnsatzFactory
 from .core.generators import CircuitGenerator, CircuitType, StateGenerator, StatePattern
 from .core.photonicbackend import PhotonicBackend
 from .pcvl_pytorch import CircuitConverter, build_slos_distribution_computegraph
+from .sampling import (
+    FockDistribution,
+    FockGrouping,
+    ModeExpectation,
+    OutputMapper,
+    StateVector,
+)
 from .sampling.autodiff import AutoDiffProcess
 from .sampling.process import SamplingProcess
-from .sampling.strategies import OutputMappingStrategy
-from .torch_utils.torch_codes import (
-    FeatureEncoder,
-    LexGroupingMapper,
-    ModGroupingMapper,
-    OutputMapper,
+from .sampling.strategies import (
+    GroupingPolicy,
+    MeasurementStrategy,
+    OutputMappingStrategy,
 )
+from .torch_utils.torch_codes import FeatureEncoder
 
 # Version and metadata
 __version__ = "0.1.0"
@@ -64,6 +70,8 @@ __all__ = [
     "CircuitType",
     "StatePattern",
     "OutputMappingStrategy",
+    "MeasurementStrategy",
+    "GroupingPolicy",
     # Advanced components
     "CircuitGenerator",
     "StateGenerator",
@@ -71,8 +79,10 @@ __all__ = [
     "SamplingProcess",
     "AutoDiffProcess",
     "OutputMapper",
-    "LexGroupingMapper",
-    "ModGroupingMapper",
+    "FockDistribution",
+    "FockGrouping",
+    "ModeExpectation",
+    "StateVector",
     "CircuitConverter",
     "build_slos_distribution_computegraph",
     "NKernelAlignment",

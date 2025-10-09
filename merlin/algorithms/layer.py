@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import perceval as pcvl
@@ -42,9 +42,12 @@ from ..builder.circuit_builder import (
 )
 from ..core.components import GenericInterferometer
 from ..core.process import ComputationProcessFactory
+from ..sampling import OutputMapper
 from ..sampling.autodiff import AutoDiffProcess
-from ..sampling.strategies import OutputMappingStrategy
-from ..torch_utils.torch_codes import OutputMapper
+from ..sampling.strategies import (
+    GroupingPolicy,
+    MeasurementStrategy,
+)
 
 
 class QuantumLayer(nn.Module):
@@ -70,12 +73,13 @@ class QuantumLayer(nn.Module):
         ansatz: Ansatz | None = None,
         # Custom circuit construction (backward compatible)
         circuit: pcvl.Circuit | CircuitBuilder | None = None,
-        input_state: list[int] | None = None,
+        input_state: list[int] | torch.Tensor | None = None,
         n_photons: int | None = None,
-        trainable_parameters: list[str] = None,
-        input_parameters: list[str] = None,
+        trainable_parameters: list[str] | None = None,
+        input_parameters: list[str] | None = None,
         # Common parameters
-        output_mapping_strategy: OutputMappingStrategy = OutputMappingStrategy.LINEAR,
+        measurement_strategy: MeasurementStrategy = MeasurementStrategy.FOCKDISTRIBUTION,
+        grouping_policy: GroupingPolicy | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
         shots: int = 0,
@@ -91,6 +95,7 @@ class QuantumLayer(nn.Module):
         self.input_size = input_size
         self.no_bunching = no_bunching
         self.index_photons = index_photons
+        self.input_state = input_state
 
         builder_trainable: list[str] = []
         builder_input: list[str] = []
@@ -118,7 +123,9 @@ class QuantumLayer(nn.Module):
         # Determine construction mode
         # TODO: can be deprectated once Builder is fully supported
         if ansatz is not None:
-            self._init_from_ansatz(ansatz, output_size, output_mapping_strategy)
+            self._init_from_ansatz(
+                ansatz, output_size, measurement_strategy, grouping_policy
+            )
 
         elif circuit is not None:
             self.circuit = circuit
@@ -129,7 +136,8 @@ class QuantumLayer(nn.Module):
                 trainable_parameters,
                 input_parameters,
                 output_size,
-                output_mapping_strategy,
+                measurement_strategy,
+                grouping_policy,
             )
         else:
             raise ValueError("Either 'ansatz' or 'circuit' must be provided")
@@ -143,7 +151,8 @@ class QuantumLayer(nn.Module):
         self,
         ansatz: Ansatz,
         output_size: int | None,
-        output_mapping_strategy: OutputMappingStrategy,
+        measurement_strategy: MeasurementStrategy,
+        grouping_policy: GroupingPolicy | None,
     ):
         """Initialize from ansatz (auto-generated mode)."""
         self.ansatz = ansatz
@@ -174,8 +183,9 @@ class QuantumLayer(nn.Module):
         self.feature_encoder = ansatz.feature_encoder
 
         # Use the ansatz's output mapping strategy - it should take precedence!
-        actual_strategy = ansatz.output_mapping_strategy
+        actual_strategy = ansatz.measurement_strategy
         actual_output_size = output_size or ansatz.output_size
+        grouping_policy = ansatz.grouping_policy
 
         # Setup bandwidth tuning if enabled
         if ansatz.experiment.use_bandwidth_tuning:
@@ -198,7 +208,9 @@ class QuantumLayer(nn.Module):
         self._setup_parameters_from_ansatz(ansatz)
 
         # Setup output mapping using ansatz configuration
-        self._setup_output_mapping(ansatz, actual_output_size, actual_strategy)
+        self._setup_measurement_mapping(
+            ansatz, actual_output_size, actual_strategy, grouping_policy
+        )
 
     def _init_from_custom_circuit(
         self,
@@ -208,7 +220,8 @@ class QuantumLayer(nn.Module):
         trainable_parameters: list[str],
         input_parameters: list[str],
         output_size: int | None,
-        output_mapping_strategy: OutputMappingStrategy,
+        measurement_strategy: MeasurementStrategy,
+        grouping_policy: GroupingPolicy | None = None,
     ):
         """Initialize from custom circuit (backward compatible mode)."""
         self.auto_generation_mode = False
@@ -249,7 +262,9 @@ class QuantumLayer(nn.Module):
         self._setup_parameters_from_custom(trainable_parameters)
 
         # Setup output mapping
-        self._setup_output_mapping_from_custom(output_size, output_mapping_strategy)
+        self._setup_measurement_mapping_from_custom(
+            output_size, measurement_strategy, grouping_policy
+        )
 
     def _validate_input_state_with_index_photons(self, input_state: list[int]):
         """Validate that input_state respects index_photons constraints."""
@@ -356,80 +371,119 @@ class QuantumLayer(nn.Module):
                 self.register_parameter(tp, parameter)
                 self.thetas.append(parameter)
 
-    def _setup_output_mapping(
+    def _setup_measurement_mapping(
         self,
         ansatz: Ansatz,
         output_size: int | None,
-        output_mapping_strategy: OutputMappingStrategy,
+        measurement_strategy: MeasurementStrategy,
+        grouping_policy: GroupingPolicy | None,
     ):
         """Setup output mapping for ansatz-based construction."""
         # Get distribution size
         dummy_params = self._create_dummy_parameters()
-        distribution = self.computation_process.compute(dummy_params)
+        if self.input_state is not None and type(self.input_state) is torch.Tensor:
+            keys, distribution = self.computation_process.compute_superposition_state(
+                dummy_params, return_keys=True
+            )
+        else:
+            keys, distribution = self.computation_process.compute_with_keys(
+                dummy_params
+            )
         dist_size = distribution.shape[-1]
 
         # Determine output size
         if output_size is None:
-            if output_mapping_strategy == OutputMappingStrategy.NONE:
+            if measurement_strategy == MeasurementStrategy.FOCKDISTRIBUTION:
+                self.output_size = dist_size
+            elif measurement_strategy == MeasurementStrategy.MODEEXPECTATION:
+                if type(self.circuit) is CircuitBuilder:
+                    circuit = self.circuit.build()
+                elif type(self.circuit) is pcvl.Circuit:
+                    circuit = self.circuit
+                else:
+                    raise TypeError(f"Unknown circuit type: {type(self.circuit)}")
+                circuit_m = cast(pcvl.AComponent, circuit).m
+                self.output_size = circuit_m
+            elif measurement_strategy == MeasurementStrategy.STATEVECTOR:
                 self.output_size = dist_size
             else:
                 raise ValueError(
-                    "output_size must be specified for non-NONE strategies"
+                    "output_size must be specified for FockGrouping measurement strategy"
                 )
         else:
             self.output_size = output_size
 
         # Validate NONE strategy
         if (
-            output_mapping_strategy == OutputMappingStrategy.NONE
+            measurement_strategy == MeasurementStrategy.FOCKDISTRIBUTION
+            and self.output_size != dist_size
+        ) or (
+            measurement_strategy == MeasurementStrategy.STATEVECTOR
             and self.output_size != dist_size
         ):
             raise ValueError(
                 f"Distribution size ({dist_size}) must equal output size ({self.output_size}) "
-                f"when using 'none' strategy"
+                f"when using FockDistribution or StateVector measurement strategies"
             )
 
         # Create output mapping
-        self.output_mapping = OutputMapper.create_mapping(
-            output_mapping_strategy, dist_size, self.output_size
+        self.measurement_mapping = OutputMapper.create_mapping(
+            measurement_strategy,
+            dist_size,
+            self.output_size,
+            grouping_policy,
+            self.computation_process.no_bunching,
+            keys,
         )
 
-        # Ensure output mapping has correct dtype and device
-        if hasattr(self.output_mapping, "weight"):
-            self.output_mapping = self.output_mapping.to(
-                dtype=self.dtype, device=self.device
-            )
-
-    def _setup_output_mapping_from_custom(
-        self, output_size: int | None, output_mapping_strategy: OutputMappingStrategy
+    def _setup_measurement_mapping_from_custom(
+        self,
+        output_size: int | None,
+        measurement_strategy: MeasurementStrategy,
+        grouping_policy: GroupingPolicy | None,
     ):
         """Setup output mapping for custom circuit construction."""
         # Get distribution size
         dummy_params = self._create_dummy_parameters()
-        distribution = self.computation_process.compute(dummy_params)
+        if self.input_state is not None and type(self.input_state) is torch.Tensor:
+            keys, distribution = self.computation_process.compute_superposition_state(
+                dummy_params, return_keys=True
+            )
+        else:
+            keys, distribution = self.computation_process.compute_with_keys(
+                dummy_params
+            )
         dist_size = distribution.shape[-1]
 
         # Determine output size
         if output_size is None:
-            if output_mapping_strategy == OutputMappingStrategy.NONE:
+            if measurement_strategy == MeasurementStrategy.FOCKDISTRIBUTION:
+                self.output_size = dist_size
+            elif measurement_strategy == MeasurementStrategy.MODEEXPECTATION:
+                if type(self.circuit) is pcvl.Circuit:
+                    self.output_size = self.circuit.m
+                elif type(self.circuit) is CircuitBuilder:
+                    self.output_size = self.circuit.n_modes
+                else:
+                    raise TypeError(f"Unknown circuit type: {type(self.circuit)}")
+            elif measurement_strategy == MeasurementStrategy.STATEVECTOR:
                 self.output_size = dist_size
             else:
                 raise ValueError(
-                    "output_size must be specified for non-NONE strategies"
+                    "output_size must be specified for FockGrouping measurement strategy"
                 )
         else:
             self.output_size = output_size
 
         # Create output mapping
-        self.output_mapping = OutputMapper.create_mapping(
-            output_mapping_strategy, dist_size, self.output_size
+        self.measurement_mapping = OutputMapper.create_mapping(
+            measurement_strategy,
+            dist_size,
+            self.output_size,
+            grouping_policy,
+            self.computation_process.no_bunching,
+            keys,
         )
-
-        # Ensure output mapping has correct dtype and device
-        if hasattr(self.output_mapping, "weight"):
-            self.output_mapping = self.output_mapping.to(
-                dtype=self.dtype, device=self.device
-            )
 
     def _create_dummy_parameters(self) -> list[torch.Tensor]:
         """Create dummy parameters for initialization."""
@@ -576,7 +630,6 @@ class QuantumLayer(nn.Module):
         *input_parameters: torch.Tensor,
         apply_sampling: bool | None = None,
         shots: int | None = None,
-        return_amplitudes: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         """Forward pass through the quantum layer."""
         # Prepare parameters
@@ -597,7 +650,13 @@ class QuantumLayer(nn.Module):
         apply_sampling, shots = self.autodiff_process.autodiff_backend(
             needs_gradient, apply_sampling or False, shots or self.shots
         )
-        distribution = amplitudes.real**2 + amplitudes.imag**2
+        if type(amplitudes) is torch.Tensor:
+            distribution = amplitudes.real**2 + amplitudes.imag**2
+        elif type(amplitudes) is tuple:
+            amplitudes = amplitudes[1]
+            distribution = amplitudes.real**2 + amplitudes.imag**2
+        else:
+            raise TypeError(f"Unexpected amplitudes type: {type(amplitudes)}")
         if self.no_bunching:
             sum_probs = distribution.sum(dim=1, keepdim=True)
 
@@ -619,14 +678,15 @@ class QuantumLayer(nn.Module):
                     amplitudes,
                 )
         if apply_sampling and shots > 0:
-            distribution = self.autodiff_process.sampling_noise.pcvl_sampler(
+            counts = self.autodiff_process.sampling_noise.pcvl_sampler(
                 distribution, shots
             )
-        if return_amplitudes:
-            return self.output_mapping(distribution), amplitudes
-        # Apply output mapping
+            results = counts
+        else:
+            results = amplitudes
 
-        return self.output_mapping(distribution)
+        # Apply measurements mapping
+        return self.measurement_mapping(results)
 
     def set_sampling_config(self, shots: int | None = None, method: str | None = None):
         """Update sampling configuration."""
@@ -656,10 +716,6 @@ class QuantumLayer(nn.Module):
             self.computation_process.converter = self.computation_process.converter.to(
                 self.dtype, device
             )
-            if hasattr(self.output_mapping, "weight"):
-                self.output_mapping = self.output_mapping.to(
-                    dtype=self.dtype, device=self.device
-                )
         return self
 
     def get_index_photons_info(self) -> dict:
@@ -698,7 +754,8 @@ class QuantumLayer(nn.Module):
         shots: int = 0,
         reservoir_mode: bool = False,
         output_size: int | None = None,
-        output_mapping_strategy: OutputMappingStrategy = OutputMappingStrategy.NONE,
+        measurement_strategy: MeasurementStrategy = MeasurementStrategy.FOCKDISTRIBUTION,
+        grouping_policy: GroupingPolicy | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
         no_bunching: bool = True,
@@ -719,7 +776,9 @@ class QuantumLayer(nn.Module):
             shots: Number of sampling shots for stochastic evaluation.
             reservoir_mode: Reserved for API compatibility (unused in builder mode).
             output_size: Optional classical output width.
-            output_mapping_strategy: Strategy used to post-process the quantum distribution.
+            measurement_strategy: Strategy used to post-process the quantum amplitudes or counts.
+            grouping_policy: Optional grouping policy to use for sampling photons. Only used if measurement_strategy is
+                             FockGrouping.
             device: Optional target device for tensors.
             dtype: Optional tensor dtype.
             no_bunching: Whether to restrict to states without photon bunching.
@@ -803,7 +862,8 @@ class QuantumLayer(nn.Module):
             output_size=output_size,
             circuit=builder,
             n_photons=n_photons,
-            output_mapping_strategy=output_mapping_strategy,
+            measurement_strategy=measurement_strategy,
+            grouping_policy=grouping_policy,
             shots=shots,
             no_bunching=no_bunching,
             device=device,

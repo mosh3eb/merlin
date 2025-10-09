@@ -23,15 +23,13 @@
 import math as math
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 from ..core.generators import CircuitType
-from ..sampling.strategies import OutputMappingStrategy
 
 """
 Output mapping implementations for quantum-to-classical conversion.
 """
+
 
 class FeatureEncoder:
     """Utility class for encoding classical features into quantum circuit parameters.

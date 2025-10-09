@@ -29,7 +29,7 @@ import torch
 from ..core.generators import CircuitGenerator, StateGenerator
 from ..core.photonicbackend import PhotonicBackend
 from ..core.process import ComputationProcessFactory
-from ..sampling.strategies import OutputMappingStrategy
+from ..sampling.strategies import GroupingPolicy, MeasurementStrategy
 from ..torch_utils.torch_codes import FeatureEncoder
 
 
@@ -41,7 +41,8 @@ class Ansatz:
         PhotonicBackend: PhotonicBackend,
         input_size: int,
         output_size: int | None = None,
-        output_mapping_strategy: OutputMappingStrategy = OutputMappingStrategy.LINEAR,
+        measurement_strategy: MeasurementStrategy = MeasurementStrategy.FOCKDISTRIBUTION,
+        grouping_policy: GroupingPolicy | None = None,
         dtype: torch.dtype | None = None,
     ):
         r"""Initialize the Ansatz with the given configuration.
@@ -50,13 +51,16 @@ class Ansatz:
             PhotonicBackend (PhotonicBackend): The backend configuration to use.
             input_size (int): Size of the input feature vector.
             output_size (int | None): Size of the output vector. If None, it is defined by the backend.
-            output_mapping_strategy (OutputMappingStrategy): Strategy for mapping outputs.
+            measurement_strategy (MeasurementStrategy): Strategy for mapping amplitudes or counts.
+            grouping_policy (GroupingPolicy): Policy used for grouping operations if measurement strategy is
+                                              FockGrouping.
             dtype (torch.dtype | None): Data type for computations.
         """
         self.experiment = PhotonicBackend
         self.input_size = input_size
         self.output_size = output_size
-        self.output_mapping_strategy = output_mapping_strategy
+        self.measurement_strategy = measurement_strategy
+        self.grouping_policy = grouping_policy
         self.dtype = dtype or torch.float32
         self.device: torch.device | None = None
 
@@ -117,7 +121,8 @@ class AnsatzFactory:
         PhotonicBackend: PhotonicBackend,
         input_size: int,
         output_size: int | None = None,
-        output_mapping_strategy: OutputMappingStrategy = OutputMappingStrategy.LINEAR,
+        measurement_strategy: MeasurementStrategy = MeasurementStrategy.FOCKDISTRIBUTION,
+        grouping_policy: GroupingPolicy | None = None,
         dtype: torch.dtype | None = None,
     ) -> Ansatz:
         r"""Create a complete ansatz configuration.
@@ -126,7 +131,9 @@ class AnsatzFactory:
             PhotonicBackend (PhotonicBackend): The backend configuration to use.
             input_size (int): Size of the input feature vector.
             output_size (int | None): Size of the output vector. If None, it is defined by the backend.
-            output_mapping_strategy (OutputMappingStrategy): Strategy for mapping outputs.
+            measurement_strategy (MeasurementStrategy): Strategy for mapping amplitudes or counts.
+            grouping_policy (GroupingPolicy): Policy used for grouping operations if measurement strategy is
+                                              FockGrouping.
             dtype (torch.dtype | None): Data type for computations.
 
         Returns:
@@ -136,6 +143,7 @@ class AnsatzFactory:
             PhotonicBackend=PhotonicBackend,
             input_size=input_size,
             output_size=output_size,
-            output_mapping_strategy=output_mapping_strategy,
+            measurement_strategy=measurement_strategy,
+            grouping_policy=grouping_policy,
             dtype=dtype,
         )

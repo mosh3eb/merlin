@@ -635,18 +635,18 @@ class TestKernelConstructionConsistency:
             input_parameters="x",
         )
         print("Manual circuit:")
-        pcvl.pdisplay(fm_manual.circuit)
+        # pcvl.pdisplay(fm_manual.circuit)
 
         # Method 2: simple factory
         fm_simple = FeatureMap.simple(input_size=2, n_modes=3, n_photons=2)
         print("Simple factory circuit:")
-        pcvl.pdisplay(fm_simple.circuit)
+        # pcvl.pdisplay(fm_simple.circuit)
 
         # Method 3: KernelCircuitBuilder
         builder = KernelCircuitBuilder()
         fm_builder = builder.input_size(2).n_modes(3).build_feature_map()
         print("Builder API circuit:")
-        pcvl.pdisplay(fm_builder.circuit)
+        # pcvl.pdisplay(fm_builder.circuit)
 
         assert fm_manual.input_size == fm_simple.input_size == fm_builder.input_size
         assert fm_manual.circuit.m == fm_simple.circuit.m == fm_builder.circuit.m
@@ -974,8 +974,6 @@ def test_iris_dataset_kernel_training_with_nka():
     print(f"Iris binary classification with NKA training - Accuracy: {accuracy:.4f}")
     print(f"Loss change: {initial_loss:.4f} -> {final_loss:.4f}")
 
-    return accuracy
-
 
 def test_iris_with_supported_constructors():
     """Test IRIS classification using the supported kernel constructors."""
@@ -1133,7 +1131,7 @@ def test_iris_with_supported_constructors():
             print(
                 f"   ✓ Created {trainable_status} builder kernel: {kernel_builder.feature_map.circuit.m} modes"
             )
-            pcvl.pdisplay(kernel_builder.feature_map.circuit)
+            # pcvl.pdisplay(kernel_builder.feature_map.circuit)
             # Attempt classification
             accuracy_builder = _test_kernel_classification(
                 kernel_builder,
@@ -1208,10 +1206,8 @@ def test_iris_with_supported_constructors():
 
     if total_successes >= total_tests * 0.5:  # At least 50% success
         print("✅ IRIS classification with supported constructors successful!")
-        return results
     else:
         print("⚠️ Some constructor issues detected, but structure creation works")
-        return results
 
 
 def _test_kernel_classification(kernel, X_train, X_test, y_train, y_test, method_name):
@@ -1242,13 +1238,11 @@ def _test_kernel_classification(kernel, X_train, X_test, y_train, y_test, method
         assert accuracy >= 0.0
         assert all(pred in [0, 1] for pred in y_pred)
 
-        return accuracy
-
     except Exception as e:
         print(f"   ⚠️ {method_name} computation failed: {str(e)[:60]}...")
         print("      (Structure creation successful, computation issue detected)")
         # Return a special marker to indicate structure success but computation failure
-        return "structure_ok"
+        # return "structure_ok"
 
 
 def test_kernel_constructor_performance_comparison():
@@ -1312,7 +1306,6 @@ def test_kernel_constructor_performance_comparison():
     )
 
     print("   ✅ All methods create structurally equivalent kernels")
-    return min(times), max(times)
 
 
 @pytest.fixture(scope="module")

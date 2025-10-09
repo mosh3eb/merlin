@@ -2,7 +2,7 @@ import perceval as pcvl
 import torch
 
 from merlin.algorithms.layer import QuantumLayer
-from merlin.sampling.strategies import OutputMappingStrategy
+from merlin.sampling.strategies import MeasurementStrategy
 
 
 def classical_method(layer, input_state):
@@ -49,7 +49,7 @@ class TestOutputSuperposedState:
             input_size=0,
             circuit=circuit,
             n_photons=3,
-            output_mapping_strategy=OutputMappingStrategy.NONE,
+            measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
             input_state=input_state,
             trainable_parameters=["phi"],
             input_parameters=[],
@@ -86,13 +86,13 @@ class TestOutputSuperposedState:
 
         sum_values = (input_state**2).sum(dim=-1, keepdim=True)
 
-        input_state = input_state / sum_values
+        input_state = input_state / torch.sqrt(sum_values)
 
         layer = QuantumLayer(
             input_size=0,
             circuit=circuit,
             n_photons=3,
-            output_mapping_strategy=OutputMappingStrategy.NONE,
+            measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
             input_state=input_state,
             trainable_parameters=["phi"],
             input_parameters=[],

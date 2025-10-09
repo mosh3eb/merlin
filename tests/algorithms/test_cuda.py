@@ -38,13 +38,17 @@ def test_load_model_on_cuda():
 
     layer = ml.QuantumLayer(
         input_size=2,
-        output_size=1,
         circuit=circuit,
         input_state=[1, 1, 0, 0],
         trainable_parameters=["phi"],
         device=torch.device("cuda"),
+        measurement_strategy=ml.MeasurementStrategy.FOCKDISTRIBUTION,
+    )
+    model = nn.Sequential(layer, torch.nn.Linear(layer.output_size, 1)).to(
+        torch.device("cuda")
     )
     assert layer.device == torch.device("cuda")
+    assert model.device == torch.device("cuda")
     if len(layer.thetas) > 0:
         assert layer.thetas[0].device == torch.device("cuda", index=0)
     assert layer.computation_process.converter.device == torch.device("cuda")
@@ -66,14 +70,19 @@ def test_switch_model_to_cuda():
     )
     layer = ml.QuantumLayer(
         input_size=2,
-        output_size=1,
         circuit=circuit,
         input_state=[1, 1, 0, 0],
         trainable_parameters=["phi"],
         device=torch.device("cpu"),
+        measurement_strategy=ml.MeasurementStrategy.FOCKDISTRIBUTION,
+    )
+    model = nn.Sequential(layer, torch.nn.Linear(layer.output_size, 1)).to(
+        torch.device("cpu")
     )
     assert layer.device == torch.device("cpu")
+    assert model.device == torch.device("cpu")
     layer = layer.to(torch.device("cuda"))
+    model = model.to(torch.device("cuda"))
     _ = layer()
     layer.computation_process.input_state = torch.rand(
         (3, 6), device=torch.device("cuda")
@@ -122,7 +131,7 @@ class QuantumClassifier_withAnsatz(nn.Module):
         ansatz = ml.AnsatzFactory.create(
             PhotonicBackend=experiment,
             input_size=hidden_dim,
-            output_mapping_strategy=ml.OutputMappingStrategy.NONE,
+            measurement_strategy=ml.MeasurementStrategy.FOCKDISTRIBUTION,
         )
 
         # Build the QLayer using Merlin

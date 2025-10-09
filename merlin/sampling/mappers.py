@@ -24,12 +24,13 @@
 Output mapping implementations for quantum-to-classical conversion.
 """
 
+import warnings
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import warnings
 
-from .strategies import OutputMappingStrategy, MeasurementStrategy, GroupingPolicy
+from .strategies import GroupingPolicy, MeasurementStrategy, OutputMappingStrategy
 
 
 class OutputMapper:
@@ -44,10 +45,10 @@ class OutputMapper:
     def create_mapping(
         strategy: OutputMappingStrategy | MeasurementStrategy,
         input_size: int,
-        output_size: int = None,
-        grouping_policy: GroupingPolicy = None,
+        output_size: int | None = None,
+        grouping_policy: GroupingPolicy | None = None,
         no_bunching: bool = True,
-        keys: list[tuple[int, ...]] = None
+        keys: list[tuple[int, ...]] | None = None,
     ):
         """
         Create an output mapping based on the specified strategy.
@@ -73,37 +74,85 @@ class OutputMapper:
             ValueError: If strategy is unknown or sizes are incompatible for FockDistribution or StateVector strategies
             DeprecationWarning: If strategy is an OutputMappingStrategy
         """
-        if type(strategy) == OutputMappingStrategy:
-            warnings.warn('OutputMappingStrategy is deprecated and will be removed in version 0.3. '
-                  'Use MeasurementStrategy instead. Switching to MeasurementStrategy.FockDistribution by default.',
-                          DeprecationWarning, stacklevel=2)
-            strategy = MeasurementStrategy.FockDistribution
+        if type(strategy) is OutputMappingStrategy:
+            warnings.warn(
+                "OutputMappingStrategy is deprecated and will be removed in version 0.3. "
+                "Use MeasurementStrategy instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if strategy == OutputMappingStrategy.LINEAR:
+                warnings.warn(
+                    "OutputMappingStrategy.LINEAR was used and it will be replaced by MeasurementStrategy.FOCKDISTRIBUTION. To obtain the same behavior as before, please add a torch.nn.Linear layer after the quantum layer with your desired output size.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                strategy = MeasurementStrategy.FOCKDISTRIBUTION
+            elif (
+                strategy == OutputMappingStrategy.GROUPING
+                or strategy == OutputMappingStrategy.LEXGROUPING
+            ):
+                warnings.warn(
+                    "OutputMappingStrategy.GROUPING or OutputMappingStrategy.LEXGROUPING was used and it will be replaced by MeasurementStrategy.FOCKGROUPING with GroupingPolicy.LEXGROUPING. This is equivalent to the previous behavior.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                strategy = MeasurementStrategy.FOCKGROUPING
+                grouping_policy = GroupingPolicy.LEXGROUPING
+            elif strategy == OutputMappingStrategy.MODGROUPING:
+                warnings.warn(
+                    "OutputMappingStrategy.MODGROUPING was used and it will be replaced by MeasurementStrategy.FOCKGROUPING with GroupingPolicy.MODGROUPING. This is equivalent to the previous behavior.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                strategy = MeasurementStrategy.FOCKGROUPING
+                grouping_policy = GroupingPolicy.MODGROUPING
+            elif strategy == OutputMappingStrategy.NONE:
+                warnings.warn(
+                    "OutputMappingStrategy.NONE was used and it will be replaced by MeasurementStrategy.FOCKDISTRIBUTION. This is equivalent to the previous behavior.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                strategy = MeasurementStrategy.FOCKDISTRIBUTION
 
-        if strategy == MeasurementStrategy.FockDistribution:
+        if strategy == MeasurementStrategy.FOCKDISTRIBUTION:
+            if output_size is None:
+                output_size = input_size
             if input_size != output_size:
                 raise ValueError(
                     f"Distribution size ({input_size}) must equal "
                     f"output size ({output_size}) when using FockDistribution measurement strategy"
                 )
             return FockDistribution(input_size, output_size)
-        elif strategy == MeasurementStrategy.FockGrouping:
+        elif strategy == MeasurementStrategy.FOCKGROUPING:
+            if output_size is None:
+                output_size = input_size
             if grouping_policy is None:
                 return FockGrouping(input_size, output_size)
             else:
                 return FockGrouping(input_size, output_size, grouping_policy)
-        elif strategy == MeasurementStrategy.ModeExpectation:
-            if output_size is not None:
-                warnings.warn(f'When using ModeExpectation measurement strategy, the output size is the number of '
-                              f'modes, so the argument output_size={output_size} is ignored.')
+        elif strategy == MeasurementStrategy.MODEEXPECTATION:
+            if keys is None:
+                raise ValueError(
+                    "When using ModeExpectation measurement strategy, keys must be provided."
+                )
+            n_modes = len(keys[0])
+            if output_size is not None and output_size != n_modes:
+                raise ValueError(
+                    f"When using ModeExpectation measurement strategy, the output size is the number of "
+                    f"modes, so the argument output_size ({output_size}) has to be None or = {n_modes}."
+                )
             return ModeExpectation(input_size, no_bunching, keys)
-        elif strategy == MeasurementStrategy.StateVector:
+        elif strategy == MeasurementStrategy.STATEVECTOR:
+            if output_size is None:
+                output_size = input_size
             if input_size != output_size:
                 raise ValueError(
                     f"Distribution size ({input_size}) must equal "
                     f"output size ({output_size}) when using StateVector measurement strategy"
                 )
             return StateVector(input_size, output_size)
-        elif strategy == MeasurementStrategy.CustomObservable:
+        elif strategy == MeasurementStrategy.CUSTOMOBSERVABLE:
             return CustomObservable(input_size, output_size)
         else:
             raise ValueError(f"Unknown measurement strategy: {strategy}")
@@ -167,7 +216,12 @@ class FockGrouping(nn.Module):
     with the same modulo value are summed together to produce the output.
     """
 
-    def __init__(self, input_size: int, output_size: int, grouping_policy: GroupingPolicy = GroupingPolicy.LexGrouping):
+    def __init__(
+        self,
+        input_size: int,
+        output_size: int,
+        grouping_policy: GroupingPolicy = GroupingPolicy.LEXGROUPING,
+    ):
         """
         Initialize the converter from Fock state amplitudes or measurement counts to a grouping of Fock state
         probability distribution.
@@ -197,8 +251,10 @@ class FockGrouping(nn.Module):
         prob = fock_distribution(x)
 
         # LexGrouping
-        if self.grouping_policy == GroupingPolicy.LexGrouping:
-            pad_size = (self.output_size - (self.input_size % self.output_size)) % self.output_size
+        if self.grouping_policy == GroupingPolicy.LEXGROUPING:
+            pad_size = (
+                self.output_size - (self.input_size % self.output_size)
+            ) % self.output_size
             if pad_size > 0:
                 padded = F.pad(prob, (0, pad_size))
             else:
@@ -210,7 +266,7 @@ class FockGrouping(nn.Module):
                 return padded.view(self.output_size, -1).sum(dim=-1)
 
         # ModGrouping
-        elif self.grouping_policy == GroupingPolicy.ModGrouping:
+        elif self.grouping_policy == GroupingPolicy.MODGROUPING:
             if self.output_size > self.input_size:
                 if prob.dim() == 2:
                     pad_size = self.output_size - self.input_size
@@ -278,7 +334,7 @@ class ModeExpectation(nn.Module):
         if not keys:
             raise ValueError("Keys list cannot be empty")
 
-        if len(set(len(key) for key in keys)) > 1:
+        if len({len(key) for key in keys}) > 1:
             raise ValueError("All keys must have the same length (number of modes)")
 
         if len(keys) != input_size:
@@ -294,7 +350,9 @@ class ModeExpectation(nn.Module):
             mask = keys_tensor.T.float()
         self.register_buffer("mask", mask)
 
-    def marginalize_photon_presence(self, probability_distribution: torch.Tensor) -> torch.Tensor:
+    def marginalize_photon_presence(
+        self, probability_distribution: torch.Tensor
+    ) -> torch.Tensor:
         """
         Marginalize Fock state probabilities to get per-mode occupation probabilities.
 
@@ -366,23 +424,26 @@ class StateVector(nn.Module):
         if x.ndim == 1:
             x = x.unsqueeze(0)
         n_batch, n_amplitudes = x.shape
-        assert torch.allclose(torch.sum( x.abs()**2, dim=1), torch.ones(n_batch), atol=1e-6), ('Amplitudes are needed '
-               'to use the StateVector measurement strategy.')
+        if not torch.allclose(
+            torch.sum(x.abs() ** 2, dim=1), torch.ones(n_batch), atol=1e-6
+        ):
+            warnings.warn(
+                "The given input to this mapper is not a valid Fock state amplitudes tensor. It will be returned as is, but cannot be interpreted as an amplitude state vector.",
+                stacklevel=2,
+            )
         if len(original_shape) == 1:
             x = x.squeeze(0)
         return x
 
 
 class CustomObservable(nn.Module):
-    """
+    """TODO: Placeholder for future implementation of custom observable measurement strategy."""
 
-    """
-
-    def __init__(self, input_size: int, output_size: int):
-        #TODO
+    def __init__(self, input_size: int, output_size: int | None):
+        # TODO
         self.input_size = input_size
         self.output_size = output_size
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        #TODO
+        # TODO
         return x

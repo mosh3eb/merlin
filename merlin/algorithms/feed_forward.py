@@ -5,7 +5,7 @@ import torch
 from perceval.components import BS, PS
 
 from ..algorithms.layer import QuantumLayer
-from ..sampling.strategies import OutputMappingStrategy
+from ..sampling.strategies import MeasurementStrategy
 
 
 def create_circuit(M, input_size):
@@ -58,7 +58,7 @@ def define_layer_no_input(n_modes, n_photons):
         circuit=circuit,
         n_photons=n_photons,
         input_state=input_state,  # Random Initial quantum state used only for initialization
-        output_mapping_strategy=OutputMappingStrategy.NONE,
+        measurement_strategy=MeasurementStrategy.STATEVECTOR,
         trainable_parameters=["theta"],
         no_bunching=True,
     )
@@ -83,7 +83,7 @@ def define_layer_with_input(M, N, input_size):
         circuit=circuit,
         n_photons=N,
         input_state=input_state,  # Random Initial quantum state used only for initialization
-        output_mapping_strategy=OutputMappingStrategy.NONE,
+        measurement_strategy=MeasurementStrategy.STATEVECTOR,
         input_parameters=["phi"],  # Optional: Specify device
         trainable_parameters=["theta"],
         no_bunching=True,
@@ -108,10 +108,10 @@ class FeedForwardBlock(torch.nn.Module):
         input_size: int,
         n: int,
         m: int,
-        depth: int = None,
+        depth: int | None = None,
         state_injection=False,
         conditional_mode: int = 0,
-        layers: list[QuantumLayer] = None,
+        layers: list[QuantumLayer] | None = None,
     ):
         super().__init__()
         self.conditional_mode = conditional_mode
@@ -276,11 +276,9 @@ class FeedForwardBlock(torch.nn.Module):
             start, end = self.input_segments[current_key_with]
 
             if start != end:
-                probs_with, amplitudes_with = layer_with_photon(
-                    x[:, start:end], return_amplitudes=True
-                )
+                amplitudes_with = layer_with_photon(x[:, start:end])
             else:
-                probs_with, amplitudes_with = layer_with_photon(return_amplitudes=True)
+                amplitudes_with = layer_with_photon()
 
             new_prob_with = accumulated_prob * intermediary[current_key_with]
             self.iterate_feedforward(
@@ -320,13 +318,9 @@ class FeedForwardBlock(torch.nn.Module):
             start, end = self.input_segments[current_key_without]
 
             if start != end:
-                probs_without, amplitudes_without = layer_without_photon(
-                    x[:, start:end], return_amplitudes=True
-                )
+                amplitudes_without = layer_without_photon(x[:, start:end])
             else:
-                probs_without, amplitudes_without = layer_without_photon(
-                    return_amplitudes=True
-                )
+                amplitudes_without = layer_without_photon()
             new_prob_without = accumulated_prob * intermediary[current_key_without]
 
             self.iterate_feedforward(
@@ -363,7 +357,7 @@ class FeedForwardBlock(torch.nn.Module):
         input_size = min(self.input_size, self.m)
         input = x[:, :input_size]
         layer = self.layers[()]
-        probs, amplitudes = layer(input, return_amplitudes=True)
+        amplitudes = layer(input)
         keys = layer.computation_process.simulation_graph.mapped_keys
         self.iterate_feedforward(
             (),

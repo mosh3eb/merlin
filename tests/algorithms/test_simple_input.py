@@ -8,7 +8,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from merlin import OutputMappingStrategy, QuantumLayer
+from merlin import FockDistribution, MeasurementStrategy, QuantumLayer
 
 _PCVL_HOME = Path(__file__).resolve().parents[2] / ".pcvl_home"
 (
@@ -24,16 +24,16 @@ def perceval_home(monkeypatch):
 
 @pytest.fixture
 def quantum_layer_api():
-    return QuantumLayer, OutputMappingStrategy
+    return QuantumLayer, MeasurementStrategy
 
 
 def test_none_strategy_without_output_size(quantum_layer_api):
-    QuantumLayer, OutputMappingStrategy = quantum_layer_api
+    QuantumLayer, MeasurementStrategy = quantum_layer_api
 
     layer = QuantumLayer.simple(
         input_size=3,
         n_params=60,
-        output_mapping_strategy=OutputMappingStrategy.NONE,
+        measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
         dtype=torch.float32,
     )
 
@@ -45,12 +45,12 @@ def test_none_strategy_without_output_size(quantum_layer_api):
 
 
 def test_none_strategy_with_matching_output_size(quantum_layer_api):
-    QuantumLayer, OutputMappingStrategy = quantum_layer_api
+    QuantumLayer, MeasurementStrategy = quantum_layer_api
 
     reference_layer = QuantumLayer.simple(
         input_size=3,
         n_params=60,
-        output_mapping_strategy=OutputMappingStrategy.NONE,
+        measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
     )
     dist_size = reference_layer.output_size
 
@@ -58,7 +58,7 @@ def test_none_strategy_with_matching_output_size(quantum_layer_api):
         input_size=3,
         n_params=60,
         output_size=dist_size,
-        output_mapping_strategy=OutputMappingStrategy.NONE,
+        measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
     )
 
     x = torch.rand(2, 3)
@@ -67,25 +67,41 @@ def test_none_strategy_with_matching_output_size(quantum_layer_api):
 
 
 def test_none_strategy_with_mismatched_output_size(quantum_layer_api):
-    QuantumLayer, OutputMappingStrategy = quantum_layer_api
+    QuantumLayer, MeasurementStrategy = quantum_layer_api
 
     with pytest.raises(ValueError):
         QuantumLayer.simple(
             input_size=3,
             n_params=60,
             output_size=10,
-            output_mapping_strategy=OutputMappingStrategy.NONE,
+            measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
         )
-
-
-def test_linear_strategy_requires_output_size(quantum_layer_api):
-    QuantumLayer, OutputMappingStrategy = quantum_layer_api
 
     with pytest.raises(ValueError):
         QuantumLayer.simple(
             input_size=3,
             n_params=60,
-            output_mapping_strategy=OutputMappingStrategy.LINEAR,
+            output_size=10,
+            measurement_strategy=MeasurementStrategy.STATEVECTOR,
+        )
+
+    with pytest.raises(ValueError):
+        QuantumLayer.simple(
+            input_size=3,
+            n_params=60,
+            output_size=5,
+            measurement_strategy=MeasurementStrategy.MODEEXPECTATION,
+        )
+
+
+def test_fock_grouping_strategy_requires_output_size(quantum_layer_api):
+    QuantumLayer, MeasurementStrategy = quantum_layer_api
+
+    with pytest.raises(ValueError):
+        QuantumLayer.simple(
+            input_size=3,
+            n_params=60,
+            measurement_strategy=MeasurementStrategy.FOCKGROUPING,
         )
 
 
@@ -95,13 +111,13 @@ def test_linear_strategy_creates_linear_mapping(quantum_layer_api):
     layer = QuantumLayer.simple(
         input_size=3,
         n_params=60,
-        output_size=5,
-        output_mapping_strategy=OutputMappingStrategy.LINEAR,
+        measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
     )
+    model = nn.Sequential(layer, nn.Linear(layer.output_size, 5))
 
-    assert isinstance(layer.output_mapping, nn.Linear)
+    assert isinstance(layer.measurement_mapping, FockDistribution)
     x = torch.rand(6, 3)
-    output = layer(x)
+    output = model(x)
     assert output.shape == (6, 5)
 
 
@@ -109,19 +125,20 @@ def test_default_strategy_is_none(quantum_layer_api):
     QuantumLayer, _ = quantum_layer_api
     sig = inspect.signature(QuantumLayer.simple)
     assert (
-        sig.parameters["output_mapping_strategy"].default == OutputMappingStrategy.NONE
+        sig.parameters["measurement_strategy"].default
+        == MeasurementStrategy.FOCKDISTRIBUTION
     )
 
 
 def test_trainable_parameter_budget_matches_request(quantum_layer_api):
-    QuantumLayer, OutputMappingStrategy = quantum_layer_api
+    QuantumLayer, MeasurementStrategy = quantum_layer_api
 
     requested_params = 37
     with pytest.warns(RuntimeWarning):
         layer = QuantumLayer.simple(
             input_size=3,
             n_params=requested_params,
-            output_mapping_strategy=OutputMappingStrategy.NONE,
+            measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
         )
 
     theta_param_count = sum(
@@ -147,24 +164,24 @@ def test_gradient_flow_for_strategies(quantum_layer_api):
     QuantumLayer, OutputMappingStrategy = quantum_layer_api
     nb_params = 40
 
-    layer_linear = QuantumLayer.simple(
+    layer = QuantumLayer.simple(
         input_size=3,
         n_params=nb_params,
-        output_size=4,
-        output_mapping_strategy=OutputMappingStrategy.LINEAR,
+        measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
     )
+    model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 4))
 
     x = torch.rand(8, 3, requires_grad=True)
-    loss = layer_linear(x).sum()
+    loss = model(x).sum()
     loss.backward()
     assert any(
-        p.grad is not None and torch.any(p.grad != 0) for p in layer_linear.parameters()
+        p.grad is not None and torch.any(p.grad != 0) for p in model.parameters()
     )
 
     layer_none = QuantumLayer.simple(
         input_size=3,
         n_params=nb_params,
-        output_mapping_strategy=OutputMappingStrategy.NONE,
+        measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
     )
 
     x = torch.rand(8, 3, requires_grad=True)
@@ -201,17 +218,17 @@ def test_quantum_layer_simple_raises_when_input_exceeds_modes(quantum_layer_api)
         QuantumLayer.simple(
             input_size=12,
             n_params=30,
-            output_mapping_strategy=OutputMappingStrategy.NONE,
+            measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
         )
 
 
 def test_batch_shapes_and_probabilities(quantum_layer_api):
-    QuantumLayer, OutputMappingStrategy = quantum_layer_api
+    QuantumLayer, MeasurementStrategy = quantum_layer_api
 
     layer = QuantumLayer.simple(
         input_size=4,
         n_params=80,
-        output_mapping_strategy=OutputMappingStrategy.NONE,
+        measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
     )
 
     for batch_size in [1, 5, 16]:
@@ -223,14 +240,14 @@ def test_batch_shapes_and_probabilities(quantum_layer_api):
 
 
 def test_dtype_propagation(quantum_layer_api):
-    QuantumLayer, OutputMappingStrategy = quantum_layer_api
+    QuantumLayer, MeasurementStrategy = quantum_layer_api
 
     for dtype in (torch.float32, torch.float64):
         layer = QuantumLayer.simple(
             input_size=3,
             n_params=60,
             dtype=dtype,
-            output_mapping_strategy=OutputMappingStrategy.NONE,
+            measurement_strategy=MeasurementStrategy.FOCKDISTRIBUTION,
         )
 
         for param in layer.parameters():
