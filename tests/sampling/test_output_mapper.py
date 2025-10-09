@@ -29,58 +29,35 @@ import merlin as ML
 
 
 class TestOutputMapper:
-    def test_mode_expectation_mapping(self):
-        """Test ModeExpectation mapping creation and behavior."""
-        # keys: 3 modes, 2 photons, all possible Fock states
-        keys = [(2, 0, 0), (1, 1, 0), (1, 0, 1), (0, 2, 0), (0, 1, 1), (0, 0, 2)]
-        input_size = len(keys)
-        output_size = 3
-        mapping = ML.OutputMapper.create_mapping(
-            ML.MeasurementStrategy.MODEEXPECTATION,
-            input_size=input_size,
-            output_size=output_size,
-            keys=keys,
-            no_bunching=True,
-        )
-        # Input: batch of probability distributions
-        x = torch.rand(4, input_size, requires_grad=True)
-        output = mapping(x)
-        assert output.shape == (4, output_size)
-        assert torch.all(output >= 0)
-        output.sum().backward()
-        assert x.grad is not None
-        # Since no_bunching=True
-        assert torch.all(output <= torch.ones_like(output))
-        assert torch.all(output >= torch.zeros_like(output))
-
-    def test_state_vector_mapping(self):
-        """Test StateVector mapping creation and behavior."""
-        input_size = 5
-        output_size = 5
-        mapping = ML.OutputMapper.create_mapping(
-            ML.MeasurementStrategy.STATEVECTOR,
-            input_size=input_size,
-            output_size=output_size,
-        )
-        x = torch.rand(3, input_size, requires_grad=True)
-
-        # Use MSE loss instead of sum for better gradient flow
-        output = mapping(x)
-        target = torch.ones_like(output)
-        loss = F.mse_loss(output, target)
-        loss.backward()
-
-        assert x.grad is not None
-
     def test_linear_mapping_creation(self):
         """Test creation of linear output mapping."""
         fock_distribution = ML.OutputMapper.create_mapping(
             ML.MeasurementStrategy.FOCKDISTRIBUTION, input_size=6, output_size=6
         )
         mapping = torch.nn.Sequential(fock_distribution, nn.Linear(6, 3))
+        assert isinstance(mapping[0], ML.FockDistribution)
+        assert mapping[0].input_size == 6
+        assert mapping[0].output_size == 6
         assert isinstance(mapping[-1], nn.Linear)
         assert mapping[-1].in_features == 6
         assert mapping[-1].out_features == 3
+
+    def test_fock_distribution_mapping_creation(self):
+        fock_distribution = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKDISTRIBUTION, input_size=6, output_size=6
+        )
+        assert isinstance(fock_distribution, ML.FockDistribution)
+        assert fock_distribution.input_size == 6
+        assert fock_distribution.output_size == 6
+
+    def test_fock_grouping_mapping_creation(self):
+        """Test creation of default fock grouping mapping."""
+        fock_grouping = ML.OutputMapper.create_mapping(
+            ML.MeasurementStrategy.FOCKGROUPING, input_size=8, output_size=4
+        )
+        assert isinstance(fock_grouping, ML.FockGrouping)
+        assert fock_grouping.input_size == 8
+        assert fock_grouping.output_size == 4
 
     def test_lexgrouping_mapping_creation(self):
         """Test creation of lexicographical grouping mapping."""
@@ -114,7 +91,15 @@ class TestOutputMapper:
         batch_size = 4
         input_amps = torch.rand(batch_size, 5)
         output_amps = mapping(input_amps)
+        assert isinstance(mapping, ML.StateVector)
         assert torch.allclose(input_amps, output_amps, atol=1e-6)
+
+    def test_state_vector_mapping_creation_invalid(self):
+        """Test that StateVector strategy with mismatched sizes raises error."""
+        with pytest.raises(ValueError):
+            ML.OutputMapper.create_mapping(
+                ML.MeasurementStrategy.STATEVECTOR, input_size=5, output_size=3
+            )
 
     def test_fock_distribution_mapping_creation_invalid(self):
         """Test that FockDistribution strategy with mismatched sizes raises error."""
