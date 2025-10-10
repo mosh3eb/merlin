@@ -4,11 +4,9 @@ import perceval as pcvl
 import torch
 from perceval.components import BS, PS
 
-from merlin import (
-    CircuitType,
-    OutputMappingStrategy,
-    QuantumLayer,
-)
+from ..core.generators import CircuitType
+from ..sampling.strategies import OutputMappingStrategy
+from .layer import QuantumLayer
 
 
 def create_circuit(M, input_size):
