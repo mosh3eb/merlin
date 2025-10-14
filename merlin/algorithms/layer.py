@@ -67,13 +67,15 @@ class QuantumLayer(nn.Module):
         output_size: int | None = None,
         # Ansatz-based construction
         ansatz: Ansatz | None = None,
-        # Custom circuit or builder construction (backward compatible)
-        circuit: pcvl.Circuit | None = None,
+        # Builder-based construction
         builder: CircuitBuilder | None = None,
-        input_state: list[int] | None = None,
-        n_photons: int | None = None,
+        # Custom circuit
+        circuit: pcvl.Circuit | None = None,
         trainable_parameters: list[str] = None,
         input_parameters: list[str] = None,
+        # For both custom circuits and builder
+        input_state: list[int] | None = None,
+        n_photons: int | None = None,
         # Common parameters
         output_mapping_strategy: OutputMappingStrategy = OutputMappingStrategy.LINEAR,
         device: torch.device | None = None,
