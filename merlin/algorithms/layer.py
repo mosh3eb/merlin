@@ -52,7 +52,7 @@ class QuantumLayer(nn.Module):
 
     This layer can be created either from:
     1. An Ansatz object (from AnsatzFactory) - for auto-generated circuits
-    2. Direct parameters - for custom circuits (backward compatible)
+    2. A :class:`CircuitBuilder` instance or a pre-compiled :class:`pcvl.Circuit`
 
     Args:
         index_photons (List[Tuple[int, int]], optional): List of tuples (min_mode, max_mode)
@@ -67,8 +67,9 @@ class QuantumLayer(nn.Module):
         output_size: int | None = None,
         # Ansatz-based construction
         ansatz: Ansatz | None = None,
-        # Custom circuit construction (backward compatible)
-        circuit: pcvl.Circuit | CircuitBuilder | None = None,
+        # Custom circuit or builder construction (backward compatible)
+        circuit: pcvl.Circuit | None = None,
+        builder: CircuitBuilder | None = None,
         input_state: list[int] | None = None,
         n_photons: int | None = None,
         trainable_parameters: list[str] = None,
@@ -93,15 +94,20 @@ class QuantumLayer(nn.Module):
 
         builder_trainable: list[str] = []
         builder_input: list[str] = []
+        resolved_circuit: pcvl.Circuit | None = None
 
         self.angle_encoding_specs: dict[str, dict[str, Any]] = {}
 
-        # convert CircuitBuilder to pcvl.Circuit if needed, otherwise use Circuit
-        if isinstance(circuit, CircuitBuilder):
-            builder_trainable = circuit.trainable_parameter_prefixes
-            builder_input = circuit.input_parameter_prefixes
-            self.angle_encoding_specs = circuit.angle_encoding_specs
-            circuit = circuit.to_pcvl_circuit(pcvl)
+        if circuit is not None and builder is not None:
+            raise ValueError("Provide either 'circuit' or 'builder', not both")
+
+        if builder is not None:
+            builder_trainable = builder.trainable_parameter_prefixes
+            builder_input = builder.input_parameter_prefixes
+            self.angle_encoding_specs = builder.angle_encoding_specs
+            resolved_circuit = builder.to_pcvl_circuit(pcvl)
+        elif circuit is not None:
+            resolved_circuit = circuit
 
         # Fix trainable and input parameters from builder or circuit, can also be empty lists
         if trainable_parameters is None:
@@ -119,10 +125,10 @@ class QuantumLayer(nn.Module):
         if ansatz is not None:
             self._init_from_ansatz(ansatz, output_size, output_mapping_strategy)
 
-        elif circuit is not None:
-            self.circuit = circuit
+        elif resolved_circuit is not None:
+            self.circuit = resolved_circuit
             self._init_from_custom_circuit(
-                circuit,
+                resolved_circuit,
                 input_state,
                 n_photons,
                 trainable_parameters,
@@ -131,7 +137,7 @@ class QuantumLayer(nn.Module):
                 output_mapping_strategy,
             )
         else:
-            raise ValueError("Either 'ansatz' or 'circuit' must be provided")
+            raise ValueError("Either 'ansatz', 'circuit', or 'builder' must be provided")
 
         # Setup sampling
         self.autodiff_process = AutoDiffProcess(sampling_method)
@@ -799,7 +805,7 @@ class QuantumLayer(nn.Module):
         return cls(
             input_size=input_size,
             output_size=output_size,
-            circuit=builder,
+            builder=builder,
             n_photons=n_photons,
             output_mapping_strategy=output_mapping_strategy,
             shots=shots,

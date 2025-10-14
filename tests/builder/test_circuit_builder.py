@@ -156,7 +156,7 @@ def test_builder_integrates_directly_with_quantum_layer():
 
     layer = QuantumLayer(
         input_size=3,
-        circuit=builder,
+        builder=builder,
         n_photons=1,
         output_size=3,
         output_mapping_strategy=OutputMappingStrategy.LINEAR,
@@ -236,7 +236,7 @@ def test_angle_encoding_applies_scaling_in_quantum_layer():
 
     layer = QuantumLayer(
         input_size=3,
-        circuit=builder,
+        builder=builder,
         n_photons=1,
         output_size=3,
         output_mapping_strategy=OutputMappingStrategy.LINEAR,
@@ -265,7 +265,7 @@ def test_angle_encoding_subset_combinations_in_quantum_layer():
 
     layer = QuantumLayer(
         input_size=3,
-        circuit=builder,
+        builder=builder,
         n_photons=1,
         output_size=3,
         output_mapping_strategy=OutputMappingStrategy.LINEAR,
@@ -414,7 +414,7 @@ def test_entangling_layer_models_forward_backward(model):
 
     layer = QuantumLayer(
         input_size=4,
-        circuit=builder,
+        builder=builder,
         n_photons=1,
         output_size=4,
         output_mapping_strategy=OutputMappingStrategy.LINEAR,
@@ -448,7 +448,7 @@ def test_entangling_layer_layer_trains():
 
     layer = QuantumLayer(
         input_size=4,
-        circuit=builder,
+        builder=builder,
         n_photons=1,
         output_size=4,
         output_mapping_strategy=OutputMappingStrategy.LINEAR,
@@ -475,7 +475,7 @@ def test_entangling_layer_with_additional_components_trains():
 
     layer = QuantumLayer(
         input_size=5,
-        circuit=builder,
+        builder=builder,
         n_photons=1,
         output_size=5,
         output_mapping_strategy=OutputMappingStrategy.LINEAR,
@@ -507,7 +507,7 @@ def test_entangling_layer_models_on_gpu(model):
 
     layer = QuantumLayer(
         input_size=4,
-        circuit=builder,
+        builder=builder,
         n_photons=1,
         output_size=4,
         output_mapping_strategy=OutputMappingStrategy.LINEAR,

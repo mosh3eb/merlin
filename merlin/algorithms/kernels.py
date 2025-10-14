@@ -40,7 +40,8 @@ class FeatureMap:
     computes the associated unitary for quantum kernel methods.
 
     Args:
-        circuit: Circuit or builder containing the data-encoding gates.
+        circuit: Pre-compiled :class:`pcvl.Circuit` to encode features.
+        builder: Optional :class:`CircuitBuilder` to compile into a circuit.
         input_parameters: Parameter prefix(es) that host the classical data.
         dtype: Torch dtype used when constructing the unitary.
         device: Torch device on which unitaries are evaluated.
@@ -48,10 +49,11 @@ class FeatureMap:
 
     def __init__(
         self,
-        circuit: pcvl.Circuit | CircuitBuilder,
+        circuit: pcvl.Circuit | None = None,
+        *,
+        builder: CircuitBuilder | None = None,
         input_size: int,
         input_parameters: str | list[str] | None,
-        *,
         trainable_parameters: list[str] | None = None,
         dtype: str | torch.dtype = torch.float32,
         device: torch.device | None = None,
@@ -62,12 +64,17 @@ class FeatureMap:
 
         self._angle_encoding_specs: dict[str, dict[str, object]] = {}
 
-        if isinstance(circuit, CircuitBuilder):
-            builder_trainable = circuit.trainable_parameter_prefixes
-            builder_input = circuit.input_parameter_prefixes
-            self._angle_encoding_specs = circuit.angle_encoding_specs
-            circuit = circuit.to_pcvl_circuit(pcvl)
+        if circuit is not None and builder is not None:
+            raise ValueError("Provide either 'circuit' or 'builder', not both")   
 
+        if builder is not None:
+            builder_trainable = builder.trainable_parameter_prefixes
+            builder_input = builder.input_parameter_prefixes
+            self._angle_encoding_specs = builder.angle_encoding_specs
+            circuit = builder.to_pcvl_circuit(pcvl)
+
+        if circuit is None:
+            raise ValueError("Either 'circuit' or 'builder' must be provided")  
         self.circuit = circuit
         self.input_size = input_size
         if trainable_parameters is None:
@@ -95,7 +102,7 @@ class FeatureMap:
             self.input_parameters = input_parameters
 
         self._circuit_graph = CircuitConverter(
-            circuit,
+            self.circuit,
             [self.input_parameters] + self.trainable_parameters,
             dtype=self.dtype,
             device=device,
@@ -385,7 +392,7 @@ class FeatureMap:
         builder.add_superpositions(depth=1)
 
         return cls(
-            circuit=builder,
+            builder=builder,
             input_size=input_size,
             input_parameters=None,
             trainable_parameters=trainable_parameters,
@@ -502,7 +509,7 @@ class KernelCircuitBuilder:
         builder.add_superpositions(depth=1)
 
         return FeatureMap(
-            circuit=builder,
+            builder=builder,
             input_size=self._input_size,
             input_parameters=None,
             trainable_parameters=trainable_params,

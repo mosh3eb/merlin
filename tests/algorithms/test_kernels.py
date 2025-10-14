@@ -302,7 +302,7 @@ class TestFeatureMapFactoryMethods:
         builder.add_superpositions(depth=1)
 
         feature_map = FeatureMap(
-            circuit=builder,
+            builder=builder,
             input_size=2,
             input_parameters=None,
         )
@@ -319,7 +319,7 @@ class TestFeatureMapFactoryMethods:
         builder.add_superpositions(depth=1)
 
         feature_map = FeatureMap(
-            circuit=builder,
+            builder=builder,
             input_size=2,
             input_parameters=None,
         )
@@ -337,7 +337,7 @@ class TestFeatureMapFactoryMethods:
         )
 
         feature_map = FeatureMap(
-            circuit=builder,
+            builder=builder,
             input_size=3,
             input_parameters=None,
         )
@@ -407,7 +407,7 @@ class TestFidelityKernelFactoryMethods:
         builder.add_superpositions(depth=1)
 
         feature_map = FeatureMap(
-            circuit=builder,
+            builder=builder,
             input_size=2,
             input_parameters=None,
         )
@@ -585,7 +585,7 @@ class TestKernelCircuitBuilder:
         builder.add_angle_encoding(modes=[0, 1, 2, 3], name="input")
 
         feature_map = FeatureMap(
-            circuit=builder,
+            builder=builder,
             input_size=4,
             input_parameters=None,
         )
@@ -659,7 +659,7 @@ class TestKernelConstructionConsistency:
         builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_superpositions(depth=1, name="phi_2_")
         fm_manual = FeatureMap(
-            circuit=builder,
+            builder=builder,
             input_size=2,
             input_parameters=None,
         )

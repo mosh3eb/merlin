@@ -46,7 +46,7 @@ Example: Declarative builder API
 
     builder_layer = QuantumLayer(
         input_size=4,
-        circuit=builder,
+        builder=builder,
         n_photons=3, # is equivalent to input_state=[1,1,1,0,0,0]
         output_size=3,
         output_mapping_strategy=OutputMappingStrategy.GROUPING,

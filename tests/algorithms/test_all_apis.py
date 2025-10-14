@@ -79,7 +79,7 @@ def test_builder_api_pipeline_on_iris(iris_batch):
 
     layer = QuantumLayer(
         input_size=features.shape[1],
-        circuit=builder,
+        builder=builder,
         n_photons=5,
         output_size=3,
         output_mapping_strategy=OutputMappingStrategy.LINEAR,
