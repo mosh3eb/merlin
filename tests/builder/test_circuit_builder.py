@@ -309,8 +309,8 @@ def test_angle_encoding_tracks_logical_indices_for_sparse_modes():
 def test_trainable_name_deduplication_for_rotation_layer():
     builder = CircuitBuilder(n_modes=2)
 
-    builder.add_rotation_layer(modes=[0, 1], trainable=True, name="theta")
-    builder.add_rotation_layer(modes=[0, 1], trainable=True, name="theta")
+    builder.add_rotations(modes=[0, 1], trainable=True, name="theta")
+    builder.add_rotations(modes=[0, 1], trainable=True, name="theta")
     pcvl.pdisplay(builder.to_pcvl_circuit(pcvl), output_format=pcvl.Format.TEXT)
     rotations = [
         comp for comp in builder.circuit.components if isinstance(comp, Rotation)
