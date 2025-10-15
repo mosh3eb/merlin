@@ -94,8 +94,8 @@ class QuantumLayer(nn.Module):
         self.no_bunching = no_bunching
         self.index_photons = index_photons
 
-        builder_trainable: list[str] = []
-        builder_input: list[str] = []
+        trainable_parameters = list(trainable_parameters) if trainable_parameters else []
+        input_parameters = list(input_parameters) if input_parameters else []
         resolved_circuit: pcvl.Circuit | None = None
 
         self.angle_encoding_specs: dict[str, dict[str, Any]] = {}
@@ -103,27 +103,18 @@ class QuantumLayer(nn.Module):
         if circuit is not None and builder is not None:
             raise ValueError("Provide either 'circuit' or 'builder', not both")
 
+        # define circuit from input builder or from circuit
         if builder is not None:
-            builder_trainable = builder.trainable_parameter_prefixes
-            builder_input = builder.input_parameter_prefixes
+            trainable_parameters = list(builder.trainable_parameter_prefixes)
+            input_parameters = list(builder.input_parameter_prefixes)
             self.angle_encoding_specs = builder.angle_encoding_specs
             resolved_circuit = builder.to_pcvl_circuit(pcvl)
+        
         elif circuit is not None:
             resolved_circuit = circuit
 
-        # Fix trainable and input parameters from builder or circuit, can also be empty lists
-        if trainable_parameters is None:
-            trainable_parameters = list(builder_trainable)
-        else:
-            trainable_parameters = list(trainable_parameters)
-
-        if input_parameters is None:
-            input_parameters = list(builder_input)
-        else:
-            input_parameters = list(input_parameters)
-
-        # Determine construction mode
-
+        # Determine construction mode with deprecated ansatz or resolved circuit
+        # this if/elif loop can be removed for future releases because resolved_circuit will always be not None
         if ansatz is not None:
             warnings.warn(
                 "The ansatz-based QuantumLayer construction is deprecated and will be "
