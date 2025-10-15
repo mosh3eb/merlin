@@ -309,9 +309,9 @@ def test_angle_encoding_tracks_logical_indices_for_sparse_modes():
 def test_trainable_name_deduplication_for_rotation_layer():
     builder = CircuitBuilder(n_modes=2)
 
-    builder.add_rotations(modes=[0, 1], trainable=True, name="theta")
-    builder.add_rotations(modes=[0, 1], trainable=True, name="theta")
-    pcvl.pdisplay(builder.to_pcvl_circuit(pcvl))
+    builder.add_rotation_layer(modes=[0, 1], trainable=True, name="theta")
+    builder.add_rotation_layer(modes=[0, 1], trainable=True, name="theta")
+    pcvl.pdisplay(builder.to_pcvl_circuit(pcvl), output_format=pcvl.Format.TEXT)
     rotations = [
         comp for comp in builder.circuit.components if isinstance(comp, Rotation)
     ]
@@ -459,7 +459,7 @@ def test_entangling_layer_layer_trains():
     logits = layer(x)
     loss = logits.sum()
     loss.backward()
-    pcvl.pdisplay(layer.computation_process.circuit)
+    pcvl.pdisplay(layer.computation_process.circuit, output_format=pcvl.Format.TEXT)
     assert logits.shape == (5, 4)
     assert any(
         p.grad is not None and torch.any(p.grad != 0) for p in layer.parameters()
@@ -481,7 +481,7 @@ def test_entangling_layer_with_additional_components_trains():
         output_mapping_strategy=OutputMappingStrategy.LINEAR,
         dtype=torch.float32,
     )
-    pcvl.pdisplay(layer.computation_process.circuit)
+    pcvl.pdisplay(layer.computation_process.circuit, output_format=pcvl.Format.TEXT)
 
     x = torch.rand(3, 5)
     logits = layer(x)
