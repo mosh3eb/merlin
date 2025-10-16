@@ -243,11 +243,20 @@ class TestFidelityKernel:
             f"Matrix has negative eigenvalues: {real_eigenvals[real_eigenvals < -1e-10]}"
         )
 
-
     def test_kernel_no_bunching(self):
-        from merlin.algorithms import FidelityKernel
-        from perceval import Circuit, BS, PS, P, Processor, GenericInterferometer, Unitary, BasicState
+        from perceval import (
+            BS,
+            PS,
+            BasicState,
+            Circuit,
+            GenericInterferometer,
+            P,
+            Processor,
+            Unitary,
+        )
         from perceval.algorithm import Sampler
+
+        from merlin.algorithms import FidelityKernel
 
         # ---- Evaluate kernel using Perceval ----
         def circ_func(x):
@@ -286,27 +295,37 @@ class TestFidelityKernel:
         merlin_pnr = float(quantum_kernel(X1, X2))
         merlin_thr = float(unbunching_kernel(X1, X2))
 
-        print(F"MerLin quantum kernel (PNR) {quantum_kernel(X1, X2)}")
-        print(F"MerLin quantum kernel (THR) {unbunching_kernel(X1, X2)} \n")
+        print(f"MerLin quantum kernel (PNR) {quantum_kernel(X1, X2)}")
+        print(f"MerLin quantum kernel (THR) {unbunching_kernel(X1, X2)} \n")
         # --- Compute kernel circuit unitary using Perceval ---
         circuit_forward = GenericInterferometer(len(input_state), circ_func)
         for i, p in enumerate(circuit_forward.get_parameters()):
             p.set_value(X1[i])
-        forward_unitary = np.asarray(circuit_forward.compute_unitary(), dtype=np.complex128)
+        forward_unitary = np.asarray(
+            circuit_forward.compute_unitary(), dtype=np.complex128
+        )
 
-        feature_forward = feature_map.compute_unitary(
-            torch.as_tensor(X1, dtype=feature_map.dtype)
-        ).detach().cpu().numpy()
+        feature_forward = (
+            feature_map.compute_unitary(torch.as_tensor(X1, dtype=feature_map.dtype))
+            .detach()
+            .cpu()
+            .numpy()
+        )
         assert np.allclose(feature_forward, forward_unitary, atol=1e-6)
 
         circuit_backward = GenericInterferometer(len(input_state), circ_func)
         for i, p in enumerate(circuit_backward.get_parameters()):
             p.set_value(X2[i])
-        backward_unitary = np.asarray(circuit_backward.compute_unitary(), dtype=np.complex128)
+        backward_unitary = np.asarray(
+            circuit_backward.compute_unitary(), dtype=np.complex128
+        )
 
-        feature_backward = feature_map.compute_unitary(
-            torch.as_tensor(X2, dtype=feature_map.dtype)
-        ).detach().cpu().numpy()
+        feature_backward = (
+            feature_map.compute_unitary(torch.as_tensor(X2, dtype=feature_map.dtype))
+            .detach()
+            .cpu()
+            .numpy()
+        )
         assert np.allclose(feature_backward, backward_unitary, atol=1e-6)
 
         circ_unitary = forward_unitary @ backward_unitary.conj().T
@@ -319,6 +338,7 @@ class TestFidelityKernel:
         processor.min_detected_photons_filter(0)
 
         sampler = Sampler(processor)
+
         def state_to_tuple(state):
             try:
                 return tuple(int(n) for n in state.tolist())
@@ -327,8 +347,7 @@ class TestFidelityKernel:
 
         raw_results = sampler.probs()["results"]
         results = {
-            state_to_tuple(state): float(prob)
-            for state, prob in raw_results.items()
+            state_to_tuple(state): float(prob) for state, prob in raw_results.items()
         }
 
         key = tuple(input_state)
@@ -348,6 +367,7 @@ class TestFidelityKernel:
 
         assert merlin_pnr == pytest.approx(perceval_pnr, rel=1e-6, abs=1e-8)
         assert merlin_thr == pytest.approx(perceval_thr, rel=1e-6, abs=1e-8)
+
 
 class TestNKernelAlignment:
     def setup_method(self):
