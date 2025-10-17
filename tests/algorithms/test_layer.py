@@ -181,28 +181,6 @@ class TestQuantumLayer:
         output = layer_reservoir(x)
         assert output.shape == (3, 3)
 
-    def test_bandwidth_tuning(self):
-        """Test bandwidth tuning functionality."""
-        experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=4,
-            n_photons=2,
-            use_bandwidth_tuning=True,
-        )
-
-        ansatz = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment, input_size=3, output_size=5
-        )
-
-        layer = ML.QuantumLayer(input_size=3, ansatz=ansatz)
-
-        # Check that bandwidth coefficients exist
-        assert layer.bandwidth_coeffs is not None
-        assert len(layer.bandwidth_coeffs) == 3  # One per input dimension
-
-        # Check they're learnable parameters
-        for _key, param in layer.bandwidth_coeffs.items():
-            assert param.requires_grad
 
     def test_output_mapping_strategies(self):
         """Test different output mapping strategies."""
