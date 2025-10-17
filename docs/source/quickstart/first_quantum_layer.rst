@@ -51,6 +51,12 @@ Basic Example
                 shots=10000        # Number of measurements
             )
 
+            # ``QuantumLayer.simple`` returns a lightweight wrapper that exposes the underlying
+            # quantum layer through ``.quantum_layer`` and any post-processing through
+            # ``.post_processing``.  Common attributes such as ``.output_size`` and ``.circuit`` are
+            # forwarded, so existing code can continue to treat the result like a standard
+            # ``QuantumLayer`` when preferred.
+
             # Classical output layer
             self.classical_out = nn.Sequential(
                 nn.Linear(self.quantum.output_size, 8),

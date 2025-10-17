@@ -24,6 +24,10 @@ MerLin Quantum Layers can be executed on either CPU or GPU, like any other PyTor
        device = device
    )
 
+   # ``quantum_layer`` is a thin wrapper with ``quantum_layer.quantum_layer`` giving access to the
+   # inner :class:`~merlin.algorithms.layer.QuantumLayer` and ``quantum_layer.output_size`` providing the
+   # (possibly grouped) classical width.
+
 Therefore, these Quantum Layers must be optimized for efficient GPU execution across varying batch sizes, mode counts, and photon numbers.
 
 Here, we analyze the memory and computation time requirements for running a GenericInterferometer with :math:`m` modes and :math:`2m(m-1)` trainable parameters (:math:`m(m-1)` beam splitters and :math:`m(m-1)` phase shifters).

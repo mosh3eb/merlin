@@ -100,7 +100,8 @@ def test_simple_api_pipeline_on_iris(iris_batch):
         n_params=10,
         dtype=features.dtype,
     )
-    pcvl.pdisplay(layer.computation_process.circuit, output_format=pcvl.Format.TEXT)
+    base = layer.quantum_layer if hasattr(layer, "quantum_layer") else layer
+    pcvl.pdisplay(base.computation_process.circuit, output_format=pcvl.Format.TEXT)
     print(
         f"Nb of parameters = {sum(p.numel() for p in layer.parameters() if p.requires_grad)}"
     )

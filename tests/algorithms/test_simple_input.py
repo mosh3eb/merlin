@@ -29,7 +29,11 @@ def quantum_layer_api():
 
 
 def _unwrap(layer: nn.Module) -> QuantumLayer:
-    return layer[0] if isinstance(layer, nn.Sequential) else layer
+    if hasattr(layer, "quantum_layer"):
+        return layer.quantum_layer  # type: ignore[attr-defined]
+    if isinstance(layer, nn.Sequential) and len(layer) > 0:
+        return _unwrap(layer[0])
+    return layer  # type: ignore[return-value]
 
 
 def test_none_strategy_without_output_size(quantum_layer_api):
@@ -81,8 +85,8 @@ def test_simple_groups_output_when_requested(quantum_layer_api):
         output_size=target_size,
     )
 
-    assert isinstance(layer, nn.Sequential)
-    assert isinstance(layer[1], ModGrouping)
+    assert hasattr(layer, "post_processing")
+    assert isinstance(layer.post_processing, ModGrouping)
     base = _unwrap(layer)
     x = torch.rand(4, 3)
     output = layer(x)
@@ -100,7 +104,8 @@ def test_linear_strategy_creates_linear_mapping(quantum_layer_api):
     )
     model = nn.Sequential(layer, nn.Linear(layer.output_size, 5))
 
-    assert isinstance(layer.measurement_mapping, MeasurementDistribution)
+    base = _unwrap(layer)
+    assert isinstance(base.measurement_mapping, MeasurementDistribution)
     x = torch.rand(6, 3)
     output = model(x)
     assert output.shape == (6, 5)
@@ -128,14 +133,15 @@ def test_trainable_parameter_budget_matches_request(quantum_layer_api):
             n_params=requested_params,
         )
 
+    base = _unwrap(layer)
     mzi_param_count = sum(
         param.numel()
-        for name, param in layer.named_parameters()
+        for name, param in base.named_parameters()
         if name.startswith("mzi_extra")
     )
     interferometer_param_count = sum(
         param.numel()
-        for name, param in layer.named_parameters()
+        for name, param in base.named_parameters()
         if name.startswith("gi_simple")
     )
 
@@ -166,14 +172,15 @@ def test_simple_allocates_full_mzi_pairs(quantum_layer_api):
         n_params=requested_params,
     )
 
+    base = _unwrap(layer)
     gi_params = sum(
         param.numel()
-        for name, param in layer.named_parameters()
+        for name, param in base.named_parameters()
         if name.startswith("gi_simple")
     )
     mzi_params = sum(
         param.numel()
-        for name, param in layer.named_parameters()
+        for name, param in base.named_parameters()
         if name.startswith("mzi_extra")
     )
 
@@ -181,7 +188,7 @@ def test_simple_allocates_full_mzi_pairs(quantum_layer_api):
     assert mzi_params == requested_params - gi_params == 10
     # Every MZI exposes both inner and outer phases
     mzi_roles: dict[str, set[str]] = {}
-    for name, _ in layer.named_parameters():
+    for name, _ in base.named_parameters():
         if name.startswith("mzi_extra"):
             if "_li" in name:
                 prefix = name.split("_li", 1)[0]
@@ -220,17 +227,18 @@ def test_gradient_flow_for_strategies(quantum_layer_api):
     x = torch.rand(8, 3, requires_grad=True)
     loss = layer_none(x).sum()
     loss.backward()
+    base_none = _unwrap(layer_none)
     assert any(
-        p.grad is not None and torch.any(p.grad != 0) for p in layer_none.parameters()
+        p.grad is not None and torch.any(p.grad != 0) for p in base_none.parameters()
     )
     mzi_param_count = sum(
         param.numel()
-        for name, param in layer_none.named_parameters()
+        for name, param in base_none.named_parameters()
         if name.startswith("mzi_extra")
     )
     interferometer_param_count = sum(
         param.numel()
-        for name, param in layer_none.named_parameters()
+        for name, param in base_none.named_parameters()
         if name.startswith("gi_simple")
     )
 
@@ -280,7 +288,8 @@ def test_dtype_propagation(quantum_layer_api):
             dtype=dtype,
         )
 
-        for param in layer.parameters():
+        base = _unwrap(layer)
+        for param in base.parameters():
             assert param.dtype == dtype
 
         x = torch.rand(2, 3, dtype=dtype)

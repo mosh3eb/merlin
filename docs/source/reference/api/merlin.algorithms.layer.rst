@@ -26,10 +26,11 @@ Example: Quickstart QuantumLayer
     # Train and evaluate as a standard torch.nn.Module
 
 .. note::
-   When you pass the optional ``output_size`` argument to :func:`QuantumLayer.simple`,
-   the helper returns an :class:`torch.nn.Sequential` composed of the quantum layer followed by a
-   :class:`~merlin.utils.grouping.mappers.ModGrouping` stage that performs the dimensionality reduction 
-   unless the output size already is the size of the output distribution.
+   :func:`QuantumLayer.simple` returns a thin ``SimpleSequential`` wrapper that behaves like a standard
+   PyTorch module while exposing the inner quantum layer as ``.quantum_layer`` and any
+   post-processing (:class:`~merlin.utils.grouping.mappers.ModGrouping` or :class:`~torch.nn.Identity`) as ``.post_processing``.
+   The wrapper also forwards ``.circuit`` and ``.output_size`` so existing code that inspects these
+   attributes continues to work.
 
 .. image:: ../../_static/img/Circ_simple.png
    :alt: A Perceval Circuit built with QuantumLayer.simple

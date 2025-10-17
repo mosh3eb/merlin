@@ -844,19 +844,37 @@ class QuantumLayer(nn.Module):
             dtype=dtype,
         )
 
+        class SimpleSequential(nn.Module):
+            """Simple Sequential Module that contains the quantum layer as well as the post processing"""
+
+            def __init__(self, quantum_layer: QuantumLayer, post_processing: nn.Module):
+                super().__init__()
+                self.quantum_layer = quantum_layer
+                self.post_processing = post_processing
+                self.add_module("quantum_layer", quantum_layer)
+                self.add_module("post_processing", post_processing)
+                self.circuit = quantum_layer.circuit
+                if hasattr(post_processing, "output_size"):
+                    self.output_size = post_processing.output_size  # type: ignore[attr-defined]
+                else:
+                    self.output_size = quantum_layer.output_size
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.post_processing(self.quantum_layer(x))
+
         if output_size is not None:
             if not isinstance(output_size, int):
                 raise TypeError("output_size must be an integer.")
             if output_size <= 0:
                 raise ValueError("output_size must be a positive integer.")
             if output_size != quantum_layer.output_size:
-                model = nn.Sequential(
+                model = SimpleSequential(
                     quantum_layer, ModGrouping(quantum_layer.output_size, output_size)
                 )
             else:
-                model = quantum_layer
+                model = SimpleSequential(quantum_layer, nn.Identity())
         else:
-            model = quantum_layer
+            model = SimpleSequential(quantum_layer, nn.Identity())
 
         return model
 
