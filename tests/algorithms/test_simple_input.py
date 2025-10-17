@@ -295,3 +295,23 @@ def test_dtype_propagation(quantum_layer_api):
         x = torch.rand(2, 3, dtype=dtype)
         output = layer(x)
         assert output.dtype == dtype
+
+
+def test_circuit_and_output_size_access(quantum_layer_api):
+    QuantumLayer = quantum_layer_api
+
+    simple_layer = QuantumLayer.simple(
+        input_size=3,
+        n_params=60,
+    )
+    circuit = simple_layer.circuit
+    output_size = simple_layer.output_size
+
+    assert circuit == simple_layer.quantum_layer.circuit
+    assert output_size == simple_layer.quantum_layer.output_size
+
+    simple_layer = QuantumLayer.simple(input_size=3, n_params=60, output_size=3)
+    output_size = simple_layer.output_size
+    assert output_size == 3
+    assert output_size != simple_layer.quantum_layer.output_size
+    assert output_size == simple_layer.post_processing.output_size

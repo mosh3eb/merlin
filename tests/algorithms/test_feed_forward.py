@@ -343,7 +343,7 @@ class TestPoolingFeedForward:
             amplitudes = pre_layer()
             amplitudes = pff(amplitudes)
             post_layer.set_input_state(amplitudes)
-            res = post_layer().pow(2).sum()
+            res = post_layer().abs().pow(2).sum()
             res.backward()
             optimizer.step()
             optimizer.zero_grad()

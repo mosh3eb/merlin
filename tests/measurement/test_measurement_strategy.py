@@ -274,7 +274,10 @@ class TestQuantumLayerMeasurementStrategy:
         assert torch.all(torch.isfinite(output))
 
         # Backprop compatibility
-        output.sum().backward()
+        probs = output.abs().pow(2)
+        targets = torch.ones_like(probs)
+        loss = torch.sum(targets - probs)
+        loss.backward()
         assert x.grad is not None
 
         # Ensure that it is normalized
