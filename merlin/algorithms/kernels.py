@@ -725,7 +725,7 @@ class FidelityKernel(torch.nn.Module):
         _, probabilities = self._slos_graph.post_pa_inc(amplitudes, all_circuits)
         if probabilities.ndim == 1:
             probabilities = probabilities.unsqueeze(0)
-        probabilities = probabilities.to(dtype=self.dtype, device=x1.device)
+        probabilities = probabilities.to(dtype=self.dtype)
 
         if self.shots > 0:
             probabilities = self._autodiff_process.sampling_noise.pcvl_sampler(
