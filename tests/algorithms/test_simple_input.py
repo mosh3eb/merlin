@@ -112,6 +112,12 @@ def test_default_strategy_is_none(quantum_layer_api):
     assert "measurement_strategy" not in sig.parameters
 
 
+def test_simple_signature_does_not_include_reservoir_mode(quantum_layer_api):
+    QuantumLayer = quantum_layer_api
+    sig = inspect.signature(QuantumLayer.simple)
+    assert "reservoir_mode" not in sig.parameters
+
+
 def test_trainable_parameter_budget_matches_request(quantum_layer_api):
     QuantumLayer = quantum_layer_api
 
@@ -122,10 +128,10 @@ def test_trainable_parameter_budget_matches_request(quantum_layer_api):
             n_params=requested_params,
         )
 
-    theta_param_count = sum(
+    mzi_param_count = sum(
         param.numel()
         for name, param in layer.named_parameters()
-        if name.startswith("theta")
+        if name.startswith("mzi_extra")
     )
     interferometer_param_count = sum(
         param.numel()
@@ -133,12 +139,60 @@ def test_trainable_parameter_budget_matches_request(quantum_layer_api):
         if name.startswith("gi_simple")
     )
 
-    total_trainable = theta_param_count + interferometer_param_count
+    total_trainable = mzi_param_count + interferometer_param_count
     expected_total = max(requested_params, interferometer_param_count)
-    expected_theta = max(requested_params - interferometer_param_count, 0)
+    expected_mzi = max(requested_params - interferometer_param_count, 0)
 
     assert total_trainable == expected_total
-    assert theta_param_count == expected_theta
+    assert mzi_param_count == expected_mzi
+
+
+def test_simple_rejects_odd_mzi_budget(quantum_layer_api):
+    QuantumLayer = quantum_layer_api
+
+    with pytest.raises(ValueError, match="Additional parameter budget must be even"):
+        QuantumLayer.simple(
+            input_size=3,
+            n_params=95,
+        )
+
+
+def test_simple_allocates_full_mzi_pairs(quantum_layer_api):
+    QuantumLayer = quantum_layer_api
+
+    requested_params = 100  # 10 above the base GI budget (90)
+    layer = QuantumLayer.simple(
+        input_size=3,
+        n_params=requested_params,
+    )
+
+    gi_params = sum(
+        param.numel()
+        for name, param in layer.named_parameters()
+        if name.startswith("gi_simple")
+    )
+    mzi_params = sum(
+        param.numel()
+        for name, param in layer.named_parameters()
+        if name.startswith("mzi_extra")
+    )
+
+    assert gi_params == 90
+    assert mzi_params == requested_params - gi_params == 10
+    # Every MZI exposes both inner and outer phases
+    mzi_roles: dict[str, set[str]] = {}
+    for name, _ in layer.named_parameters():
+        if name.startswith("mzi_extra"):
+            if "_li" in name:
+                prefix = name.split("_li", 1)[0]
+                role = "li"
+            elif "_lo" in name:
+                prefix = name.split("_lo", 1)[0]
+                role = "lo"
+            else:
+                continue
+            mzi_roles.setdefault(prefix, set()).add(role)
+    assert all({"li", "lo"}.issubset(roles) for roles in mzi_roles.values())
 
 
 def test_gradient_flow_for_strategies(quantum_layer_api):
@@ -169,10 +223,10 @@ def test_gradient_flow_for_strategies(quantum_layer_api):
     assert any(
         p.grad is not None and torch.any(p.grad != 0) for p in layer_none.parameters()
     )
-    theta_param_count = sum(
+    mzi_param_count = sum(
         param.numel()
         for name, param in layer_none.named_parameters()
-        if name.startswith("theta")
+        if name.startswith("mzi_extra")
     )
     interferometer_param_count = sum(
         param.numel()
@@ -180,12 +234,12 @@ def test_gradient_flow_for_strategies(quantum_layer_api):
         if name.startswith("gi_simple")
     )
 
-    total_trainable = theta_param_count + interferometer_param_count
+    total_trainable = mzi_param_count + interferometer_param_count
     expected_total = max(nb_params, interferometer_param_count)
-    expected_theta = max(nb_params - interferometer_param_count, 0)
+    expected_mzi = max(nb_params - interferometer_param_count, 0)
 
     assert total_trainable == expected_total
-    assert theta_param_count == expected_theta
+    assert mzi_param_count == expected_mzi
 
 
 def test_quantum_layer_simple_raises_when_input_exceeds_modes(quantum_layer_api):
