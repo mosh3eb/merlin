@@ -27,7 +27,7 @@ Tests for no_bunching functionality in quantum computation.
 import math
 
 import torch
-import perceval as pcvl
+
 from merlin.algorithms.layer import QuantumLayer
 from merlin.core.generators import (
     CircuitGenerator,

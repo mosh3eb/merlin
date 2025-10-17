@@ -91,6 +91,7 @@ def test_switch_model_to_cuda():
         0
     ].device == torch.device("cuda", index=0)
 
+
 class QuantumClassifier_withBuilder(nn.Module):
     def __init__(
         self,
@@ -117,9 +118,7 @@ class QuantumClassifier_withBuilder(nn.Module):
         # we need to add as many input layers as needed to encode all features
         full_chunks, remainder = divmod(hidden_dim, len(available_modes))
         if hidden_dim < len(available_modes):
-            builder.add_angle_encoding(
-                modes=available_modes[:hidden_dim], name="input"
-            )
+            builder.add_angle_encoding(modes=available_modes[:hidden_dim], name="input")
         else:
             for _ in range(full_chunks):
                 builder.add_angle_encoding(modes=available_modes, name="input")

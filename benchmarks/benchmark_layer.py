@@ -89,13 +89,18 @@ def test_quantum_layer_forward_benchmark(benchmark, config: dict, device: str):
 
     builder = ML.CircuitBuilder(n_modes=config["n_modes"])
     builder.add_entangling_layer(trainable=True, name="U1")
-    builder.add_angle_encoding(modes=list(range(config["input_size"])), name="input", subset_combinations=True)
+    builder.add_angle_encoding(
+        modes=list(range(config["input_size"])), name="input", subset_combinations=True
+    )
     builder.add_entangling_layer(trainable=True, name="U2")
 
-    layer = ML.QuantumLayer(input_size=config["input_size"], output_size = config["output_size"],
-                            n_photons = config["n_photons"],
-                            builder = builder,  
-                            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+    layer = ML.QuantumLayer(
+        input_size=config["input_size"],
+        output_size=config["output_size"],
+        n_photons=config["n_photons"],
+        builder=builder,
+        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+    )
 
     # Create larger batch for meaningful timing
     batch_size = 32
@@ -125,10 +130,13 @@ def test_batched_computation_benchmark(
     builder.add_angle_encoding(modes=list(range(config["input_size"])), name="input")
     builder.add_entangling_layer(trainable=True, name="U2")
 
-    layer = ML.QuantumLayer(input_size=config["input_size"], output_size = config["output_size"],
-                            n_photons = config["n_photons"],
-                            builder = builder,  
-                            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+    layer = ML.QuantumLayer(
+        input_size=config["input_size"],
+        output_size=config["output_size"],
+        n_photons=config["n_photons"],
+        builder=builder,
+        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+    )
 
     x = torch.rand(batch_size, config["input_size"])
 
@@ -150,13 +158,18 @@ def test_gradient_computation_benchmark(benchmark, config: dict, device: str):
 
     builder = ML.CircuitBuilder(n_modes=config["n_modes"])
     builder.add_entangling_layer(trainable=True, name="U1")
-    builder.add_angle_encoding(modes=list(range(config["input_size"])), name="input", subset_combinations=True)
+    builder.add_angle_encoding(
+        modes=list(range(config["input_size"])), name="input", subset_combinations=True
+    )
     builder.add_entangling_layer(trainable=True, name="U2")
 
-    layer = ML.QuantumLayer(input_size=config["input_size"], output_size = config["output_size"],
-                            n_photons = config["n_photons"],
-                            builder = builder,  
-                            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+    layer = ML.QuantumLayer(
+        input_size=config["input_size"],
+        output_size=config["output_size"],
+        n_photons=config["n_photons"],
+        builder=builder,
+        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+    )
 
     x = torch.rand(16, config["input_size"], requires_grad=True)
 
@@ -187,22 +200,28 @@ def test_gradient_computation_benchmark(benchmark, config: dict, device: str):
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
 def test_multiple_circuit_types_benchmark(benchmark, config: dict, device: str):
     """Benchmark different circuit types for quantum layers."""
-    subset_combinations = [ True, False ]
+    subset_combinations = [True, False]
 
     def test_all_circuit_types():
         results = []
 
         for subset in subset_combinations:
-
             builder = ML.CircuitBuilder(n_modes=config["n_modes"])
             builder.add_entangling_layer(trainable=True, name="U1")
-            builder.add_angle_encoding(modes=list(range(config["input_size"])), name="input", subset_combinations=subset)
+            builder.add_angle_encoding(
+                modes=list(range(config["input_size"])),
+                name="input",
+                subset_combinations=subset,
+            )
             builder.add_entangling_layer(trainable=True, name="U2")
 
-            layer = ML.QuantumLayer(input_size=config["input_size"], output_size = config["output_size"],
-                                    n_photons = config["n_photons"],
-                                    builder = builder,  
-                                    output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+            layer = ML.QuantumLayer(
+                input_size=config["input_size"],
+                output_size=config["output_size"],
+                n_photons=config["n_photons"],
+                builder=builder,
+                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+            )
 
             x = torch.rand(16, config["input_size"])
             output = layer(x)
@@ -232,20 +251,26 @@ def test_output_mapping_strategies_benchmark(benchmark, config: dict, device: st
         ML.OutputMappingStrategy.MODGROUPING,
     ]
 
-
     def test_all_strategies():
         results = []
 
         for strategy in strategies:
             builder = ML.CircuitBuilder(n_modes=config["n_modes"])
             builder.add_entangling_layer(trainable=True, name="U1")
-            builder.add_angle_encoding(modes=list(range(config["input_size"])), name="input", subset_combinations=True)
+            builder.add_angle_encoding(
+                modes=list(range(config["input_size"])),
+                name="input",
+                subset_combinations=True,
+            )
             builder.add_entangling_layer(trainable=True, name="U2")
 
-            layer = ML.QuantumLayer(input_size=config["input_size"], output_size = config["output_size"],
-                                    n_photons = config["n_photons"],
-                                    builder = builder,  
-                                    output_mapping_strategy=strategy,)
+            layer = ML.QuantumLayer(
+                input_size=config["input_size"],
+                output_size=config["output_size"],
+                n_photons=config["n_photons"],
+                builder=builder,
+                output_mapping_strategy=strategy,
+            )
             x = torch.rand(16, config["input_size"])
             output = layer(x)
             results.append(output)
@@ -273,13 +298,18 @@ class TestLayerPerformanceRegression:
 
         builder = ML.CircuitBuilder(n_modes=8)
         builder.add_entangling_layer(trainable=True, name="U1")
-        builder.add_angle_encoding(modes=list(range(6)), name="input", subset_combinations=True)
+        builder.add_angle_encoding(
+            modes=list(range(6)), name="input", subset_combinations=True
+        )
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=6, output_size = 10,
-                                n_photons = 3,
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+        layer = ML.QuantumLayer(
+            input_size=6,
+            output_size=10,
+            n_photons=3,
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         x = torch.rand(32, 6)
 
@@ -298,13 +328,18 @@ class TestLayerPerformanceRegression:
 
         builder = ML.CircuitBuilder(n_modes=6)
         builder.add_entangling_layer(trainable=True, name="U1")
-        builder.add_angle_encoding(modes=list(range(4)), name="input", subset_combinations=True)
+        builder.add_angle_encoding(
+            modes=list(range(4)), name="input", subset_combinations=True
+        )
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=4, output_size = 6,
-                                n_photons = 2,
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+        layer = ML.QuantumLayer(
+            input_size=4,
+            output_size=6,
+            n_photons=2,
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         x = torch.rand(16, 4, requires_grad=True)
 
@@ -356,14 +391,18 @@ if __name__ == "__main__":
 
     builder = ML.CircuitBuilder(n_modes=6)
     builder.add_entangling_layer(trainable=True, name="U1")
-    builder.add_angle_encoding(modes=list(range(4)), name="input", subset_combinations=True)
+    builder.add_angle_encoding(
+        modes=list(range(4)), name="input", subset_combinations=True
+    )
     builder.add_entangling_layer(trainable=True, name="U2")
 
-    layer = ML.QuantumLayer(input_size=4, output_size = 8,
-                            n_photons = 3,
-                            builder = builder,  
-                            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
-
+    layer = ML.QuantumLayer(
+        input_size=4,
+        output_size=8,
+        n_photons=3,
+        builder=builder,
+        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+    )
 
     print("Testing forward pass performance...")
     x = torch.rand(32, 4)

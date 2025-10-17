@@ -41,13 +41,18 @@ class TestQuantumLayer:
         builder.add_angle_encoding(modes=[0, 1, 3], name="input")
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=3, output_size = 5,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING)
+        layer = ML.QuantumLayer(
+            input_size=3,
+            output_size=5,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
         assert layer.input_size == 3
         assert layer.output_size == 5
-        assert layer.thetas[0].shape[0] == 2 * 4 * (4-1)  # 24 trainable parameters from U1 and U2
+        assert layer.thetas[0].shape[0] == 2 * 4 * (
+            4 - 1
+        )  # 24 trainable parameters from U1 and U2
 
     def test_forward_pass_batched(self):
         """Test forward pass with batched input."""
@@ -56,10 +61,13 @@ class TestQuantumLayer:
         builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         # Test with batch
         x = torch.rand(10, 2)
@@ -75,10 +83,13 @@ class TestQuantumLayer:
         builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,0,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.LINEAR)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 0, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+        )
 
         # Test with single sample
         x = torch.rand(1, 2)
@@ -95,10 +106,13 @@ class TestQuantumLayer:
         builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,1,0,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.LINEAR)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 1, 0, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+        )
 
         x = torch.rand(5, 2, requires_grad=True)
         output = layer(x)
@@ -124,11 +138,14 @@ class TestQuantumLayer:
         builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
-                                shots = 100,)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+            shots=100,
+        )
 
         assert layer.shots == 100
         assert layer.sampling_method == "multinomial"
@@ -150,20 +167,26 @@ class TestQuantumLayer:
         builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer_normal = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.LINEAR)
-        
-        layer_reservoir = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.LINEAR)
-        
+        layer_normal = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+        )
+
+        layer_reservoir = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+        )
+
         layer_reservoir.requires_grad_(False)
         assert any(p.requires_grad for p in layer_normal.parameters())
         assert all(not p.requires_grad for p in layer_reservoir.parameters())
-        
+
         normal_trainable = sum(
             p.numel() for p in layer_normal.parameters() if p.requires_grad
         )
@@ -181,14 +204,13 @@ class TestQuantumLayer:
         output = layer_reservoir(x)
         assert output.shape == (3, 3)
 
-
     def test_output_mapping_strategies(self):
         """Test different output mapping strategies."""
         builder = ML.CircuitBuilder(n_modes=4)
         builder.add_entangling_layer(trainable=True, name="U1")
         builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_entangling_layer(trainable=True, name="U2")
-      
+
         strategies = [
             ML.OutputMappingStrategy.LINEAR,
             ML.OutputMappingStrategy.LEXGROUPING,
@@ -196,11 +218,13 @@ class TestQuantumLayer:
         ]
 
         for strategy in strategies:
-
-            layer = ML.QuantumLayer(input_size=2, output_size = 4,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=strategy)
+            layer = ML.QuantumLayer(
+                input_size=2,
+                output_size=4,
+                input_state=[1, 0, 1, 0],
+                builder=builder,
+                output_mapping_strategy=strategy,
+            )
 
             x = torch.rand(3, 2)
             output = layer(x)
@@ -215,11 +239,14 @@ class TestQuantumLayer:
         builder.add_angle_encoding(modes=[0, 1, 2], name="input")
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=3, output_size = 5,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING)
-    
+        layer = ML.QuantumLayer(
+            input_size=3,
+            output_size=5,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
+
         layer_str = str(layer)
         print(f"Layer string representation:\n{layer_str}")
         assert "QuantumLayer" in layer_str
@@ -256,14 +283,16 @@ class TestQuantumLayer:
             )
 
         with pytest.raises(ValueError):
-            ML.QuantumLayer(input_size=2, output_size = 5,
-                                n_photons = 5, # more photons than modes
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING)
-        
+            ML.QuantumLayer(
+                input_size=2,
+                output_size=5,
+                n_photons=5,  # more photons than modes
+                builder=builder,
+                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+            )
+
         with pytest.raises(TypeError):
-            ML.QuantumLayer.simple(n_params = 0)
-            
+            ML.QuantumLayer.simple(n_params=0)
 
     def test_subset_combinations_respected(self):
         """Ensure subset combinations expose more parameters without breaking input size checks."""
@@ -291,21 +320,26 @@ class TestQuantumLayer:
         builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        temp_layer = ML.QuantumLayer(input_size=2, output_size = 5,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING)
+        temp_layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=5,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         # Get actual distribution size
         dummy_input = torch.rand(1, 2)
         with torch.no_grad():
-            temp_output = temp_layer(dummy_input)
+            _temp_output = temp_layer(dummy_input)
 
         # Now create NONE strategy with correct size
-        layer_none = ML.QuantumLayer(input_size=2,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.NONE)
+        layer_none = ML.QuantumLayer(
+            input_size=2,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.NONE,
+        )
 
         x = torch.rand(2, 2)
         output = layer_none(x)
@@ -344,14 +378,14 @@ class TestQuantumLayer:
             match="Input size \\(2\\) must equal the number of input parameters generated by the circuit \\(0\\)\\.",
         ):
             layer = ML.QuantumLayer(
-            input_size=2,  # input_size > nb of input_parameters
-            circuit=circuit,
-            input_state=input_state,
-            trainable_parameters=["phi"],  # Parameters to train (by prefix)
-            input_parameters=None,  # No input parameters
-            output_size=3,
-            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
-        )  
+                input_size=2,  # input_size > nb of input_parameters
+                circuit=circuit,
+                input_state=input_state,
+                trainable_parameters=["phi"],  # Parameters to train (by prefix)
+                input_parameters=None,  # No input parameters
+                output_size=3,
+                output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+            )
 
         # Test layer properties
         assert layer.input_size == 0

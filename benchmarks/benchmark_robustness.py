@@ -104,13 +104,18 @@ def test_large_batch_robustness_benchmark(
 
     builder = ML.CircuitBuilder(n_modes=config["n_modes"])
     builder.add_entangling_layer(trainable=True, name="U1")
-    builder.add_angle_encoding(modes=list(range(config["input_size"])), name="input", subset_combinations=True)
+    builder.add_angle_encoding(
+        modes=list(range(config["input_size"])), name="input", subset_combinations=True
+    )
     builder.add_entangling_layer(trainable=True, name="U2")
 
-    layer = ML.QuantumLayer(input_size=config["input_size"], output_size = config["output_size"],
-                            n_photons = config["n_photons"],
-                            builder = builder,  
-                            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+    layer = ML.QuantumLayer(
+        input_size=config["input_size"],
+        output_size=config["output_size"],
+        n_photons=config["n_photons"],
+        builder=builder,
+        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+    )
 
     # Large batch for stress testing
     x = torch.rand(batch_size, config["input_size"])
@@ -135,13 +140,18 @@ def test_extreme_values_robustness_benchmark(benchmark, config: dict, device: st
 
     builder = ML.CircuitBuilder(n_modes=config["n_modes"])
     builder.add_entangling_layer(trainable=True, name="U1")
-    builder.add_angle_encoding(modes=list(range(config["input_size"])), name="input", subset_combinations=True)
+    builder.add_angle_encoding(
+        modes=list(range(config["input_size"])), name="input", subset_combinations=True
+    )
     builder.add_entangling_layer(trainable=True, name="U2")
 
-    layer = ML.QuantumLayer(input_size=config["input_size"], output_size = config["output_size"],
-                            n_photons = config["n_photons"],
-                            builder = builder,  
-                            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+    layer = ML.QuantumLayer(
+        input_size=config["input_size"],
+        output_size=config["output_size"],
+        n_photons=config["n_photons"],
+        builder=builder,
+        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+    )
 
     def test_extreme_inputs():
         results = []
@@ -182,13 +192,18 @@ def test_numerical_stability_benchmark(benchmark, config: dict, device: str):
 
     builder = ML.CircuitBuilder(n_modes=config["n_modes"])
     builder.add_entangling_layer(trainable=True, name="U1")
-    builder.add_angle_encoding(modes=list(range(config["input_size"])), name="input", subset_combinations=True)
+    builder.add_angle_encoding(
+        modes=list(range(config["input_size"])), name="input", subset_combinations=True
+    )
     builder.add_entangling_layer(trainable=True, name="U2")
 
-    layer = ML.QuantumLayer(input_size=config["input_size"], output_size = config["output_size"],
-                            n_photons = config["n_photons"],
-                            builder = builder,  
-                            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+    layer = ML.QuantumLayer(
+        input_size=config["input_size"],
+        output_size=config["output_size"],
+        n_photons=config["n_photons"],
+        builder=builder,
+        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+    )
 
     def stability_test():
         x = torch.rand(32, config["input_size"])
@@ -227,13 +242,18 @@ def test_memory_efficiency_benchmark(benchmark, config: dict, device: str):
 
     builder = ML.CircuitBuilder(n_modes=config["n_modes"])
     builder.add_entangling_layer(trainable=True, name="U1")
-    builder.add_angle_encoding(modes=list(range(config["input_size"])), name="input", subset_combinations=True)
+    builder.add_angle_encoding(
+        modes=list(range(config["input_size"])), name="input", subset_combinations=True
+    )
     builder.add_entangling_layer(trainable=True, name="U2")
 
-    layer = ML.QuantumLayer(input_size=config["input_size"], output_size = config["output_size"],
-                            n_photons = config["n_photons"],
-                            builder = builder,  
-                            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+    layer = ML.QuantumLayer(
+        input_size=config["input_size"],
+        output_size=config["output_size"],
+        n_photons=config["n_photons"],
+        builder=builder,
+        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+    )
 
     def memory_efficiency_test():
         results = []
@@ -278,13 +298,18 @@ def test_hybrid_model_stress_benchmark(benchmark, config: dict, device: str):
             # Quantum layer
             builder = ML.CircuitBuilder(n_modes=n_modes)
             builder.add_entangling_layer(trainable=True, name="U1")
-            builder.add_angle_encoding(modes=list(range(input_size)), name="input", subset_combinations=True)
+            builder.add_angle_encoding(
+                modes=list(range(input_size)), name="input", subset_combinations=True
+            )
             builder.add_entangling_layer(trainable=True, name="U2")
 
-            self.quantum = ML.QuantumLayer(input_size=input_size, output_size = output_size,
-                                    n_photons = n_photons,
-                                    builder = builder,  
-                                    output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+            self.quantum = ML.QuantumLayer(
+                input_size=input_size,
+                output_size=output_size,
+                n_photons=n_photons,
+                builder=builder,
+                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+            )
 
             # Classical postprocessing
             self.post_classical = nn.Sequential(
@@ -356,14 +381,18 @@ class TestRobustnessPerformanceRegression:
         """Test that large batch processing stays within reasonable time bounds."""
         builder = ML.CircuitBuilder(n_modes=8)
         builder.add_entangling_layer(trainable=True, name="U1")
-        builder.add_angle_encoding(modes=list(range(6)), name="input", subset_combinations=True)
+        builder.add_angle_encoding(
+            modes=list(range(6)), name="input", subset_combinations=True
+        )
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=6, output_size = 15,
-                                n_photons = 3,
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
-        
+        layer = ML.QuantumLayer(
+            input_size=6,
+            output_size=15,
+            n_photons=3,
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         # Large batch stress test
         large_batch_size = 256
@@ -450,13 +479,18 @@ if __name__ == "__main__":
 
     builder = ML.CircuitBuilder(n_modes=6)
     builder.add_entangling_layer(trainable=True, name="U1")
-    builder.add_angle_encoding(modes=list(range(4)), name="input", subset_combinations=True)
+    builder.add_angle_encoding(
+        modes=list(range(4)), name="input", subset_combinations=True
+    )
     builder.add_entangling_layer(trainable=True, name="U2")
 
-    layer = ML.QuantumLayer(input_size=4, output_size = 10,
-                            n_photons = 2,
-                            builder = builder,  
-                            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+    layer = ML.QuantumLayer(
+        input_size=4,
+        output_size=10,
+        n_photons=2,
+        builder=builder,
+        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+    )
 
     print("Testing large batch robustness...")
     large_batch_size = 128

@@ -228,11 +228,14 @@ class TestSamplingIntegration:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
-                                shots=100)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+            shots=100,
+        )
 
         # Set to training mode
         layer.train()
@@ -261,10 +264,13 @@ class TestSamplingIntegration:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         # Set to evaluation mode
         layer.eval()
@@ -291,10 +297,13 @@ class TestSamplingIntegration:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         # Initial config
         assert layer.shots == 0
@@ -320,10 +329,13 @@ class TestSamplingIntegration:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
         layer.eval()
 
         x = torch.rand(5, 2)

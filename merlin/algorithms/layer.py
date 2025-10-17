@@ -143,10 +143,8 @@ class QuantumLayer(nn.Module):
                 output_mapping_strategy,
             )
         else:
-            #TODO: add experiment in this error as well
-            raise ValueError(
-                "Either 'circuit', or 'builder' must be provided"
-            )
+            # TODO: add experiment in this error as well
+            raise ValueError("Either 'circuit', or 'builder' must be provided")
 
         # Setup sampling
         self.autodiff_process = AutoDiffProcess(sampling_method)
@@ -871,7 +869,10 @@ class QuantumLayer(nn.Module):
             )
         else:
             n_modes = None
-            if hasattr(self, "circuit") and getattr(self.circuit, "m", None) is not None:
+            if (
+                hasattr(self, "circuit")
+                and getattr(self.circuit, "m", None) is not None
+            ):
                 n_modes = self.circuit.m
 
             modes_fragment = f", modes={n_modes}" if n_modes is not None else ""

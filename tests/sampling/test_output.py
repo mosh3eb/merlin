@@ -266,10 +266,13 @@ class TestOutputMappingIntegration:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         x = torch.rand(5, 2)
         output = layer(x)
@@ -285,10 +288,13 @@ class TestOutputMappingIntegration:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 4,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING,)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=4,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING,
+        )
 
         x = torch.rand(3, 2)
         output = layer(x)
@@ -304,10 +310,13 @@ class TestOutputMappingIntegration:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING,)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING,
+        )
 
         x = torch.rand(4, 2)
         output = layer(x)
@@ -330,11 +339,13 @@ class TestOutputMappingIntegration:
         ]
 
         for strategy in strategies:
-
-            layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=strategy)
+            layer = ML.QuantumLayer(
+                input_size=2,
+                output_size=3,
+                input_state=[1, 0, 1, 0],
+                builder=builder,
+                output_mapping_strategy=strategy,
+            )
 
             x = torch.rand(2, 2, requires_grad=True)
             output = layer(x)
@@ -352,34 +363,43 @@ class TestOutputMappingIntegration:
 
     def test_mapping_output_bounds(self):
         """Test that different mappings produce reasonable output bounds."""
- 
+
         # LINEAR mapping - can have any range
         builder = ML.CircuitBuilder(n_modes=4)
         builder.add_entangling_layer(trainable=True, name="U1")
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer_linear = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,)
+        layer_linear = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+        )
         x = torch.rand(5, 2)
         output_linear = layer_linear(x)
         assert torch.all(torch.isfinite(output_linear))
 
         # LEXGROUPING mapping - should preserve probability mass
-        layer_lex = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING,)
+        layer_lex = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING,
+        )
         output_lex = layer_lex(x)
         assert torch.all(output_lex >= 0)  # Should be non-negative
 
         # MODGROUPING mapping - should preserve probability mass
-        layer_mod = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING,)
+        layer_mod = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING,
+        )
         output_mod = layer_mod(x)
         assert torch.all(output_mod >= 0)  # Should be non-negative
 
@@ -391,11 +411,14 @@ class TestOutputMappingIntegration:
         builder.add_entangling_layer(trainable=True, name="U2")
 
         for dtype in [torch.float32, torch.float64]:
-            layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
-                                dtype = dtype)
+            layer = ML.QuantumLayer(
+                input_size=2,
+                output_size=3,
+                input_state=[1, 0, 1, 0],
+                builder=builder,
+                output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+                dtype=dtype,
+            )
 
             x = torch.rand(3, 2, dtype=dtype)
             output = layer(x)
@@ -409,13 +432,18 @@ class TestOutputMappingIntegration:
         # Create a larger quantum system
         builder = ML.CircuitBuilder(n_modes=6)
         builder.add_entangling_layer(trainable=True, name="U1")
-        builder.add_angle_encoding(modes=[0, 1, 2, 3], name="input", subset_combinations=True)
+        builder.add_angle_encoding(
+            modes=[0, 1, 2, 3], name="input", subset_combinations=True
+        )
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=4, output_size = 8,
-                            input_state = [1,0,1,0,1,0],
-                            builder = builder,  
-                            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING,)
+        layer = ML.QuantumLayer(
+            input_size=4,
+            output_size=8,
+            input_state=[1, 0, 1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.LEXGROUPING,
+        )
 
         x = torch.rand(10, 4)
         output = layer(x)
@@ -432,10 +460,13 @@ class TestOutputMappingIntegration:
         builder.add_angle_encoding(modes=[0], name="input")
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=1, output_size = 1,
-                                input_state = [1,0,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,)
+        layer = ML.QuantumLayer(
+            input_size=1,
+            output_size=1,
+            input_state=[1, 0, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+        )
 
         x = torch.rand(5, 1)
         output = layer(x)
@@ -451,10 +482,13 @@ class TestOutputMappingIntegration:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING,)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.MODGROUPING,
+        )
 
         x = torch.rand(3, 2)
 

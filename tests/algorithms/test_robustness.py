@@ -41,10 +41,13 @@ class TestRobustness:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         # Test with large batch
         large_batch_size = 1000
@@ -63,10 +66,13 @@ class TestRobustness:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         # Test boundary values
         boundary_inputs = torch.tensor([
@@ -89,10 +95,13 @@ class TestRobustness:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         x = torch.rand(5, 2)
 
@@ -109,16 +118,19 @@ class TestRobustness:
 
     def test_gradient_accumulation(self):
         """Test gradient accumulation over multiple batches."""
-        
+
         builder = ML.CircuitBuilder(n_modes=4)
         builder.add_entangling_layer(trainable=True, name="U1")
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         # Accumulate gradients over multiple batches
         total_loss = 0
@@ -146,11 +158,14 @@ class TestRobustness:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer_cpu = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
-                                device=torch.device("cpu"))
+        layer_cpu = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+            device=torch.device("cpu"),
+        )
 
         x_cpu = torch.rand(3, 2, device="cpu")
         output_cpu = layer_cpu(x_cpu)
@@ -167,22 +182,28 @@ class TestRobustness:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer_f32 = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
-                                dtype = torch.float32)
-        
+        layer_f32 = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+            dtype=torch.float32,
+        )
+
         x_f32 = torch.rand(2, 2, dtype=torch.float32)
         output_f32 = layer_f32(x_f32)
         assert output_f32.dtype == torch.float32
 
-        # Test float64 
-        layer_f64 = ML.QuantumLayer(input_size=2, output_size = 3,
-                                        input_state = [1,0,1,0],
-                                        builder = builder,  
-                                        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
-                                        dtype = torch.float64)
+        # Test float64
+        layer_f64 = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+            dtype=torch.float64,
+        )
 
         x_f64 = torch.rand(2, 2, dtype=torch.float64)
         output_f64 = layer_f64(x_f64)
@@ -206,19 +227,24 @@ class TestRobustness:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-
         # Create multiple layers with same random seed
         torch.manual_seed(42)
 
-        layer1 = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+        layer1 = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
         torch.manual_seed(42)
-        layer2 = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+        layer2 = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         # Parameters should be identical
         assert len(list(layer1.parameters())) == len(list(layer2.parameters())), (
@@ -233,10 +259,13 @@ class TestRobustness:
         builder.add_angle_encoding(modes=[0, 1], name="input", subset_combinations=True)
         builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                input_state = [1,0,1,0],
-                                builder = builder,  
-                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+        layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         # Run many forward passes
         for _ in range(100):
@@ -264,13 +293,18 @@ class TestIntegrationScenarios:
                 super().__init__()
                 builder = ML.CircuitBuilder(n_modes=4)
                 builder.add_entangling_layer(trainable=True, name="U1")
-                builder.add_angle_encoding(modes=[0, 1, 2], name="input", subset_combinations=True)
+                builder.add_angle_encoding(
+                    modes=[0, 1, 2], name="input", subset_combinations=True
+                )
                 builder.add_entangling_layer(trainable=True, name="U2")
 
-                self.quantum = ML.QuantumLayer(input_size=3, output_size = 4,
-                                        input_state = [1,0,1,0],
-                                        builder = builder,  
-                                        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+                self.quantum = ML.QuantumLayer(
+                    input_size=3,
+                    output_size=4,
+                    input_state=[1, 0, 1, 0],
+                    builder=builder,
+                    output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+                )
                 self.classifier = nn.Linear(4, 2)
 
             def forward(self, x):
@@ -324,13 +358,18 @@ class TestIntegrationScenarios:
                 # First quantum layer
                 builder = ML.CircuitBuilder(n_modes=4)
                 builder.add_entangling_layer(trainable=True, name="U1")
-                builder.add_angle_encoding(modes=[0, 1, 2], name="input", subset_combinations=True)
+                builder.add_angle_encoding(
+                    modes=[0, 1, 2], name="input", subset_combinations=True
+                )
                 builder.add_entangling_layer(trainable=True, name="U2")
 
-                self.quantum1 = ML.QuantumLayer(input_size=3, output_size = 4,
-                                        input_state = [1,0,1,0],
-                                        builder = builder,  
-                                        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+                self.quantum1 = ML.QuantumLayer(
+                    input_size=3,
+                    output_size=4,
+                    input_state=[1, 0, 1, 0],
+                    builder=builder,
+                    output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+                )
 
                 # Middle classical processing
                 self.mid_classical = nn.Sequential(nn.Linear(4, 5), nn.ReLU())
@@ -338,12 +377,17 @@ class TestIntegrationScenarios:
                 # Second quantum layer (reservoir)
                 builder = ML.CircuitBuilder(n_modes=5)
                 builder.add_entangling_layer(trainable=True, name="U1")
-                builder.add_angle_encoding(modes=[0, 1, 2, 3], name="input", subset_combinations=True)
+                builder.add_angle_encoding(
+                    modes=[0, 1, 2, 3], name="input", subset_combinations=True
+                )
                 builder.add_entangling_layer(trainable=True, name="U2")
-                self.quantum2 = ML.QuantumLayer(input_size=4, output_size = 3,
-                                        input_state = [1,0,1,0,0],
-                                        builder = builder,  
-                                        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+                self.quantum2 = ML.QuantumLayer(
+                    input_size=4,
+                    output_size=3,
+                    input_state=[1, 0, 1, 0, 0],
+                    builder=builder,
+                    output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+                )
                 self.quantum2.requires_grad_(False)  # Freeze reservoir layer
                 # Final classical layer
                 self.final_classical = nn.Linear(3, 2)
@@ -389,15 +433,17 @@ class TestIntegrationScenarios:
                 self.models = nn.ModuleList()
 
                 for _i in range(n_models):
-
                     builder = ML.CircuitBuilder(n_modes=4)
                     builder.add_entangling_layer(trainable=True, name="U1")
                     builder.add_angle_encoding(modes=[0, 1], name="input")
                     builder.add_entangling_layer(trainable=True, name="U2")
-                    layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                                        input_state = [1,0,1,0],
-                                        builder = builder,  
-                                        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+                    layer = ML.QuantumLayer(
+                        input_size=2,
+                        output_size=3,
+                        input_state=[1, 0, 1, 0],
+                        builder=builder,
+                        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+                    )
                     self.models.append(layer)
 
             def forward(self, x):
@@ -440,10 +486,13 @@ class TestIntegrationScenarios:
         builder.add_entangling_layer(trainable=True, name="U1")
         builder.add_angle_encoding(modes=[0, 1], name="input")
         builder.add_entangling_layer(trainable=True, name="U2")
-        original_layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                            input_state = [1,0,1,0],
-                            builder = builder,  
-                            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+        original_layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         x = torch.rand(3, 2)
         original_output = original_layer(x)
@@ -452,10 +501,13 @@ class TestIntegrationScenarios:
         state_dict = original_layer.state_dict()
 
         # Create new model and load state
-        new_layer = ML.QuantumLayer(input_size=2, output_size = 3,
-                            input_state = [1,0,1,0],
-                            builder = builder,  
-                            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,)
+        new_layer = ML.QuantumLayer(
+            input_size=2,
+            output_size=3,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
         new_layer.load_state_dict(state_dict)
 
         # Test that outputs are identical
