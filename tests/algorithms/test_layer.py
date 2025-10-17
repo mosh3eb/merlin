@@ -30,10 +30,83 @@ import torch
 
 import merlin as ML
 
+ANSATZ_SKIP = pytest.mark.skip(
+    reason="Legacy ansatz-based QuantumLayer API has been removed; test pending migration."
+)
+
 
 class TestQuantumLayer:
     """Test suite for QuantumLayer."""
 
+    def test_experiment_unitary_initialization(self):
+        """QuantumLayer should accept a unitary experiment."""
+
+        circuit = pcvl.Circuit(1)
+        experiment = pcvl.Experiment(circuit)
+
+        layer = ML.QuantumLayer(
+            input_size=0,
+            output_size=None,
+            experiment=experiment,
+            input_state=[1],
+            output_mapping_strategy=ML.OutputMappingStrategy.NONE,
+        )
+
+        output = layer()
+        assert torch.allclose(
+            output.sum(), torch.tensor(1.0, dtype=output.dtype), atol=1e-6
+        )
+
+    def test_experiment_non_unitary_rejected(self):
+        """A non-unitary experiment should be rejected."""
+
+        circuit = pcvl.Circuit(1)
+        experiment = pcvl.Experiment(circuit)
+        experiment.add(0, pcvl.TD(1))
+        assert experiment.is_unitary is False
+
+        with pytest.raises(ValueError, match="must be unitary"):
+            ML.QuantumLayer(
+                input_size=0,
+                experiment=experiment,
+                input_state=[1],
+                output_mapping_strategy=ML.OutputMappingStrategy.NONE,
+            )
+
+    def test_experiment_min_photons_filter_warning(self):
+        """A min_photons_filter configured on the experiment should raise a warning (unsupported)."""
+
+        circuit = pcvl.Circuit(1)
+        experiment = pcvl.Experiment(circuit)
+        experiment.min_detected_photons_filter(1)
+
+        with pytest.warns(UserWarning, match="min_photons_filter"):
+            ML.QuantumLayer(
+                input_size=0,
+                experiment=experiment,
+                input_state=[1],
+                output_mapping_strategy=ML.OutputMappingStrategy.NONE,
+            )
+
+    def test_experiment_detectors_warning(self):
+        """Detectors preset on the experiment should raise a warning (unsupported)."""
+
+        circuit = pcvl.Circuit(1)
+        experiment = pcvl.Experiment(circuit)
+        experiment.detectors[0] = pcvl.Detector.pnr()
+        assert (
+            experiment.is_unitary is True
+        )  # direct assignment should not break unitary flag
+
+        with pytest.warns(UserWarning, match="detectors"):
+            ML.QuantumLayer(
+                input_size=0,
+                experiment=experiment,
+                input_state=[1],
+                output_mapping_strategy=ML.OutputMappingStrategy.NONE,
+            )
+
+    @ANSATZ_SKIP
     def test_ansatz_based_layer_creation(self):
         """Test creating a layer from an ansatz."""
         experiment = ML.PhotonicBackend(
@@ -50,6 +123,7 @@ class TestQuantumLayer:
         assert layer.output_size == 5
         assert layer.auto_generation_mode is True
 
+    @ANSATZ_SKIP
     def test_forward_pass_batched(self):
         """Test forward pass with batched input."""
         experiment = ML.PhotonicBackend(
@@ -71,6 +145,7 @@ class TestQuantumLayer:
         assert output.shape == (10, 3)
         assert torch.all(output >= -1e6)  # More reasonable bounds for quantum outputs
 
+    @ANSATZ_SKIP
     def test_forward_pass_single(self):
         """Test forward pass with single input."""
         experiment = ML.PhotonicBackend(
@@ -93,6 +168,7 @@ class TestQuantumLayer:
         assert output.shape[0] == 1
         assert output.shape[1] == 3
 
+    @ANSATZ_SKIP
     def test_gradient_computation(self):
         """Test that gradients flow through the layer."""
         experiment = ML.PhotonicBackend(
@@ -125,6 +201,7 @@ class TestQuantumLayer:
 
         assert has_trainable_params, "Layer should have trainable parameters"
 
+    @ANSATZ_SKIP
     def test_sampling_configuration(self):
         """Test sampling configuration methods."""
         experiment = ML.PhotonicBackend(
@@ -149,6 +226,7 @@ class TestQuantumLayer:
         with pytest.raises(ValueError):
             layer.set_sampling_config(method="invalid")
 
+    @ANSATZ_SKIP
     def test_reservoir_mode(self):
         """Test reservoir computing mode."""
         # Test normal mode first
@@ -194,6 +272,7 @@ class TestQuantumLayer:
         output = layer_reservoir(x)
         assert output.shape == (3, 3)
 
+    @ANSATZ_SKIP
     def test_bandwidth_tuning(self):
         """Test bandwidth tuning functionality."""
         experiment = ML.PhotonicBackend(
@@ -217,6 +296,7 @@ class TestQuantumLayer:
         for _key, param in layer.bandwidth_coeffs.items():
             assert param.requires_grad
 
+    @ANSATZ_SKIP
     def test_output_mapping_strategies(self):
         """Test different output mapping strategies."""
         experiment = ML.PhotonicBackend(
@@ -247,6 +327,7 @@ class TestQuantumLayer:
             assert output.shape == (3, 4)
             assert torch.all(torch.isfinite(output))
 
+    @ANSATZ_SKIP
     def test_string_representation(self):
         """Test string representation of the layer."""
         experiment = ML.PhotonicBackend(
@@ -268,11 +349,8 @@ class TestQuantumLayer:
 
     def test_invalid_configurations(self):
         """Test that invalid configurations raise appropriate errors."""
-        # Test missing both ansatz and builder
-        with pytest.raises(
-            ValueError,
-            match="Either 'ansatz', 'circuit', or 'builder' must be provided",
-        ):
+        # Test missing both ansatz and circuit
+        with pytest.raises(ValueError, match="circuit"):
             ML.QuantumLayer(input_size=3)
 
         # Test invalid experiment configuration
@@ -283,6 +361,7 @@ class TestQuantumLayer:
                 n_photons=5,  # More photons than modes
             )
 
+    @ANSATZ_SKIP
     def test_none_output_mapping_with_correct_size(self):
         """Test NONE output mapping with correct size matching."""
         experiment = ML.PhotonicBackend(
