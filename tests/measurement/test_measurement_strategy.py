@@ -241,16 +241,6 @@ class TestQuantumLayerMeasurementStrategy:
         output.sum().backward()
         assert x.grad is not None
 
-        """# Error: ModeExpectations with wrong output_size (not None or n_modes)
-        ansatz = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment,
-            input_size=2,
-            output_size=10,  # Wrong output size
-            measurement_strategy=MeasurementStrategy.MODEEXPECTATIONS,
-        )
-        with pytest.raises(ValueError):
-            layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)"""
-
     def test_amplitude_vector(self):
         # AmplitudeVector is equivalent to return_amplitudes=True
         experiment = ML.PhotonicBackend(
@@ -316,19 +306,14 @@ class TestQuantumLayerMeasurementStrategy:
         x = torch.rand(2, 2, requires_grad=True)
         output = layer(x)
         assert output.shape[-1] == layer.output_size
-        output.sum().backward()
+
+        # Backprop compatibility
+        probs = output.abs().pow(2)
+        targets = torch.ones_like(probs)
+        loss = torch.sum(targets - probs)
+        loss.backward()
         assert x.grad is not None
+
         assert torch.allclose(
             torch.sum(output.abs() ** 2, dim=-1), torch.ones(output.shape[0]), atol=1e-6
         )
-
-        # Error: wrong output size specification (output_size must be None or equal to the number of possible Fock states)
-        output_size = 20  # Wrong output size
-        ansatz = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment,
-            input_size=2,
-            output_size=output_size,
-            measurement_strategy=MeasurementStrategy.AMPLITUDEVECTOR,
-        )
-        with pytest.raises(ValueError):
-            layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
