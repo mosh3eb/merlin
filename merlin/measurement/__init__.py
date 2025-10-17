@@ -30,10 +30,9 @@ from .mappers import (
     OutputMapper,
 )
 from .process import SamplingProcess
-from .strategies import MeasurementStrategy, OutputMappingStrategy
+from .strategies import MeasurementStrategy
 
 __all__ = [
-    "OutputMappingStrategy",
     "MeasurementStrategy",
     "OutputMapper",
     "MeasurementDistribution",

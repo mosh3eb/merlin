@@ -20,25 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""
-Output mapping strategy definitions.
-"""
+"""Measurement strategy definitions for quantum-to-classical conversion."""
 
 from enum import Enum
-
-
-class OutputMappingStrategy(Enum):
-    """
-    Strategy for mapping quantum probability distributions to classical outputs.
-
-    This class is deprecated and will be removed in v0.3.
-    """
-
-    LINEAR = "linear"
-    GROUPING = "grouping"
-    LEXGROUPING = "lexgrouping"
-    MODGROUPING = "modgrouping"
-    NONE = "none"
 
 
 class MeasurementStrategy(Enum):

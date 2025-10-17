@@ -33,7 +33,7 @@ import warnings
 import torch
 import torch.nn as nn
 
-from .strategies import MeasurementStrategy, OutputMappingStrategy
+from .strategies import MeasurementStrategy
 
 
 class OutputMapper:
@@ -46,7 +46,7 @@ class OutputMapper:
 
     @staticmethod
     def create_mapping(
-        strategy: OutputMappingStrategy | MeasurementStrategy,
+        strategy: MeasurementStrategy,
         no_bunching: bool = True,
         keys: list[tuple[int, ...]] | None = None,
     ):
@@ -65,47 +65,7 @@ class OutputMapper:
 
         Raises:
             ValueError: If strategy is unknown
-            DeprecationWarning: If strategy is an OutputMappingStrategy
         """
-        if type(strategy) is OutputMappingStrategy:
-            warnings.warn(
-                "OutputMappingStrategy is deprecated and will be removed in version 0.3. "
-                "Use MeasurementStrategy instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if strategy == OutputMappingStrategy.LINEAR:
-                warnings.warn(
-                    "OutputMappingStrategy.LINEAR was used and it will be replaced by MeasurementStrategy.MEASUREMENTDISTRIBUTION. To obtain the same behavior as before, please add a torch.nn.Linear layer after the quantum layer with your desired output size.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                strategy = MeasurementStrategy.MEASUREMENTDISTRIBUTION
-            elif (
-                strategy == OutputMappingStrategy.GROUPING
-                or strategy == OutputMappingStrategy.LEXGROUPING
-            ):
-                warnings.warn(
-                    "OutputMappingStrategy.GROUPING or OutputMappingStrategy.LEXGROUPING was used and it will be replaced by MeasurementStrategy.MEASUREMENTDISTRIBUTION. Use merlin.GroupingPolicy.LEXGROUPING afterwards for equivalent behavior.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                strategy = MeasurementStrategy.MEASUREMENTDISTRIBUTION
-            elif strategy == OutputMappingStrategy.MODGROUPING:
-                warnings.warn(
-                    "OutputMappingStrategy.MODGROUPING was used and it will be replaced by MeasurementStrategy.MEASUREMENTDISTRIBUTION. Use merlin.GroupingPolicy.MODGROUPING afterwards for equivalent behavior.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                strategy = MeasurementStrategy.MEASUREMENTDISTRIBUTION
-            elif strategy == OutputMappingStrategy.NONE:
-                warnings.warn(
-                    "OutputMappingStrategy.NONE was used and it will be replaced by MeasurementStrategy.MEASUREMENTDISTRIBUTION. This is equivalent to the previous behavior.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                strategy = MeasurementStrategy.MEASUREMENTDISTRIBUTION
-
         if strategy == MeasurementStrategy.MEASUREMENTDISTRIBUTION:
             return MeasurementDistribution()
         elif strategy == MeasurementStrategy.MODEEXPECTATIONS:

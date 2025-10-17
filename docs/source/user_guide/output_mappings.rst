@@ -9,7 +9,7 @@ Merlin now exposes quantum-to-classical conversion through two orthogonal concep
 - :class:`~merlin.measurement.strategies.MeasurementStrategy` selects how results are extracted from the quantum simulation or hardware backend.
 - :class:`~merlin.utils.grouping.mappers.LexGrouping` and :class:`~merlin.utils.grouping.mappers.ModGrouping` provide optional post-processing of outputs.
 
-The previous :class:`~merlin.measurement.strategies.OutputMappingStrategy` enum has been removed. This page explains how to build measurement pipelines with the new API.
+The legacy output mapping strategy enum has been removed. This page explains how to build measurement pipelines with the new API.
 
 Measurement Strategies
 ======================

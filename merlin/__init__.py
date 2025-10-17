@@ -45,10 +45,7 @@ from .measurement import (
 )
 from .measurement.autodiff import AutoDiffProcess
 from .measurement.process import SamplingProcess
-from .measurement.strategies import (
-    MeasurementStrategy,
-    OutputMappingStrategy,
-)
+from .measurement.strategies import MeasurementStrategy
 from .pcvl_pytorch import CircuitConverter, build_slos_distribution_computegraph
 from .utils.grouping.mappers import LexGrouping, ModGrouping
 from .utils.torch_utils.torch_codes import FeatureEncoder
@@ -68,7 +65,6 @@ __all__ = [
     # Configuration enums
     "CircuitType",
     "StatePattern",
-    "OutputMappingStrategy",
     "MeasurementStrategy",
     # Advanced components
     "CircuitGenerator",

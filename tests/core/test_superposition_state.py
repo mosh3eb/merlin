@@ -25,14 +25,13 @@ def classical_method(layer, input_state):
 
 
 class TestOutputSuperposedState:
-    """Test cases for output mapping strategies in QuantumLayer.simple()."""
+    """Test cases for measurement-driven outputs in QuantumLayer.simple()."""
 
     def test_superposed_state(self, benchmark):
-        """Test NONE strategy when output_size is not specified."""
+        """Test default measurement behaviour when output_size is not constrained."""
         print("\n=== Testing Superposed input state method ===")
 
-        # When using NONE strategy without specifying output_size,
-        # the output size should equal the distribution size
+        # With the default measurement distribution the output size matches the underlying Fock distribution
         circuit = pcvl.components.GenericInterferometer(
             10,
             pcvl.components.catalog["mzi phase last"].generate,
@@ -71,11 +70,10 @@ class TestOutputSuperposedState:
         )
 
     def test_classical_method(self, benchmark):
-        """Test NONE strategy when output_size is not specified."""
+        """Test probability distribution behaviour when output_size is not constrained."""
         print("\n=== Testing Superposed input state method ===")
 
-        # When using NONE strategy without specifying output_size,
-        # the output size should equal the distribution size
+        # With the default measurement distribution the output size matches the underlying Fock distribution
         circuit = pcvl.components.GenericInterferometer(
             10,
             pcvl.components.catalog["mzi phase last"].generate,
