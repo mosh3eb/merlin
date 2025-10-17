@@ -143,8 +143,9 @@ class QuantumLayer(nn.Module):
                 output_mapping_strategy,
             )
         else:
+            #TODO: add experiment in this error as well
             raise ValueError(
-                "Either 'ansatz', 'circuit', or 'builder' must be provided"
+                "Either 'circuit', or 'builder' must be provided"
             )
 
         # Setup sampling

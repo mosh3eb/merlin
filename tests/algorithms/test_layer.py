@@ -243,17 +243,26 @@ class TestQuantumLayer:
         # Test missing both ansatz and builder
         with pytest.raises(
             ValueError,
-            match="Either 'ansatz', 'circuit', or 'builder' must be provided",
+            match="Either 'circuit', or 'builder' must be provided",
         ):
             ML.QuantumLayer(input_size=3)
 
         # Test invalid experiment configuration
+        builder = ML.CircuitBuilder(n_modes=4)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+
         with pytest.raises(ValueError):
-            ML.PhotonicBackend(
-                circuit_type=ML.CircuitType.SERIES,
-                n_modes=4,
-                n_photons=5,  # More photons than modes
-            )
+            ML.QuantumLayer(input_size=3, output_size = 5,
+                                n_photons = 5, # more photons than modes
+                                builder = builder,  
+                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING)
+        
+        with pytest.raises(TypeError):
+            ML.QuantumLayer.simple(n_params = 0)
+            
 
     def test_none_output_mapping_with_correct_size(self):
         """Test NONE output mapping with correct size matching."""
