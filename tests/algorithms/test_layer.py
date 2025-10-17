@@ -210,7 +210,7 @@ class TestQuantumLayer:
 
     def test_string_representation(self):
         """Test string representation of the layer."""
-        experiment = ML.PhotonicBackend(
+        """experiment = ML.PhotonicBackend(
             circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
         )
 
@@ -218,11 +218,22 @@ class TestQuantumLayer:
             PhotonicBackend=experiment, input_size=3, output_size=5
         )
 
-        layer = ML.QuantumLayer(input_size=3, ansatz=ansatz)
-        layer_str = str(layer)
+        layer = ML.QuantumLayer(input_size=3, ansatz=ansatz)"""
 
+        builder = ML.CircuitBuilder(n_modes=4)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        layer = ML.QuantumLayer(input_size=3, output_size = 5,
+                                input_state = [1,0,1,0],
+                                builder = builder,  
+                                output_mapping_strategy=ML.OutputMappingStrategy.GROUPING)
+
+
+        layer_str = str(layer)
+        print(f"Layer string representation:\n{layer_str}")
         assert "QuantumLayer" in layer_str
-        assert "parallel_columns" in layer_str
         assert "modes=4" in layer_str
         assert "input_size=3" in layer_str
         assert "output_size=5" in layer_str

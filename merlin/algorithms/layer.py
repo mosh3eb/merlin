@@ -831,7 +831,6 @@ class QuantumLayer(nn.Module):
 
     def __str__(self) -> str:
         """String representation of the quantum layer."""
-        base_str = ""
         if self.auto_generation_mode:
             base_str = (
                 f"QuantumLayer(ansatz={self.ansatz.experiment.circuit_type.value}, "
@@ -839,8 +838,13 @@ class QuantumLayer(nn.Module):
                 f"input_size={self.input_size}, output_size={self.output_size}"
             )
         else:
+            n_modes = None
+            if hasattr(self, "circuit") and getattr(self.circuit, "m", None) is not None:
+                n_modes = self.circuit.m
+
+            modes_fragment = f", modes={n_modes}" if n_modes is not None else ""
             base_str = (
-                f"QuantumLayer(custom_circuit, input_size={self.input_size}, "
+                f"QuantumLayer(custom_circuit{modes_fragment}, input_size={self.input_size}, "
                 f"output_size={self.output_size}"
             )
 
