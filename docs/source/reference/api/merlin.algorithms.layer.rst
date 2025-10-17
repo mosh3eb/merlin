@@ -12,12 +12,11 @@ Example: Quickstart QuantumLayer
 .. code-block:: python
 
     import torch.nn as nn
-    from merlin import MeasurementStrategy, QuantumLayer
+    from merlin import QuantumLayer
 
     simple_layer = QuantumLayer.simple(
         input_size=4,
         n_params=120,
-        measurement_strategy=MeasurementStrategy.MEASUREMENTDISTRIBUTION,
     )
 
     model = nn.Sequential(
@@ -25,6 +24,12 @@ Example: Quickstart QuantumLayer
         nn.Linear(simple_layer.output_size, 3),
     )
     # Train and evaluate as a standard torch.nn.Module
+
+.. note::
+   When you pass the optional ``output_size`` argument to :func:`QuantumLayer.simple`,
+   the helper returns an :class:`torch.nn.Sequential` composed of the quantum layer followed by a
+   :class:`~merlin.utils.grouping.mappers.ModGrouping` stage that performs the dimensionality reduction 
+   unless the output size already is the size of the output distribution.
 
 .. image:: ../../_static/img/Circ_simple.png
    :alt: A Perceval Circuit built with QuantumLayer.simple

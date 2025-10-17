@@ -329,18 +329,3 @@ class TestQuantumLayerMeasurementStrategy:
         )
         with pytest.raises(ValueError):
             layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
-
-    def test_custom_observable(self):
-        # CustomObservable strategy (should be implemented, but test placeholder)
-        experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL, n_modes=2, n_photons=1
-        )
-        ansatz = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment,
-            input_size=2,
-            output_size=2,
-            measurement_strategy=MeasurementStrategy.CUSTOMOBSERVABLE,
-        )
-        ML.QuantumLayer(input_size=2, ansatz=ansatz)
-        torch.rand(2, 2, requires_grad=True)
-        # TODO: implement CustomObservable strategy

@@ -47,6 +47,7 @@ from ..measurement.autodiff import AutoDiffProcess
 from ..measurement.strategies import (
     MeasurementStrategy,
 )
+from ..utils.grouping.mappers import ModGrouping
 
 
 class QuantumLayer(nn.Module):
@@ -67,7 +68,6 @@ class QuantumLayer(nn.Module):
     def __init__(
         self,
         input_size: int,
-        output_size: int | None = None,
         # Ansatz-based construction
         ansatz: Ansatz | None = None,
         # Custom circuit construction (backward compatible)
@@ -121,7 +121,7 @@ class QuantumLayer(nn.Module):
         # Determine construction mode
         # TODO: can be deprectated once Builder is fully supported
         if ansatz is not None:
-            self._init_from_ansatz(ansatz, output_size, measurement_strategy)
+            self._init_from_ansatz(ansatz, measurement_strategy)
 
         elif circuit is not None:
             self.circuit = circuit
@@ -131,7 +131,6 @@ class QuantumLayer(nn.Module):
                 n_photons,
                 trainable_parameters,
                 input_parameters,
-                output_size,
                 measurement_strategy,
             )
         else:
@@ -145,7 +144,6 @@ class QuantumLayer(nn.Module):
     def _init_from_ansatz(
         self,
         ansatz: Ansatz,
-        output_size: int | None,
         measurement_strategy: MeasurementStrategy,
     ):
         """Initialize from ansatz (auto-generated mode)."""
@@ -179,7 +177,6 @@ class QuantumLayer(nn.Module):
 
         # Use the ansatz's output mapping strategy - it should take precedence!
         actual_strategy = ansatz.measurement_strategy
-        actual_output_size = output_size or ansatz.output_size
 
         # Setup bandwidth tuning if enabled
         if ansatz.experiment.use_bandwidth_tuning:
@@ -202,7 +199,7 @@ class QuantumLayer(nn.Module):
         self._setup_parameters_from_ansatz(ansatz)
 
         # Setup output mapping using ansatz configuration
-        self._setup_measurement_mapping(ansatz, actual_output_size, actual_strategy)
+        self._setup_measurement_mapping(ansatz, actual_strategy)
 
     def _init_from_custom_circuit(
         self,
@@ -211,7 +208,6 @@ class QuantumLayer(nn.Module):
         n_photons: int | None,
         trainable_parameters: list[str],
         input_parameters: list[str],
-        output_size: int | None,
         measurement_strategy: MeasurementStrategy,
     ):
         """Initialize from custom circuit (backward compatible mode)."""
@@ -253,7 +249,7 @@ class QuantumLayer(nn.Module):
         self._setup_parameters_from_custom(trainable_parameters)
 
         # Setup output mapping
-        self._setup_measurement_mapping_from_custom(output_size, measurement_strategy)
+        self._setup_measurement_mapping_from_custom(measurement_strategy)
 
     def _validate_input_state_with_index_photons(self, input_state: list[int]):
         """Validate that input_state respects index_photons constraints."""
@@ -363,7 +359,6 @@ class QuantumLayer(nn.Module):
     def _setup_measurement_mapping(
         self,
         ansatz: Ansatz,
-        output_size: int | None,
         measurement_strategy: MeasurementStrategy,
     ):
         """Setup output mapping for ansatz-based construction."""
@@ -380,34 +375,30 @@ class QuantumLayer(nn.Module):
         dist_size = distribution.shape[-1]
 
         # Determine output size
-        if output_size is None:
-            if measurement_strategy == MeasurementStrategy.MEASUREMENTDISTRIBUTION:
-                self.output_size = dist_size
-            elif measurement_strategy == MeasurementStrategy.MODEEXPECTATIONS:
-                if type(self.circuit) is CircuitBuilder:
-                    circuit = self.circuit.build()
-                elif type(self.circuit) is pcvl.Circuit:
-                    circuit = self.circuit
-                else:
-                    raise TypeError(f"Unknown circuit type: {type(self.circuit)}")
-                circuit_m = cast(pcvl.AComponent, circuit).m
-                self.output_size = circuit_m
-            elif measurement_strategy == MeasurementStrategy.AMPLITUDEVECTOR:
-                self.output_size = dist_size
+        if measurement_strategy == MeasurementStrategy.MEASUREMENTDISTRIBUTION:
+            self.output_size = dist_size
+        elif measurement_strategy == MeasurementStrategy.MODEEXPECTATIONS:
+            if type(self.circuit) is CircuitBuilder:
+                circuit = self.circuit.build()
+            elif type(self.circuit) is pcvl.Circuit:
+                circuit = self.circuit
+            else:
+                raise TypeError(f"Unknown circuit type: {type(self.circuit)}")
+            circuit_m = cast(pcvl.AComponent, circuit).m
+            self.output_size = circuit_m
+        elif measurement_strategy == MeasurementStrategy.AMPLITUDEVECTOR:
+            self.output_size = dist_size
         else:
-            self.output_size = output_size
+            raise TypeError(f"Unknown measurement_strategy: {measurement_strategy}")
 
-        # Validate NONE strategy
-        if (
-            measurement_strategy == MeasurementStrategy.MEASUREMENTDISTRIBUTION
-            and self.output_size != dist_size
-        ) or (
-            measurement_strategy == MeasurementStrategy.AMPLITUDEVECTOR
-            and self.output_size != dist_size
-        ):
+        # Validate requested output size from the ansatz, if any
+        expected_size = getattr(ansatz, "output_size", None)
+        if expected_size is not None and expected_size != self.output_size:
             raise ValueError(
-                f"Output size ({self.output_size}) must equal Distribution size ({dist_size}) "
-                f"when using MeasurementDistribution or AmplitudeVector measurement strategies"
+                f"The provided ansatz expects an output_size of {expected_size}, "
+                f"but measurement strategy {measurement_strategy.name} produces {self.output_size} features. "
+                "QuantumLayer no longer accepts an explicit output_size override; "
+                "please adjust your measurement pipeline (e.g., via grouping) instead."
             )
 
         # Create output mapping
@@ -419,7 +410,6 @@ class QuantumLayer(nn.Module):
 
     def _setup_measurement_mapping_from_custom(
         self,
-        output_size: int | None,
         measurement_strategy: MeasurementStrategy,
     ):
         """Setup output mapping for custom circuit construction."""
@@ -436,24 +426,19 @@ class QuantumLayer(nn.Module):
         dist_size = distribution.shape[-1]
 
         # Determine output size
-        if output_size is None:
-            if measurement_strategy == MeasurementStrategy.MEASUREMENTDISTRIBUTION:
-                self.output_size = dist_size
-            elif measurement_strategy == MeasurementStrategy.MODEEXPECTATIONS:
-                if type(self.circuit) is pcvl.Circuit:
-                    self.output_size = self.circuit.m
-                elif type(self.circuit) is CircuitBuilder:
-                    self.output_size = self.circuit.n_modes
-                else:
-                    raise TypeError(f"Unknown circuit type: {type(self.circuit)}")
-            elif measurement_strategy == MeasurementStrategy.AMPLITUDEVECTOR:
-                self.output_size = dist_size
+        if measurement_strategy == MeasurementStrategy.MEASUREMENTDISTRIBUTION:
+            self.output_size = dist_size
+        elif measurement_strategy == MeasurementStrategy.MODEEXPECTATIONS:
+            if type(self.circuit) is pcvl.Circuit:
+                self.output_size = self.circuit.m
+            elif type(self.circuit) is CircuitBuilder:
+                self.output_size = self.circuit.n_modes
             else:
-                raise ValueError(
-                    "output_size must be specified for FockGrouping measurement strategy"
-                )
+                raise TypeError(f"Unknown circuit type: {type(self.circuit)}")
+        elif measurement_strategy == MeasurementStrategy.AMPLITUDEVECTOR:
+            self.output_size = dist_size
         else:
-            self.output_size = output_size
+            raise TypeError(f"Unknown measurement_strategy: {measurement_strategy}")
 
         # Create output mapping
         self.measurement_mapping = OutputMapper.create_mapping(
@@ -738,7 +723,6 @@ class QuantumLayer(nn.Module):
         shots: int = 0,
         reservoir_mode: bool = False,
         output_size: int | None = None,
-        measurement_strategy: MeasurementStrategy = MeasurementStrategy.MEASUREMENTDISTRIBUTION,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
         no_bunching: bool = True,
@@ -758,8 +742,7 @@ class QuantumLayer(nn.Module):
             n_params: Number of trainable parameters to allocate across rotation layers.
             shots: Number of sampling shots for stochastic evaluation.
             reservoir_mode: Reserved for API compatibility (unused in builder mode).
-            output_size: Optional classical output width.
-            measurement_strategy: Strategy used to post-process the quantum amplitudes or counts.
+            output_size: Optional classical output width (supported only when using ``MeasurementStrategy.MEASUREMENTDISTRIBUTION``).
             device: Optional target device for tensors.
             dtype: Optional tensor dtype.
             no_bunching: Whether to restrict to states without photon bunching.
@@ -838,17 +821,32 @@ class QuantumLayer(nn.Module):
                 f"{total_trainable} trainable parameters but {expected_trainable} were expected."
             )
 
-        return cls(
+        quantum_layer = cls(
             input_size=input_size,
-            output_size=output_size,
             circuit=builder,
             n_photons=n_photons,
-            measurement_strategy=measurement_strategy,
+            measurement_strategy=MeasurementStrategy.MEASUREMENTDISTRIBUTION,
             shots=shots,
             no_bunching=no_bunching,
             device=device,
             dtype=dtype,
         )
+
+        if output_size is not None:
+            if not isinstance(output_size, int):
+                raise TypeError("output_size must be an integer.")
+            if output_size <= 0:
+                raise ValueError("output_size must be a positive integer.")
+            if output_size != quantum_layer.output_size:
+                model = nn.Sequential(
+                    quantum_layer, ModGrouping(quantum_layer.output_size, output_size)
+                )
+            else:
+                model = quantum_layer
+        else:
+            model = quantum_layer
+
+        return model
 
     def __str__(self) -> str:
         """String representation of the quantum layer."""

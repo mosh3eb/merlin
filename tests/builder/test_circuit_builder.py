@@ -481,7 +481,6 @@ def test_builder_functionality_on_gpu():
         input_size=3,
         circuit=builder,
         n_photons=1,
-        output_size=3,
         measurement_strategy=MeasurementStrategy.MEASUREMENTDISTRIBUTION,
         dtype=torch.float32,
     ).to(device)

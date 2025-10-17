@@ -98,7 +98,6 @@ def test_simple_api_pipeline_on_iris(iris_batch):
     layer = QuantumLayer.simple(
         input_size=features.shape[1],
         n_params=10,
-        measurement_strategy=MeasurementStrategy.MEASUREMENTDISTRIBUTION,
         dtype=features.dtype,
     )
     pcvl.pdisplay(layer.computation_process.circuit, output_format=pcvl.Format.TEXT)

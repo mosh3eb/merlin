@@ -124,7 +124,6 @@ def benchmark_bs(MODES=8, PHOTONS=4, BS=32, TYPE=torch.float32, set_hp=False):
     ])
     q_model = QuantumLayer(
         input_size=input_size,
-        output_size=None,
         circuit=circuit,
         input_state=input_state,
         trainable_parameters=[],

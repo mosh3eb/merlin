@@ -58,7 +58,6 @@ def define_layer_no_input(n_modes, n_photons, circuit_type=None):
 
     layer = QuantumLayer(
         input_size=0,
-        output_size=None,
         circuit=circuit,
         n_photons=n_photons,
         input_state=input_state,  # Random Initial quantum state used only for initialization
@@ -86,7 +85,6 @@ def define_layer_with_input(M, N, input_size, circuit_type=None):
     input_state = [1] * N + [0] * (M - N)
     layer = QuantumLayer(
         input_size=input_size,
-        output_size=None,
         circuit=circuit,
         n_photons=N,
         input_state=input_state,  # Random Initial quantum state used only for initialization
