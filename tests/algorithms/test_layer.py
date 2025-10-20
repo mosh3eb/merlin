@@ -54,6 +54,26 @@ class TestQuantumLayer:
             4 - 1
         )  # 24 trainable parameters from U1 and U2
 
+    def test_multiple_angle_encodings_validate_input_size(self):
+        """Ensure input size validation handles multiple angle encoding prefixes."""
+        builder = ML.CircuitBuilder(n_modes=5)
+        builder.add_angle_encoding(modes=[0, 1], name="input_a")
+        builder.add_angle_encoding(modes=[2, 3, 4], name="input_b")
+
+        layer = ML.QuantumLayer(
+            input_size=5,
+            output_size=3,
+            input_state=[1, 0, 0, 0, 0],
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
+        )
+
+        dummy_input = torch.rand(1, 5)
+        output = layer(dummy_input)
+        print(f"Output with multiple angle encodings: {output}")
+
+        assert layer.input_size == 5
+
     def test_forward_pass_batched(self):
         """Test forward pass with batched input."""
         builder = ML.CircuitBuilder(n_modes=4)
