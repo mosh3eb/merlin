@@ -641,7 +641,7 @@ class SLOSComputeGraph:
 
         return amplitudes
 
-    def post_pa_inc(self, amplitudes, unitary):
+    def compute_probs_from_amplitudes(self, amplitudes, unitary):
         if len(unitary.shape) == 2:
             is_batched = False
         else:
