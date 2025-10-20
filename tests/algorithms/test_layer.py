@@ -54,11 +54,11 @@ class TestQuantumLayer:
             4 - 1
         )  # 24 trainable parameters from U1 and U2
 
-    def test_multiple_angle_encodings_validate_input_size(self):
-        """Ensure input size validation handles multiple angle encoding prefixes."""
+    @pytest.mark.parametrize("names", [("input", "input"), ("input_a", "input_b")])
+    def test_multiple_angle_encodings_validate_input_size(self, names):
         builder = ML.CircuitBuilder(n_modes=5)
-        builder.add_angle_encoding(modes=[0, 1], name="input_a")
-        builder.add_angle_encoding(modes=[2, 3, 4], name="input_b")
+        builder.add_angle_encoding(modes=[0, 1], name=names[0])
+        builder.add_angle_encoding(modes=[2, 3, 4], name=names[1])
 
         layer = ML.QuantumLayer(
             input_size=5,
@@ -67,12 +67,13 @@ class TestQuantumLayer:
             builder=builder,
             output_mapping_strategy=ML.OutputMappingStrategy.LINEAR,
         )
+        pcvl.pdisplay(layer.circuit, output_format=pcvl.Format.TEXT)
 
         dummy_input = torch.rand(1, 5)
         output = layer(dummy_input)
-        print(f"Output with multiple angle encodings: {output}")
-
-        assert layer.input_size == 5
+        assert output.shape == (1, 3), "Output shape mismatch"
+        assert layer.input_size == 5, "Input size should match number of encoded modes"
+        assert not torch.isnan(output).any(), "Output should not contain NaNs"
 
     def test_forward_pass_batched(self):
         """Test forward pass with batched input."""
