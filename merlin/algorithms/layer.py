@@ -270,6 +270,7 @@ class QuantumLayer(nn.Module):
         if self.angle_encoding_specs:
             feature_indices: set[int] = set()
             for metadata in self.angle_encoding_specs.values():
+                # "combinations" keeps the logical feature-index subsets emitted by the builder.
                 combos = metadata.get("combinations", [])
                 for combo in combos:
                     feature_indices.update(combo)
