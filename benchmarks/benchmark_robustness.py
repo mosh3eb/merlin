@@ -414,15 +414,21 @@ class TestRobustnessPerformanceRegression:
 
     def test_extreme_values_performance_bounds(self):
         """Test that extreme value handling stays within reasonable time bounds."""
-        experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.SERIES, n_modes=6, n_photons=2
-        )
 
-        ansatz = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment, input_size=4, output_size=8
+        builder = ML.CircuitBuilder(n_modes=6)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(
+            modes=list(range(4)), name="input", subset_combinations=True
         )
+        builder.add_entangling_layer(trainable=True, name="U2")
 
-        layer = ML.QuantumLayer(input_size=4, ansatz=ansatz)
+        layer = ML.QuantumLayer(
+            input_size=4,
+            output_size=8,
+            n_photons=2,
+            builder=builder,
+            output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
+        )
 
         # Test extreme values
         extreme_inputs = [
