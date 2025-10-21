@@ -113,11 +113,7 @@ class QuantumLayer(nn.Module):
         self.no_bunching = no_bunching
 
         # ensure exclusivity of circuit/builder/experiment
-        if (
-            (circuit is not None and (builder is not None or experiment is not None))
-            or (builder is not None and experiment is not None)
-            or (circuit is None and builder is None and experiment is None)
-        ):
+        if sum(x is not None for x in (circuit, builder, experiment)) != 1:
             raise ValueError(
                 "Provide exactly one of 'circuit', 'builder', or 'experiment'."
             )
