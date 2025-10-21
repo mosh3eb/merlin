@@ -484,10 +484,7 @@ class QuantumLayer(nn.Module):
         # Automatically split a single logical input across multiple prefixes when possible.
         # Builder circuits that define several encoders typically expose one logical tensor
         # to the user, while the converter expects separate tensors per prefix.
-        if (
-            len(prefixes) > 1
-            and len(input_parameters) == 1
-        ):
+        if len(prefixes) > 1 and len(input_parameters) == 1:
             split_inputs = self._split_inputs_by_prefix(prefixes, input_parameters[0])
             if split_inputs is not None:
                 input_parameters = split_inputs
@@ -721,10 +718,7 @@ class QuantumLayer(nn.Module):
     def __str__(self) -> str:
         """String representation of the quantum layer."""
         n_modes = None
-        if (
-            hasattr(self, "circuit")
-            and getattr(self.circuit, "m", None) is not None
-        ):
+        if hasattr(self, "circuit") and getattr(self.circuit, "m", None) is not None:
             n_modes = self.circuit.m
 
         modes_fragment = f", modes={n_modes}" if n_modes is not None else ""
