@@ -11,20 +11,22 @@ Focus:
 Requires cloud; auto-skips if no token via `remote_processor` fixture.
 """
 
-import time
+from __future__ import annotations
+
 import concurrent.futures as _cf
+import time
 
 import pytest
 import torch
 import torch.nn as nn
 
-from merlin.core.merlin_processor import MerlinProcessor
 from merlin.algorithms import QuantumLayer
 from merlin.builder.circuit_builder import CircuitBuilder
+from merlin.core.merlin_processor import MerlinProcessor
 from merlin.sampling.strategies import OutputMappingStrategy
 
 
-def _spin_until(pred, timeout_s=10.0, sleep_s=0.02):
+def _spin_until(pred, timeout_s: float = 10.0, sleep_s: float = 0.02) -> bool:
     start = time.time()
     while not pred():
         if time.time() - start > timeout_s:
@@ -33,7 +35,7 @@ def _spin_until(pred, timeout_s=10.0, sleep_s=0.02):
     return True
 
 
-def _make_layer_6m2p_raw():
+def _make_layer_6m2p_raw() -> QuantumLayer:
     builder = CircuitBuilder(n_modes=6)
     builder.add_rotations(trainable=True, name="theta")
     builder.add_angle_encoding(modes=[0, 1], name="px")
@@ -60,7 +62,7 @@ class TestFuturesCloud:
         assert hasattr(fut, "status")
         assert hasattr(fut, "job_ids")
 
-        _spin_until(lambda: len(fut.job_ids) > 0 or fut.done(), timeout_s=10.0)
+        _spin_until(lambda f=fut: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
         out = fut.wait()
         assert out.shape == (3, 15)
 
@@ -85,7 +87,7 @@ class TestFuturesCloud:
         proc = MerlinProcessor(remote_processor, timeout=None)
         fut = proc.forward_async(layer, torch.rand(8, 2), shots=40000, timeout=None)
 
-        _spin_until(lambda: len(fut.job_ids) > 0 or fut.done(), timeout_s=10.0)
+        _spin_until(lambda f=fut: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
         if fut.done():
             pytest.skip("Backend finished too quickly to test cancellation")
 
@@ -98,7 +100,7 @@ class TestFuturesCloud:
         proc = MerlinProcessor(remote_processor)
 
         fut = proc.forward_async(layer, torch.rand(2, 2), shots=2000)
-        _spin_until(lambda: len(fut.job_ids) > 0 or fut.done(), timeout_s=10.0)
+        _spin_until(lambda f=fut: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
 
         if len(fut.job_ids) == 0:
             out = fut.wait()
@@ -118,7 +120,7 @@ class TestFuturesCloud:
         futs = [proc.forward_async(layer, x, shots=1500) for x in xs]
 
         for f in futs:
-            _spin_until(lambda: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
+            _spin_until(lambda f=f: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
 
         outs = [f.wait() for f in futs]
         for y in outs:
@@ -129,14 +131,26 @@ class TestFuturesCloud:
         b1 = CircuitBuilder(n_modes=4)
         b1.add_rotations(trainable=True, name="t1")
         b1.add_angle_encoding(modes=[0], name="px")
-        q1 = QuantumLayer(1, None, builder=b1, n_photons=2,
-                          no_bunching=True, output_mapping_strategy=OutputMappingStrategy.NONE).eval()
+        q1 = QuantumLayer(
+            1,
+            None,
+            builder=b1,
+            n_photons=2,
+            no_bunching=True,
+            output_mapping_strategy=OutputMappingStrategy.NONE,
+        ).eval()
 
         b2 = CircuitBuilder(n_modes=5)
         b2.add_rotations(trainable=True, name="t2")
         b2.add_angle_encoding(modes=[0, 1], name="px")
-        q2 = QuantumLayer(2, None, builder=b2, n_photons=2,
-                          no_bunching=True, output_mapping_strategy=OutputMappingStrategy.NONE).eval()
+        q2 = QuantumLayer(
+            2,
+            None,
+            builder=b2,
+            n_photons=2,
+            no_bunching=True,
+            output_mapping_strategy=OutputMappingStrategy.NONE,
+        ).eval()
 
         model = nn.Sequential(
             nn.Linear(3, 1),
@@ -149,7 +163,7 @@ class TestFuturesCloud:
 
         proc = MerlinProcessor(remote_processor)
         fut = proc.forward_async(model, torch.rand(4, 3), shots=2000)
-        _spin_until(lambda: len(fut.job_ids) >= 2 or fut.done(), timeout_s=20.0)
+        _spin_until(lambda f=fut: len(f.job_ids) >= 2 or f.done(), timeout_s=20.0)
         y = fut.wait()
         assert y.shape == (4, 3)
         assert len(fut.job_ids) >= 2

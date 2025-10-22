@@ -7,13 +7,16 @@ Focus:
 - GPU: local forward on CUDA; cloud roundtrip preserves device (auto-skips if no CUDA)
 """
 
-import pytest
-import torch
+from __future__ import annotations
+
 from math import comb
 
-from merlin.core.merlin_processor import MerlinProcessor
+import pytest
+import torch
+
 from merlin.algorithms import QuantumLayer
 from merlin.builder.circuit_builder import CircuitBuilder
+from merlin.core.merlin_processor import MerlinProcessor
 from merlin.sampling.strategies import OutputMappingStrategy
 
 
@@ -47,22 +50,22 @@ class TestOutputSpacesAndGPU:
     )
     def test_local_distribution_size(self, m, n, input_size, no_bunching):
         layer = _make_layer(m, n, input_size, no_bunching)
-        B = 3
-        y = layer(torch.rand(B, input_size))
+        bsz = 3
+        y = layer(torch.rand(bsz, input_size))
         expected = comb(m, n) if no_bunching else comb(m + n - 1, n)
-        assert y.shape == (B, expected)
-        assert torch.allclose(y.sum(dim=1), torch.ones(B), atol=1e-5)
+        assert y.shape == (bsz, expected)
+        assert torch.allclose(y.sum(dim=1), torch.ones(bsz), atol=1e-5)
 
     def test_cloud_distribution_size_matches(self, remote_processor):
         m, n, input_size, no_bunching = 6, 2, 2, True
         layer = _make_layer(m, n, input_size, no_bunching)
-        B = 4
-        x = torch.rand(B, input_size)
+        bsz = 4
+        x = torch.rand(bsz, input_size)
         expected = comb(m, n)
 
         proc = MerlinProcessor(remote_processor)
         y = proc.forward(layer, x, shots=2000)
-        assert y.shape == (B, expected)
+        assert y.shape == (bsz, expected)
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_local_cuda(self):

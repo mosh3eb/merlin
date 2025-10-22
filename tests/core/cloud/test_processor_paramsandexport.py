@@ -7,17 +7,25 @@ Focus:
 - local vs remote shape/normalization consistency (cloud optional)
 """
 
-import torch
-import pytest
+from __future__ import annotations
+
 from math import comb
 
+import torch
+
 from merlin.algorithms import QuantumLayer
-from merlin.core.merlin_processor import MerlinProcessor
 from merlin.builder.circuit_builder import CircuitBuilder
+from merlin.core.merlin_processor import MerlinProcessor
 from merlin.sampling.strategies import OutputMappingStrategy
 
 
-def _make_layer(m: int, n: int, input_size: int, trainable=True, no_bunching=True) -> QuantumLayer:
+def _make_layer(
+    m: int,
+    n: int,
+    input_size: int,
+    trainable: bool = True,
+    no_bunching: bool = True,
+) -> QuantumLayer:
     builder = CircuitBuilder(n_modes=m)
     if trainable:
         builder.add_rotations(trainable=True, name="theta")

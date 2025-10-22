@@ -1,13 +1,14 @@
 """
 MerlinProcessor: PyTorch-friendly quantum processor with full async RPC semantics.
 
-Optimal design changes:
-- Traversal treats any module with `merlin_leaf == True` as an execution leaf
-  (never recurses into its children like nn.Identity).
-- Execution policy is delegated to the leaf:
+Traversal treats any module with `merlin_leaf == True` as an execution leaf
+(never recurses into its children like nn.Identity).
+
+Execution policy is delegated to the leaf:
     * If `should_offload(processor, shots)` exists → use it
-    * Else fall back to legacy `_is_quantum_layer` (export_config & not force_simulation)
-- If not offloading → call the leaf's own forward() locally (not an identity passthrough)
+    * Else `_is_quantum_layer` (has export_config & not force_simulation)
+
+If not offloading → call the leaf's own forward() locally (not an identity passthrough).
 
 Key design points:
 - Single async surface: forward_async(module, x, *, shots=..., timeout=...) -> Future[Tensor]
@@ -17,20 +18,24 @@ Key design points:
 - Sync forward(...) waits on forward_async with timeout semantics
 """
 
-import time
+import logging
 import threading
+import time
 import warnings
-from typing import Optional, Dict, List, Any, Tuple, Iterable
+from collections.abc import Iterable
+from contextlib import suppress
+from math import comb
+from typing import Any
 
 import numpy as np
+import perceval as pcvl
 import torch
 import torch.nn as nn
-from torch.futures import Future
-from math import comb
-
-import perceval as pcvl
-from perceval.runtime import RemoteProcessor, RemoteJob
 from perceval.algorithm import Sampler
+from perceval.runtime import RemoteJob, RemoteProcessor
+from torch.futures import Future
+
+logger = logging.getLogger(__name__)
 
 
 class MerlinProcessor:
@@ -77,14 +82,14 @@ class MerlinProcessor:
                 stacklevel=2,
             )
 
-        self._layer_cache: Dict[int, Tuple[Sampler, dict, RemoteProcessor]] = {}
-        self._job_history: List[RemoteJob] = []
+        self._layer_cache: dict[int, tuple[Sampler, dict, RemoteProcessor]] = {}
+        self._job_history: list[RemoteJob] = []
 
     @classmethod
     def from_platform(
         cls,
         platform: str,
-        token: Optional[str] = None,
+        token: str | None = None,
         url: str = "https://api.cloud.quandela.com",
         **kwargs,
     ) -> "MerlinProcessor":
@@ -102,8 +107,8 @@ class MerlinProcessor:
         module: nn.Module,
         input: torch.Tensor,
         *,
-        shots: Optional[int] = None,
-        timeout: Optional[float] = None,
+        shots: int | None = None,
+        timeout: float | None = None,
     ) -> torch.Tensor:
         timeout = self.default_timeout if timeout is None else timeout
         fut = self.forward_async(module, input, shots=shots, timeout=timeout)
@@ -112,10 +117,8 @@ class MerlinProcessor:
         end = time.time() + float(timeout)
         while not fut.done():
             if time.time() >= end:
-                try:
+                with suppress(Exception):
                     fut.cancel_remote()
-                except Exception:
-                    pass
                 raise TimeoutError(f"Operation timed out after {timeout} seconds (remote cancel issued)")
             time.sleep(0.01)
         return fut.value()
@@ -125,8 +128,8 @@ class MerlinProcessor:
         module: nn.Module,
         input: torch.Tensor,
         *,
-        shots: Optional[int] = None,
-        timeout: Optional[float] = None,
+        shots: int | None = None,
+        timeout: float | None = None,
     ) -> Future:
         if module.training:
             raise RuntimeError("Remote quantum execution requires `.eval()` mode. Call `module.eval()` before forward.")
@@ -140,8 +143,8 @@ class MerlinProcessor:
         fut: Future = Future()
         state = {
             "cancel_requested": False,
-            "current_job": None,       # type: Optional[RemoteJob]
-            "current_status": None,    # type: Optional[Dict[str, Any]]
+            "current_job": None,       # type: RemoteJob | None
+            "current_status": None,    # type: dict[str, Any] | None
             "job_ids": [],             # list of job ids in order
         }
 
@@ -150,17 +153,15 @@ class MerlinProcessor:
             state["cancel_requested"] = True
             job = state.get("current_job")
             if job is not None:
-                try:
-                    cancel = getattr(job, "cancel", None)
-                    if callable(cancel):
+                cancel = getattr(job, "cancel", None)
+                if callable(cancel):
+                    with suppress(Exception):
                         cancel()
-                except Exception:
-                    pass
             if not fut.done():
                 try:
                     from concurrent.futures import CancelledError
-                except Exception:
-                    class CancelledError(RuntimeError):
+                except Exception:  # pragma: no cover - very unlikely
+                    class CancelledError(RuntimeError):  # type: ignore[override]
                         pass
                 fut.set_exception(CancelledError("Remote call was cancelled"))
 
@@ -188,23 +189,22 @@ class MerlinProcessor:
                         if not fut.done():
                             try:
                                 from concurrent.futures import CancelledError
-                            except Exception:
-                                class CancelledError(RuntimeError):
+                            except Exception:  # pragma: no cover
+                                class CancelledError(RuntimeError):  # type: ignore[override]
                                     pass
                             fut.set_exception(CancelledError("Remote call was cancelled"))
                         return
 
                     # Decide offload policy
                     should_offload = None
-                    if hasattr(layer, "should_offload") and callable(getattr(layer, "should_offload")):
+                    if hasattr(layer, "should_offload") and callable(layer.should_offload):
                         try:
                             should_offload = bool(layer.should_offload(self.remote_processor, shots))
-                        except Exception:
-                            # defensive: fall back to legacy rule if policy accessor raises
+                        except Exception:  # pragma: no cover - defensive
                             should_offload = None
 
                     if should_offload is None:
-                        # legacy fallback (export_config & not force_simulation)
+                        # default rule (export_config & not force_simulation)
                         should_offload = self._is_quantum_layer(layer)
 
                     if should_offload:
@@ -217,28 +217,24 @@ class MerlinProcessor:
                         sleep_ms = 50
                         while True:
                             if state["cancel_requested"]:
-                                try:
-                                    cancel = getattr(job, "cancel", None)
-                                    if callable(cancel):
+                                cancel = getattr(job, "cancel", None)
+                                if callable(cancel):
+                                    with suppress(Exception):
                                         cancel()
-                                except Exception:
-                                    pass
                                 if not fut.done():
                                     try:
                                         from concurrent.futures import CancelledError
-                                    except Exception:
-                                        class CancelledError(RuntimeError):
+                                    except Exception:  # pragma: no cover
+                                        class CancelledError(RuntimeError):  # type: ignore[override]
                                             pass
                                     fut.set_exception(CancelledError("Remote call was cancelled"))
                                 return
 
                             if deadline is not None and time.time() >= deadline:
-                                try:
-                                    cancel = getattr(job, "cancel", None)
-                                    if callable(cancel):
+                                cancel = getattr(job, "cancel", None)
+                                if callable(cancel):
+                                    with suppress(Exception):
                                         cancel()
-                                except Exception:
-                                    pass
                                 if not fut.done():
                                     fut.set_exception(TimeoutError("Remote call timed out (remote cancel issued)"))
                                 return
@@ -275,7 +271,7 @@ class MerlinProcessor:
                     y = x.to(device=original_device, dtype=original_dtype)
                     fut.set_result(y)
 
-            except BaseException as e:
+            except BaseException as e:  # pragma: no cover - surfaced to caller
                 if not fut.done():
                     fut.set_exception(e)
 
@@ -290,10 +286,10 @@ class MerlinProcessor:
         *,
         layer: Any,
         batch_size: int,
-        shots: Optional[int] = None,
-        device: Optional[torch.device] = None,
-        dtype: Optional[torch.dtype] = None,
-        timeout: Optional[float] = None,
+        shots: int | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+        timeout: float | None = None,
     ) -> Future:
         timeout = self.default_timeout if timeout is None else timeout
 
@@ -309,17 +305,15 @@ class MerlinProcessor:
             state["cancel_requested"] = True
             job = state.get("current_job")
             if job is not None:
-                try:
-                    cancel = getattr(job, "cancel", None)
-                    if callable(cancel):
+                cancel = getattr(job, "cancel", None)
+                if callable(cancel):
+                    with suppress(Exception):
                         cancel()
-                except Exception:
-                    pass
             if not fut.done():
                 try:
                     from concurrent.futures import CancelledError
-                except Exception:
-                    class CancelledError(RuntimeError):
+                except Exception:  # pragma: no cover
+                    class CancelledError(RuntimeError):  # type: ignore[override]
                         pass
                 fut.set_exception(CancelledError("Remote call was cancelled"))
 
@@ -347,28 +341,24 @@ class MerlinProcessor:
 
                 while True:
                     if state["cancel_requested"]:
-                        try:
-                            cancel = getattr(job, "cancel", None)
-                            if callable(cancel):
+                        cancel = getattr(job, "cancel", None)
+                        if callable(cancel):
+                            with suppress(Exception):
                                 cancel()
-                        except Exception:
-                            pass
                         if not fut.done():
                             try:
                                 from concurrent.futures import CancelledError
-                            except Exception:
-                                class CancelledError(RuntimeError):
+                            except Exception:  # pragma: no cover
+                                class CancelledError(RuntimeError):  # type: ignore[override]
                                     pass
                             fut.set_exception(CancelledError("Remote call was cancelled"))
                         return
 
                     if deadline is not None and time.time() >= deadline:
-                        try:
-                            cancel = getattr(job, "cancel", None)
-                            if callable(cancel):
+                        cancel = getattr(job, "cancel", None)
+                        if callable(cancel):
+                            with suppress(Exception):
                                 cancel()
-                        except Exception:
-                            pass
                         if not fut.done():
                             fut.set_exception(TimeoutError("Remote call timed out (remote cancel issued)"))
                         return
@@ -397,7 +387,7 @@ class MerlinProcessor:
 
                     time.sleep(sleep_ms / 1000.0)
                     sleep_ms = min(sleep_ms * 2, 400)
-            except BaseException as e:
+            except BaseException as e:  # pragma: no cover
                 if not fut.done():
                     fut.set_exception(e)
 
@@ -406,7 +396,7 @@ class MerlinProcessor:
 
     # ---------------- Perceval integration (per-layer) ----------------
 
-    def _submit_quantum_layer(self, layer: Any, input_data: torch.Tensor, shots: Optional[int]) -> RemoteJob:
+    def _submit_quantum_layer(self, layer: Any, input_data: torch.Tensor, shots: int | None) -> RemoteJob:
         if input_data.is_cuda:
             input_data = input_data.cpu()
 
@@ -423,7 +413,7 @@ class MerlinProcessor:
 
             layer_processor = RemoteProcessor(
                 name=self.remote_processor.name,
-                token=None
+                token=None,
             )
             layer_processor.set_circuit(config["circuit"])
 
@@ -489,10 +479,10 @@ class MerlinProcessor:
         for child in children:
             yield from self._iter_layers_in_order(child)
 
-    def _extract_input_params(self, config: dict) -> List[str]:
+    def _extract_input_params(self, config: dict) -> list[str]:
         circuit = config["circuit"]
         all_params = [p.name for p in circuit.get_parameters()]
-        input_param_names: List[str] = []
+        input_param_names: list[str] = []
 
         for input_spec in config.get("input_parameters", []):
             if input_spec == "px":
@@ -511,10 +501,10 @@ class MerlinProcessor:
         raw_results: dict,
         batch_size: int,
         layer: Any,
-        shots: Optional[int] = None,
+        shots: int | None = None,
     ) -> torch.Tensor:
         dist_size, state_to_index, valid_states = self._get_state_mapping(layer)
-        output_tensors: List[torch.Tensor] = []
+        output_tensors: list[torch.Tensor] = []
 
         if "results_list" in raw_results:
             results_list = raw_results["results_list"]
@@ -564,7 +554,7 @@ class MerlinProcessor:
 
         return torch.stack(output_tensors[:batch_size])
 
-    def _get_state_mapping(self, layer: Any) -> Tuple[int, Optional[Dict], Optional[set]]:
+    def _get_state_mapping(self, layer: Any) -> tuple[int, dict | None, set | None]:
         if hasattr(layer, "computation_process") and hasattr(layer.computation_process, "simulation_graph"):
             graph = layer.computation_process.simulation_graph
 
@@ -604,10 +594,10 @@ class MerlinProcessor:
 
         return dist_size, state_to_index, valid_states
 
-    def _generate_no_bunching_states(self, n_modes: int, n_photons: int) -> List[Tuple[int, ...]]:
-        valid_states: List[Tuple[int, ...]] = []
+    def _generate_no_bunching_states(self, n_modes: int, n_photons: int) -> list[tuple[int, ...]]:
+        valid_states: list[tuple[int, ...]] = []
 
-        def generate_states(current: List[int], remaining: int, start: int):
+        def generate_states(current: list[int], remaining: int, start: int):
             if remaining == 0:
                 valid_states.append(tuple(current))
                 return
@@ -657,20 +647,18 @@ class MerlinProcessor:
             info["performance"] = self.remote_processor.performance
         return info
 
-    def get_job_history(self) -> List[RemoteJob]:
+    def get_job_history(self) -> list[RemoteJob]:
         return self._job_history
 
     def clear_job_history(self) -> None:
         self._job_history = []
 
-    # ---------------- Legacy compatibility ----------------
-
     def _is_quantum_layer(self, module: Any) -> bool:
         """
-        Back-compat rule for offload decision if a layer doesn't provide `should_offload`:
-          - If module.force_simulation is True -> False (simulate locally).
+        Offload decision when a layer doesn't provide `should_offload`:
+          - If module.force_simulation is True -> simulate locally.
           - Else -> offload iff export_config exists (capability check).
         """
         if getattr(module, "force_simulation", False):
             return False
-        return hasattr(module, "export_config") and callable(getattr(module, "export_config"))
+        return hasattr(module, "export_config") and callable(module.export_config)

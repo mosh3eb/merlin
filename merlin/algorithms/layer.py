@@ -5,8 +5,8 @@ Main QuantumLayer implementation
 from __future__ import annotations
 
 import warnings
-from typing import Any, Optional, Dict, List
 from contextlib import contextmanager
+from typing import Any
 
 import perceval as pcvl
 import torch
@@ -109,8 +109,8 @@ class QuantumLayer(nn.Module):
         self._force_simulation: bool = False
 
         # optional experiment handle for export
-        self.experiment: Optional[pcvl.Experiment] = None
-        self.noise_model: Optional[Any] = None  # type: ignore[assignment]
+        self.experiment: pcvl.Experiment | None = None
+        self.noise_model: Any | None = None  # type: ignore[assignment]
 
         # exclusivity of circuit/builder/experiment
         if sum(x is not None for x in (circuit, builder, experiment)) != 1:
@@ -172,8 +172,8 @@ class QuantumLayer(nn.Module):
         self.circuit = resolved_circuit
 
         # persist prefixes for export/introspection
-        self.trainable_parameters: List[str] = list(trainable_parameters)
-        self.input_parameters: List[str] = list(input_parameters)
+        self.trainable_parameters: list[str] = list(trainable_parameters)
+        self.input_parameters: list[str] = list(input_parameters)
 
         self._init_from_custom_circuit(
             resolved_circuit,
@@ -189,7 +189,7 @@ class QuantumLayer(nn.Module):
         self.autodiff_process = AutoDiffProcess(sampling_method)
 
         # export snapshot cache
-        self._current_params: Dict[str, Any] = {}
+        self._current_params: dict[str, Any] = {}
 
     # -------------------- Execution policy & helpers --------------------
 
@@ -218,7 +218,7 @@ class QuantumLayer(nn.Module):
     # Offload capability & policy (queried by MerlinProcessor)
     def supports_offload(self) -> bool:
         """Return True if this layer is technically offloadable."""
-        return hasattr(self, "export_config") and callable(getattr(self, "export_config"))
+        return hasattr(self, "export_config") and callable(self.export_config)
 
     def should_offload(self, _processor=None, _shots=None) -> bool:
         """Return True if this layer should be offloaded under current policy."""
@@ -582,7 +582,7 @@ class QuantumLayer(nn.Module):
             exported_circuit = self.circuit.copy() if hasattr(self.circuit, "copy") else self.circuit
 
         spec_mappings = getattr(self.computation_process.converter, "spec_mappings", {})
-        torch_params: Dict[str, torch.Tensor] = {
+        torch_params: dict[str, torch.Tensor] = {
             n: p for n, p in self.named_parameters() if p.requires_grad
         }
 
@@ -615,7 +615,7 @@ class QuantumLayer(nn.Module):
         }
         return config
 
-    def get_experiment(self) -> Optional[pcvl.Experiment]:
+    def get_experiment(self) -> pcvl.Experiment | None:
         return self.experiment
 
     # ============================================================================
