@@ -31,7 +31,7 @@ into PyTorch neural networks with automatic differentiation support.
 from .algorithms.kernels import FeatureMap, FidelityKernel
 from .algorithms.layer import QuantumLayer
 from .algorithms.loss import NKernelAlignment
-from .builder.ansatz import Ansatz, AnsatzFactory
+from .builder.circuit_builder import CircuitBuilder
 
 # Essential enums
 # Advanced components (for power users)
@@ -58,8 +58,6 @@ __all__ = [
     # Core classes (most common usage)
     "QuantumLayer",
     "PhotonicBackend",
-    "Ansatz",
-    "AnsatzFactory",
     # Configuration enums
     "CircuitType",
     "StatePattern",
@@ -78,4 +76,5 @@ __all__ = [
     "NKernelAlignment",
     "FeatureMap",
     "FidelityKernel",
+    "CircuitBuilder",
 ]
