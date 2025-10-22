@@ -260,10 +260,9 @@ class TestQuantumLayer:
             if cfg["grouping_policy"] is None:
                 layer = ML.QuantumLayer(
                     input_size=2,
-                    output_size=4,
                     input_state=[1, 0, 1, 0],
                     builder=builder,
-                    output_mapping_strategy=cfg["strategy"],
+                    measurement_strategy=cfg["measurement_strategy"],
                 )
 
                 model = torch.nn.Sequential(
@@ -278,10 +277,9 @@ class TestQuantumLayer:
             else:
                 layer = ML.QuantumLayer(
                     input_size=2,
-                    output_size=4,
                     input_state=[1, 0, 1, 0],
                     builder=builder,
-                    output_mapping_strategy=cfg["strategy"],
+                    measurement_strategy=cfg["measurement_strategy"],
                 )
 
                 model = torch.nn.Sequential(
@@ -350,7 +348,7 @@ class TestQuantumLayer:
             )
 
         with pytest.raises(TypeError):
-            ML.QuantumLayer.simple(input_size=0, n_params=0)
+            ML.QuantumLayer.simple(n_params=0)
 
     def test_subset_combinations_respected(self):
         """Ensure subset combinations expose more parameters without breaking input size checks."""

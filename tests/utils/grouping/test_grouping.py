@@ -256,17 +256,18 @@ class TestModGrouping:
 
 def test_lexgrouping_mapping_integration():
     """Test lexicographical grouping integration with QuantumLayer."""
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
-    )
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
+    builder = ML.CircuitBuilder(n_modes=4)
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(modes=[0, 1], name="input")
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
         input_size=2,
+        n_photons=2,
+        builder=builder,
         measurement_strategy=ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
     )
-
-    layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
     model = nn.Sequential(layer, LexGrouping(layer.output_size, 4))
 
     x = torch.rand(3, 2)
@@ -278,17 +279,18 @@ def test_lexgrouping_mapping_integration():
 
 def test_modgrouping_mapping_integration():
     """Test modulo grouping integration with QuantumLayer."""
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
-    )
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
+    builder = ML.CircuitBuilder(n_modes=4)
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(modes=[0, 1], name="input")
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
         input_size=2,
+        n_photons=2,
+        builder=builder,
         measurement_strategy=ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
     )
-
-    layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
     model = nn.Sequential(layer, ModGrouping(layer.output_size, 3))
 
     x = torch.rand(4, 2)
@@ -300,20 +302,21 @@ def test_modgrouping_mapping_integration():
 
 def test_mapping_gradient_flow():
     """Test gradient flow through different mapping strategies."""
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=6, n_photons=2
-    )
+
+    builder = ML.CircuitBuilder(n_modes=6)
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(modes=[0, 1], name="input")
+    builder.add_entangling_layer(trainable=True, name="U2")
 
     strategies = [LexGrouping, ModGrouping]
 
     for grouping_policy in strategies:
-        ansatz = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment,
+        layer = ML.QuantumLayer(
             input_size=2,
+            n_photons=2,
+            builder=builder,
             measurement_strategy=ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
         )
-
-        layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
         model = torch.nn.Sequential(layer, grouping_policy(layer.output_size, 3))
 
         x = torch.rand(2, 2, requires_grad=True)
@@ -333,25 +336,32 @@ def test_mapping_gradient_flow():
 
 def test_mapping_output_bounds():
     """Test that different mappings produce reasonable output bounds."""
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
-    )
 
-    x = torch.rand(5, 2)
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
-        input_size=2,
-        measurement_strategy=ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
-    )
+    builder = ML.CircuitBuilder(n_modes=4)
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(modes=[0, 1], name="input")
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    x = torch.rand(4, 2)
 
     # LEXGROUPING mapping - should preserve probability mass
-    layer_lex = ML.QuantumLayer(input_size=2, ansatz=ansatz)
+    layer_lex = ML.QuantumLayer(
+        input_size=2,
+        n_photons=2,
+        builder=builder,
+        measurement_strategy=ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
+    )
     model_lex = nn.Sequential(layer_lex, LexGrouping(layer_lex.output_size, 3))
     output_lex = model_lex(x)
     assert torch.all(output_lex >= 0)  # Should be non-negative
 
     # MODGROUPING mapping - should preserve probability mass
-    layer_mod = ML.QuantumLayer(input_size=2, ansatz=ansatz)
+    layer_mod = ML.QuantumLayer(
+        input_size=2,
+        n_photons=2,
+        builder=builder,
+        measurement_strategy=ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
+    )
     model_mod = nn.Sequential(layer_mod, ModGrouping(layer_mod.output_size, 3))
     output_mod = model_mod(x)
     assert torch.all(output_mod >= 0)  # Should be non-negative
@@ -360,18 +370,18 @@ def test_mapping_output_bounds():
 def test_large_dimension_mappings():
     """Test mappings with larger dimensions."""
     # Create a larger quantum system
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=6, n_photons=3
-    )
 
-    # Test with larger input/output dimensions
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
+    builder = ML.CircuitBuilder(n_modes=6)
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(modes=[0, 1, 2, 3], name="input")
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
         input_size=4,
+        n_photons=3,
+        builder=builder,
         measurement_strategy=ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
     )
-
-    layer = ML.QuantumLayer(input_size=4, ansatz=ansatz)
     model = nn.Sequential(layer, LexGrouping(layer.output_size, 8))
 
     x = torch.rand(10, 4)
@@ -384,17 +394,18 @@ def test_large_dimension_mappings():
 
 def test_mapping_determinism():
     """Test that mappings are deterministic."""
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
-    )
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
+    builder = ML.CircuitBuilder(n_modes=4)
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(modes=[0, 1], name="input")
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
         input_size=2,
+        n_photons=2,
+        builder=builder,
         measurement_strategy=ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
     )
-
-    layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
     model = nn.Sequential(layer, ModGrouping(layer.output_size, 3))
 
     x = torch.rand(3, 2)

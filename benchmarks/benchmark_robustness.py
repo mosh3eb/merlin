@@ -249,10 +249,8 @@ def test_memory_efficiency_benchmark(benchmark, config: dict, device: str):
 
     layer = ML.QuantumLayer(
         input_size=config["input_size"],
-        output_size=config["output_size"],
         n_photons=config["n_photons"],
         builder=builder,
-        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
     )
 
     model = nn.Sequential(layer, nn.Linear(layer.output_size, config["output_size"]))

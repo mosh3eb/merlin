@@ -78,17 +78,19 @@ class TestOutputMappingIntegration:
 
     def test_linear_mapping_integration(self):
         """Test linear mapping integration with QuantumLayer."""
-        experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
-        )
 
-        ansatz = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment,
+        builder = ML.CircuitBuilder(n_modes=4)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        layer = ML.QuantumLayer(
             input_size=2,
+            n_photons=2,
+            builder=builder,
             measurement_strategy=ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
         )
 
-        layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
         model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 3))
 
         x = torch.rand(5, 2)
@@ -99,9 +101,6 @@ class TestOutputMappingIntegration:
 
     def test_mapping_gradient_flow(self):
         """Test gradient flow through different mapping strategies."""
-        experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=6, n_photons=2
-        )
 
         strategies = [
             ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
@@ -109,14 +108,19 @@ class TestOutputMappingIntegration:
             ML.MeasurementStrategy.AMPLITUDEVECTOR,
         ]
 
+        builder = ML.CircuitBuilder(n_modes=6)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
+
         for strategy in strategies:
-            ansatz = ML.AnsatzFactory.create(
-                PhotonicBackend=experiment,
+            layer = ML.QuantumLayer(
                 input_size=2,
+                n_photons=2,
+                builder=builder,
                 measurement_strategy=strategy,
             )
 
-            layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
             model = (
                 torch.nn.Sequential(
                     layer, torch.nn.Linear(layer.output_size, 3, dtype=torch.float32)
@@ -146,38 +150,39 @@ class TestOutputMappingIntegration:
 
     def test_mapping_output_bounds(self):
         """Test that different mappings produce reasonable output bounds."""
-        experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
-        )
 
         x = torch.rand(5, 2)
 
-        # LINEAR mapping - can have any range
-        ansatz_linear = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment,
+        builder = ML.CircuitBuilder(n_modes=4)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        layer = ML.QuantumLayer(
             input_size=2,
+            n_photons=2,
+            builder=builder,
             measurement_strategy=ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
         )
-        layer = ML.QuantumLayer(input_size=2, ansatz=ansatz_linear)
         model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 3))
         output_linear = model(x)
         assert torch.all(torch.isfinite(output_linear))
 
     def test_dtype_consistency_in_mappings(self):
         """Test that output mappings respect input dtypes."""
-        experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=4, n_photons=2
-        )
+        builder = ML.CircuitBuilder(n_modes=4)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
 
         for dtype in [torch.float32, torch.float64]:
-            ansatz = ML.AnsatzFactory.create(
-                PhotonicBackend=experiment,
+            layer = ML.QuantumLayer(
                 input_size=2,
+                n_photons=2,
+                builder=builder,
                 measurement_strategy=ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
                 dtype=dtype,
             )
-
-            layer = ML.QuantumLayer(input_size=2, ansatz=ansatz, dtype=dtype)
             model = torch.nn.Sequential(
                 layer, torch.nn.Linear(layer.output_size, 3, dtype=dtype)
             )
@@ -191,17 +196,17 @@ class TestOutputMappingIntegration:
 
     def test_edge_case_single_dimension(self):
         """Test edge case with single input/output dimensions."""
-        experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL, n_modes=3, n_photons=1
-        )
+        builder = ML.CircuitBuilder(n_modes=3)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
 
-        ansatz = ML.AnsatzFactory.create(
-            PhotonicBackend=experiment,
+        layer = ML.QuantumLayer(
             input_size=1,
+            n_photons=1,
+            builder=builder,
             measurement_strategy=ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
         )
-
-        layer = ML.QuantumLayer(input_size=1, ansatz=ansatz)
         model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 1))
 
         x = torch.rand(5, 1)

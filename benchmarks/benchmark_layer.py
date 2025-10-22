@@ -286,7 +286,7 @@ def test_output_mapping_strategies_benchmark(benchmark, config: dict, device: st
                     input_size=config["input_size"],
                     n_photons=config["n_photons"],
                     builder=builder,
-                    output_mapping_strategy=strategy,
+                    measurement_strategy=strategy["measurement_strategy"],
                 )
                 model = torch.nn.Sequential(
                     layer, torch.nn.Linear(layer.output_size, config["output_size"])
@@ -299,7 +299,7 @@ def test_output_mapping_strategies_benchmark(benchmark, config: dict, device: st
                     input_size=config["input_size"],
                     n_photons=config["n_photons"],
                     builder=builder,
-                    output_mapping_strategy=strategy,
+                    measurement_strategy=strategy["measurement_strategy"],
                 )
                 model = torch.nn.Sequential(
                     layer,
