@@ -217,8 +217,8 @@ def test_local_vs_remote_consistency():
 
     # Local execution
     print("Testing local execution...")
-    local_proc = MerlinProcessor(processor=None)  # Local mode
-    local_output = local_proc.forward(quantum_layer, X_test, shots=None)
+
+    local_output = quantum_layer.forward(X_test,shots=None)
     print(f"  Local output shape: {local_output.shape}")
 
     # Remote execution
@@ -380,14 +380,13 @@ def test_batch_output_consistency():
     single_input = torch.randn(1, 2)
 
     # Test with local processor
-    local_proc = MerlinProcessor(processor=None)
 
-    # Single sample
-    output_single = local_proc.forward(quantum_layer, single_input, shots=None)
+    output_single = quantum_layer.forward(single_input, shots=None)
 
     # Batch with repeated input
     batch_input = single_input.repeat(5, 1)
-    output_batch = local_proc.forward(quantum_layer, batch_input, shots=None)
+
+    output_batch = quantum_layer.forward(batch_input, shots=None)
 
     print(f"Single input shape: {output_single.shape}")
     print(f"Batch output shape: {output_batch.shape}")
@@ -406,7 +405,8 @@ def test_batch_output_consistency():
     print("\nTesting different batch sizes:")
     for bs in batch_sizes:
         X = torch.randn(bs, 2)
-        output = local_proc.forward(quantum_layer, X, shots=None)
+
+        output = quantum_layer.forward(X, shots=None)
         print(f"  Batch size {bs:2d}: shape {output.shape}")
         assert output.shape == (bs, expected_dim)
 
