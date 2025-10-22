@@ -21,12 +21,15 @@ Produces the probability of observing each Fock state. If the simulation returns
 
 .. code-block:: python
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
+    builder = CircuitBuilder(n_modes=5)
+    # Add whatever to your builder
+
+    quantum_layer = QuantumLayer(.
         input_size=4,
-        measurement_strategy=ML.MeasurementStrategy.MEASUREMENT_DISTRIBUTION,
+        builder=builder,
+        n_photons=2,
+        measurement_strategy=MeasurementStrategy.MEASUREMENT_DISTRIBUTION,  # Optional because this is its default value
     )
-    quantum_layer = ML.QuantumLayer(input_size=4, ansatz=ansatz)
 
 The underlying PyTorch module is :class:`~merlin.measurement.mappers.MeasurementDistribution`.
 Characteristics:
@@ -43,16 +46,18 @@ Extensions:
 MODE_EXPECTATIONS
 ----------------
 
-Marginalises the Fock distribution to per-mode statistics. Provide the list of accessible Fock states (``keys``) to initialise the mapper once, then feed batches of amplitudes or probabilities.
+Marginalises the Fock distribution to per-mode expectation values.
 
 .. code-block:: python
 
-    keys = [(1, 0, 1, 0), (0, 2, 0, 0), (0, 1, 0, 1)]
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
-        input_size=2,
-        measurement_strategy=ML.MeasurementStrategy.MODE_EXPECTATIONS,
-        no_bunching=True,  # Return per-mode “probability of at least one photon”
+    builder = CircuitBuilder(n_modes=5)
+    # Add whatever to your builder
+
+    quantum_layer = QuantumLayer(.
+        input_size=4,
+        builder=builder,
+        n_photons=2,
+        measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
     )
 
 Use :class:`~merlin.measurement.mappers.ModeExpectations` when working directly with the mapper.
@@ -60,7 +65,7 @@ Key properties:
 
 - ``no_bunching=True`` (default) reports occupancy probabilities per mode.
 - ``no_bunching=False`` returns the expected photon count per mode.
-- Output size always equals the number of modes implied by ``keys``.
+- Output size always equals the number of modes.
 
 AMPLITUDE_VECTOR
 ---------------
@@ -69,17 +74,21 @@ Returns the complex amplitudes directly. This strategy is only meaningful in sim
 
 .. code-block:: python
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
-        input_size=3,
-        measurement_strategy=ML.MeasurementStrategy.AMPLITUDE_VECTOR,
+    builder = CircuitBuilder(n_modes=5)
+    # Add whatever to your builder
+
+    quantum_layer = QuantumLayer(.
+        input_size=4,
+        builder=builder,
+        n_photons=2,
+        measurement_strategy=MeasurementStrategy.AMPLITUDE_VECTOR,
     )
 
 Use this strategy for debugging, algorithmic research, or when a classical routine manipulates complex amplitudes directly. The output is a complex tensor normalised to unit norm (within numerical precision).
 
 The helper module is :class:`~merlin.measurement.mappers.AmplitudeVector`.
 
-CUSTOMOBSERVABLE
+CUSTOM_OBSERVABLE
 ----------------
 
 Placeholder for future support of user-defined observables. Instantiating the strategy currently returns a stub module that echoes its input.
@@ -96,10 +105,9 @@ Groups consecutive values into equally sized buckets. Padding with zeros ensures
 
 .. code-block:: python
 
-    quantum = ML.QuantumLayer(input_size=4, ansatz=ansatz)
     grouped = nn.Sequential(
-        quantum,
-        ML.LexGrouping(input_size=quantum.output_size, output_size=8),
+        quantum_layer,
+        ML.LexGrouping(input_size=quantum_layer.output_size, output_size=8),
     )
 
 Useful when the order of Fock states carries meaning (e.g., lexicographic encoding). The module preserves probability mass and supports batched inputs.
@@ -119,8 +127,8 @@ Sums values sharing the same index modulo ``output_size``. When ``output_size`` 
 .. code-block:: python
 
     grouped = nn.Sequential(
-        quantum,
-        ML.ModGrouping(input_size=quantum.output_size, output_size=6),
+        quantum_layer,
+        ML.ModGrouping(input_size=quantum_layer.output_size, output_size=8),
     )
 
 This is effective for cyclic structures (e.g., periodic sensors) where indices wrapping around the distribution should be combined.
@@ -139,19 +147,15 @@ Chaining Measurement and Grouping
 
     import torch.nn as nn
 
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-        n_modes=4,
-        n_photons=2,
-    )
+    builder = CircuitBuilder(n_modes=4)
+    # Add whatever to your builder
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
+    quantum_layer = QuantumLayer(.
         input_size=2,
-        measurement_strategy=ML.MeasurementStrategy.MEASUREMENT_DISTRIBUTION,
+        builder=builder,
+        n_photons=2,
+        measurement_strategy=MeasurementStrategy.MEASUREMENT_DISTRIBUTION,
     )
-
-    quantum_layer = ML.QuantumLayer(input_size=2, ansatz=ansatz)
 
     quantum_pipeline = nn.Sequential(
         quantum_layer,
