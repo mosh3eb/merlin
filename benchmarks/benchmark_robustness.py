@@ -101,18 +101,20 @@ def test_large_batch_robustness_benchmark(
     benchmark, config: dict, batch_size: int, device: str
 ):
     """Benchmark robustness with large batch sizes."""
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-        n_modes=config["n_modes"],
-        n_photons=config["n_photons"],
-    )
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
+    builder = ML.CircuitBuilder(n_modes=config["n_modes"])
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(
+        modes=list(range(config["input_size"])), name="input", subset_combinations=True
+    )
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
         input_size=config["input_size"],
+        n_photons=config["n_photons"],
+        builder=builder,
     )
 
-    layer = ML.QuantumLayer(input_size=config["input_size"], ansatz=ansatz)
     model = nn.Sequential(layer, nn.Linear(layer.output_size, config["output_size"]))
 
     # Large batch for stress testing
@@ -135,18 +137,20 @@ def test_large_batch_robustness_benchmark(
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
 def test_extreme_values_robustness_benchmark(benchmark, config: dict, device: str):
     """Benchmark robustness with extreme input values."""
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.SERIES,
-        n_modes=config["n_modes"],
-        n_photons=config["n_photons"],
-    )
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
+    builder = ML.CircuitBuilder(n_modes=config["n_modes"])
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(
+        modes=list(range(config["input_size"])), name="input", subset_combinations=True
+    )
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
         input_size=config["input_size"],
+        n_photons=config["n_photons"],
+        builder=builder,
     )
 
-    layer = ML.QuantumLayer(input_size=config["input_size"], ansatz=ansatz)
     model = nn.Sequential(layer, nn.Linear(layer.output_size, config["output_size"]))
 
     def test_extreme_inputs():
@@ -185,18 +189,20 @@ def test_extreme_values_robustness_benchmark(benchmark, config: dict, device: st
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
 def test_numerical_stability_benchmark(benchmark, config: dict, device: str):
     """Benchmark numerical stability over multiple iterations."""
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL,
-        n_modes=config["n_modes"],
-        n_photons=config["n_photons"],
-    )
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
+    builder = ML.CircuitBuilder(n_modes=config["n_modes"])
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(
+        modes=list(range(config["input_size"])), name="input", subset_combinations=True
+    )
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
         input_size=config["input_size"],
+        n_photons=config["n_photons"],
+        builder=builder,
     )
 
-    layer = ML.QuantumLayer(input_size=config["input_size"], ansatz=ansatz)
     model = nn.Sequential(layer, nn.Linear(layer.output_size, config["output_size"]))
 
     def stability_test():
@@ -233,18 +239,22 @@ def test_numerical_stability_benchmark(benchmark, config: dict, device: str):
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
 def test_memory_efficiency_benchmark(benchmark, config: dict, device: str):
     """Benchmark memory efficiency over many iterations."""
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-        n_modes=config["n_modes"],
-        n_photons=config["n_photons"],
-    )
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
+    builder = ML.CircuitBuilder(n_modes=config["n_modes"])
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(
+        modes=list(range(config["input_size"])), name="input", subset_combinations=True
+    )
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
         input_size=config["input_size"],
+        output_size=config["output_size"],
+        n_photons=config["n_photons"],
+        builder=builder,
+        output_mapping_strategy=ML.OutputMappingStrategy.GROUPING,
     )
 
-    layer = ML.QuantumLayer(input_size=config["input_size"], ansatz=ansatz)
     model = nn.Sequential(layer, nn.Linear(layer.output_size, config["output_size"]))
 
     def memory_efficiency_test():
@@ -288,16 +298,19 @@ def test_hybrid_model_stress_benchmark(benchmark, config: dict, device: str):
             )
 
             # Quantum layer
-            experiment = ML.PhotonicBackend(
-                circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-                n_modes=n_modes,
-                n_photons=n_photons,
+            builder = ML.CircuitBuilder(n_modes=n_modes)
+            builder.add_entangling_layer(trainable=True, name="U1")
+            builder.add_angle_encoding(
+                modes=list(range(input_size)), name="input", subset_combinations=True
             )
-            ansatz = ML.AnsatzFactory.create(
-                PhotonicBackend=experiment,
+            builder.add_entangling_layer(trainable=True, name="U2")
+
+            self.quantum = ML.QuantumLayer(
                 input_size=input_size,
+                n_photons=n_photons,
+                builder=builder,
             )
-            self.quantum = ML.QuantumLayer(input_size=input_size, ansatz=ansatz)
+
             self.linear = nn.Linear(self.quantum.output_size, output_size)
 
             # Classical postprocessing
@@ -369,13 +382,19 @@ class TestRobustnessPerformanceRegression:
 
     def test_large_batch_performance_bounds(self):
         """Test that large batch processing stays within reasonable time bounds."""
-        experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=8, n_photons=3
+        builder = ML.CircuitBuilder(n_modes=8)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(
+            modes=list(range(6)), name="input", subset_combinations=True
+        )
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        layer = ML.QuantumLayer(
+            input_size=6,
+            n_photons=3,
+            builder=builder,
         )
 
-        ansatz = ML.AnsatzFactory.create(PhotonicBackend=experiment, input_size=6)
-
-        layer = ML.QuantumLayer(input_size=6, ansatz=ansatz)
         model = nn.Sequential(layer, nn.Linear(layer.output_size, 15))
 
         # Large batch stress test
@@ -398,13 +417,20 @@ class TestRobustnessPerformanceRegression:
 
     def test_extreme_values_performance_bounds(self):
         """Test that extreme value handling stays within reasonable time bounds."""
-        experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.SERIES, n_modes=6, n_photons=2
+
+        builder = ML.CircuitBuilder(n_modes=6)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(
+            modes=list(range(4)), name="input", subset_combinations=True
+        )
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        layer = ML.QuantumLayer(
+            input_size=4,
+            n_photons=2,
+            builder=builder,
         )
 
-        ansatz = ML.AnsatzFactory.create(PhotonicBackend=experiment, input_size=4)
-
-        layer = ML.QuantumLayer(input_size=4, ansatz=ansatz)
         model = nn.Sequential(layer, nn.Linear(layer.output_size, 8))
 
         # Test extreme values
@@ -460,21 +486,26 @@ def save_benchmark_results(
 if __name__ == "__main__":
     print("Running robustness benchmarks...")
 
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=6, n_photons=2
+    builder = ML.CircuitBuilder(n_modes=6)
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(
+        modes=list(range(4)), name="input", subset_combinations=True
+    )
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
+        input_size=4,
+        n_photons=2,
+        builder=builder,
     )
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment, input_size=4, output_size=10
-    )
-
-    layer = ML.QuantumLayer(input_size=4, ansatz=ansatz)
+    model = nn.Sequential(layer, nn.Linear(layer.output_size, 10))
 
     print("Testing large batch robustness...")
     large_batch_size = 128
     x = torch.rand(large_batch_size, 4)
     start = time.time()
-    output = layer(x)
+    output = model(x)
     batch_time = time.time() - start
     print(f"Large batch time: {batch_time:.4f}s")
 

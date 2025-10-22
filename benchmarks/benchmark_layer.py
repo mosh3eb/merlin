@@ -86,17 +86,20 @@ benchmark_runner = LayerBenchmarkRunner()
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
 def test_quantum_layer_forward_benchmark(benchmark, config: dict, device: str):
     """Benchmark quantum layer forward pass."""
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-        n_modes=config["n_modes"],
+
+    builder = ML.CircuitBuilder(n_modes=config["n_modes"])
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(
+        modes=list(range(config["input_size"])), name="input", subset_combinations=True
+    )
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
+        input_size=config["input_size"],
         n_photons=config["n_photons"],
+        builder=builder,
     )
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment, input_size=config["input_size"]
-    )
-
-    layer = ML.QuantumLayer(input_size=config["input_size"], ansatz=ansatz)
     model = torch.nn.Sequential(
         layer, torch.nn.Linear(layer.output_size, config["output_size"])
     )
@@ -123,17 +126,18 @@ def test_batched_computation_benchmark(
     benchmark, config: dict, batch_size: int, device: str
 ):
     """Benchmark batched quantum layer computation."""
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.SERIES,
-        n_modes=config["n_modes"],
+
+    builder = ML.CircuitBuilder(n_modes=config["n_modes"])
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(modes=list(range(config["input_size"])), name="input")
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
+        input_size=config["input_size"],
         n_photons=config["n_photons"],
+        builder=builder,
     )
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment, input_size=config["input_size"]
-    )
-
-    layer = ML.QuantumLayer(input_size=config["input_size"], ansatz=ansatz)
     model = torch.nn.Sequential(
         layer, torch.nn.Linear(layer.output_size, config["output_size"])
     )
@@ -155,19 +159,20 @@ def test_batched_computation_benchmark(
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
 def test_gradient_computation_benchmark(benchmark, config: dict, device: str):
     """Benchmark gradient computation through quantum layer."""
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-        n_modes=config["n_modes"],
-        n_photons=config["n_photons"],
-        use_bandwidth_tuning=True,
-    )
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment,
+    builder = ML.CircuitBuilder(n_modes=config["n_modes"])
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(
+        modes=list(range(config["input_size"])), name="input", subset_combinations=True
+    )
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
         input_size=config["input_size"],
+        n_photons=config["n_photons"],
+        builder=builder,
     )
 
-    layer = ML.QuantumLayer(input_size=config["input_size"], ansatz=ansatz)
     model = torch.nn.Sequential(
         layer, torch.nn.Linear(layer.output_size, config["output_size"])
     )
@@ -201,28 +206,27 @@ def test_gradient_computation_benchmark(benchmark, config: dict, device: str):
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
 def test_multiple_circuit_types_benchmark(benchmark, config: dict, device: str):
     """Benchmark different circuit types for quantum layers."""
-    circuit_types = [
-        ML.CircuitType.PARALLEL_COLUMNS,
-        ML.CircuitType.SERIES,
-        ML.CircuitType.PARALLEL,
-    ]
+    subset_combinations = [True, False]
 
     def test_all_circuit_types():
         results = []
 
-        for circuit_type in circuit_types:
-            experiment = ML.PhotonicBackend(
-                circuit_type=circuit_type,
-                n_modes=config["n_modes"],
-                n_photons=config["n_photons"],
+        for subset in subset_combinations:
+            builder = ML.CircuitBuilder(n_modes=config["n_modes"])
+            builder.add_entangling_layer(trainable=True, name="U1")
+            builder.add_angle_encoding(
+                modes=list(range(config["input_size"])),
+                name="input",
+                subset_combinations=subset,
             )
+            builder.add_entangling_layer(trainable=True, name="U2")
 
-            ansatz = ML.AnsatzFactory.create(
-                PhotonicBackend=experiment,
+            layer = ML.QuantumLayer(
                 input_size=config["input_size"],
+                n_photons=config["n_photons"],
+                builder=builder,
             )
 
-            layer = ML.QuantumLayer(input_size=config["input_size"], ansatz=ansatz)
             model = torch.nn.Sequential(
                 layer, torch.nn.Linear(layer.output_size, config["output_size"])
             )
@@ -237,7 +241,7 @@ def test_multiple_circuit_types_benchmark(benchmark, config: dict, device: str):
     results = benchmark(test_all_circuit_types)
 
     # Validate all results
-    assert len(results) == len(circuit_types)
+    assert len(results) == len(subset_combinations)
     for result in results:
         expected_shape = (16, config["output_size"])
         assert benchmark_runner.validate_layer_output_correctness(
@@ -249,7 +253,7 @@ def test_multiple_circuit_types_benchmark(benchmark, config: dict, device: str):
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
 def test_output_mapping_strategies_benchmark(benchmark, config: dict, device: str):
     """Benchmark different output mapping strategies."""
-    configs = [
+    strategies = [
         {
             "measurement_strategy": ML.MeasurementStrategy.MEASUREMENTDISTRIBUTION,
             "grouping_policy": None,
@@ -264,22 +268,26 @@ def test_output_mapping_strategies_benchmark(benchmark, config: dict, device: st
         },
     ]
 
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-        n_modes=config["n_modes"],
-        n_photons=config["n_photons"],
-    )
-
     def test_all_strategies():
         results = []
-        for cfg in configs:
-            if cfg["grouping_policy"] is None:
-                ansatz = ML.AnsatzFactory.create(
-                    PhotonicBackend=experiment,
+
+        for strategy in strategies:
+            builder = ML.CircuitBuilder(n_modes=config["n_modes"])
+            builder.add_entangling_layer(trainable=True, name="U1")
+            builder.add_angle_encoding(
+                modes=list(range(config["input_size"])),
+                name="input",
+                subset_combinations=True,
+            )
+            builder.add_entangling_layer(trainable=True, name="U2")
+
+            if strategy["grouping_policy"] is None:
+                layer = ML.QuantumLayer(
                     input_size=config["input_size"],
-                    measurement_strategy=cfg["measurement_strategy"],
+                    n_photons=config["n_photons"],
+                    builder=builder,
+                    output_mapping_strategy=strategy,
                 )
-                layer = ML.QuantumLayer(input_size=config["input_size"], ansatz=ansatz)
                 model = torch.nn.Sequential(
                     layer, torch.nn.Linear(layer.output_size, config["output_size"])
                 )
@@ -287,26 +295,29 @@ def test_output_mapping_strategies_benchmark(benchmark, config: dict, device: st
                 output = model(x)
                 results.append(output)
             else:
-                ansatz = ML.AnsatzFactory.create(
-                    PhotonicBackend=experiment,
+                layer = ML.QuantumLayer(
                     input_size=config["input_size"],
-                    measurement_strategy=cfg["measurement_strategy"],
+                    n_photons=config["n_photons"],
+                    builder=builder,
+                    output_mapping_strategy=strategy,
                 )
-                layer = ML.QuantumLayer(input_size=config["input_size"], ansatz=ansatz)
                 model = torch.nn.Sequential(
                     layer,
-                    cfg["grouping_policy"](layer.output_size, config["output_size"]),
+                    strategy["grouping_policy"](
+                        layer.output_size, config["output_size"]
+                    ),
                 )
                 x = torch.rand(16, config["input_size"])
                 output = model(x)
                 results.append(output)
+
         return results
 
     # Run benchmark
     results = benchmark(test_all_strategies)
 
     # Validate all results
-    assert len(results) == len(configs)
+    assert len(results) == len(strategies)
     for result in results:
         expected_shape = (16, config["output_size"])
         assert benchmark_runner.validate_layer_output_correctness(
@@ -320,13 +331,20 @@ class TestLayerPerformanceRegression:
 
     def test_forward_pass_performance_bounds(self):
         """Test that forward pass stays within reasonable time bounds."""
-        experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=8, n_photons=3
+
+        builder = ML.CircuitBuilder(n_modes=8)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(
+            modes=list(range(6)), name="input", subset_combinations=True
+        )
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        layer = ML.QuantumLayer(
+            input_size=6,
+            n_photons=3,
+            builder=builder,
         )
 
-        ansatz = ML.AnsatzFactory.create(PhotonicBackend=experiment, input_size=6)
-
-        layer = ML.QuantumLayer(input_size=6, ansatz=ansatz)
         model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 10))
 
         x = torch.rand(32, 6)
@@ -343,16 +361,20 @@ class TestLayerPerformanceRegression:
 
     def test_gradient_computation_performance_bounds(self):
         """Test that gradient computation stays within reasonable time bounds."""
-        experiment = ML.PhotonicBackend(
-            circuit_type=ML.CircuitType.PARALLEL_COLUMNS,
-            n_modes=6,
+
+        builder = ML.CircuitBuilder(n_modes=6)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(
+            modes=list(range(4)), name="input", subset_combinations=True
+        )
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        layer = ML.QuantumLayer(
+            input_size=4,
             n_photons=2,
-            use_bandwidth_tuning=True,
+            builder=builder,
         )
 
-        ansatz = ML.AnsatzFactory.create(PhotonicBackend=experiment, input_size=4)
-
-        layer = ML.QuantumLayer(input_size=4, ansatz=ansatz)
         model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 6))
 
         x = torch.rand(16, 4, requires_grad=True)
@@ -403,20 +425,25 @@ def save_benchmark_results(
 if __name__ == "__main__":
     print("Running quantum layer benchmarks...")
 
-    experiment = ML.PhotonicBackend(
-        circuit_type=ML.CircuitType.PARALLEL_COLUMNS, n_modes=6, n_photons=3
+    builder = ML.CircuitBuilder(n_modes=6)
+    builder.add_entangling_layer(trainable=True, name="U1")
+    builder.add_angle_encoding(
+        modes=list(range(4)), name="input", subset_combinations=True
+    )
+    builder.add_entangling_layer(trainable=True, name="U2")
+
+    layer = ML.QuantumLayer(
+        input_size=4,
+        n_photons=3,
+        builder=builder,
     )
 
-    ansatz = ML.AnsatzFactory.create(
-        PhotonicBackend=experiment, input_size=4, output_size=8
-    )
-
-    layer = ML.QuantumLayer(input_size=4, ansatz=ansatz)
+    model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 8))
 
     print("Testing forward pass performance...")
     x = torch.rand(32, 4)
     start = time.time()
-    output = layer(x)
+    output = model(x)
     forward_time = time.time() - start
     print(f"Forward pass time: {forward_time:.4f}s")
 
