@@ -149,8 +149,8 @@ class MerlinProcessor:
         fut: Future = Future()
         state = {
             "cancel_requested": False,
-            "current_job": None,  # type: RemoteJob | None
-            "current_status": None,  # type: dict[str, Any] | None
+            "current_job": None,  # type: Optional[RemoteJob]
+            "current_status": None,  # type: Optional[dict[str, Any]]
             "job_ids": [],  # list of job ids in order
         }
 
