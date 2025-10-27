@@ -444,6 +444,7 @@ class SLOSComputeGraph:
                 The unitary should be provided in the complex dtype corresponding to the graph's dtype.\
                 For example, for torch.float32, use torch.cfloat; for torch.float64, use torch.cdouble.
             input_state (list[int]): Input_state of length self.m with self.n_photons in the input state
+
         Returns:
             Tuple[List[Tuple[int, ...]], torch.Tensor]:
                 - List of tuples representing output Fock state configurations
