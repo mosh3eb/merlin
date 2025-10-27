@@ -15,7 +15,7 @@ Merlin bridges the gap between physical quantum circuits and high-level machine 
 2. **Photonic Backend**: Mathematical models of quantum circuits with configurable components
 3. **Ansatz** (:mod:`merlin.builder.ansatz`): Logical circuit templates that define shape of quantum circuits to be implemented on the backend
 4. **Encoding**: Strategies for mapping classical features to quantum parameters
-5. **Output Mapping**: Methods for converting quantum states to classical outputs
+5. **Measurement Strategy**: Strategies for converting quantum outputs to classical outputs
 6. **QuantumLayer**: High-level PyTorch interface that combines all these concepts
 
 Let's explore each level in detail.
@@ -137,12 +137,12 @@ Different patterns create different types of quantum interference and correlatio
 
 For detailed encoding strategies and optimization techniques, see :doc:`../user_guide/encoding`.
 
-5. Output Mapping: Quantum-to-Classical Conversion
+5. Measurement Strategy: Quantum-to-Classical Conversion
 ==================================================
 
-**Output Mapping** converts quantum measurement results (probability distributions) into classical neural network activations.
+**Measurement Strategy** converts quantum measurement results (probability distributions or amplitudes) into classical outputs.
 
-Quantum circuits produce probability distributions over possible photon configurations. Output mapping strategies determine how these probabilities become the classical outputs your PyTorch model sees.
+Quantum circuits produce probability distributions or amplitudes (in simulation) over possible photon configurations. Measurement strategy determines which formatting to use.
 
 .. code-block:: python
 
@@ -151,12 +151,12 @@ Quantum circuits produce probability distributions over possible photon configur
     ML.MeasurementStrategy.MODE_EXPECTATIONS   # Per-mode photon statistics
     ML.MeasurementStrategy.AMPLITUDES       # Complex amplitudes (simulation only)
 
-To reduce the dimensionality of the Fock distribution after measurement, compose your layer with
+To reduce the dimensionality of the Fock distribution after measurement, compose your layer with a grouping
 :class:`~merlin.utils.grouping.mappers.LexGrouping` or :class:`~merlin.utils.grouping.mappers.ModGrouping`.
 
-**Key Concept**: Output mapping bridges the gap between quantum measurements and classical neural network expectations. The choice affects both the interpretability and expressivity of your quantum layer.
+**Key Concept**: Measurement strategy bridges the gap between quantum measurements and classical outputs. The choice affects both the interpretability and expressivity of your quantum layer.
 
-For detailed comparisons and selection guidelines, see :doc:`../user_guide/output_mappings`.
+For detailed comparisons and selection guidelines, see :doc:`../user_guide/measurement_strategy` and :doc:`../user_guide/grouping`.
 
 6. High-Level Interface: QuantumLayer
 =====================================
