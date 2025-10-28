@@ -192,12 +192,49 @@ class ComputationProcess(AbstractComputationProcess):
         self, parameters: list[torch.Tensor], simultaneous_processes: int = 1
     ) -> torch.Tensor:
         """
-        Compute quantum output distribution for superposition states using batch processing.
+        Evaluate a single circuit parametrisation against all superposed input
+        states by chunking them in groups and delegating the heavy work to the
+        TorchScript-enabled batch kernel.
+
+        The method converts the trainable parameters into a unitary matrix,
+        normalises the input state (if it is not already normalised), filters
+        out components with zero amplitude, and then queries the simulation
+        graph for batches of Fock states. Each batch feeds
+        :meth:`SLOSComputeGraph.compute_batch`, producing a tensor that contains
+        the amplitudes of all reachable output states for the selected input
+        components. The partial results are accumulated into a preallocated
+        tensor and finally weighted by the complex coefficients of
+        ``self.input_state`` to produce the global output amplitudes.
+
         Args:
-            parameters: List of parameter tensors for the circuit
-            simultaneous_processes: Number of input states to process simultaneously in compute_batch
+            parameters (list[torch.Tensor]): Differentiable parameters that
+                encode the photonic circuit. They are forwarded to
+                ``self.converter`` to build the unitary matrix used during the
+                simulation.
+            simultaneous_processes (int): Maximum number of non-zero input
+                components that are propagated in a single call to
+                ``compute_batch``. Tuning this value allows trading memory
+                consumption for wall-clock time on GPU.
+
         Returns:
-            Final amplitudes tensor after superposition computation
+            torch.Tensor: The superposed output amplitudes with shape
+            ``[batch_size, num_output_states]`` where ``batch_size`` corresponds
+            to the number of independent input batches and ``num_output_states``
+            is the size of ``self.simulation_graph.mapped_keys``.
+
+        Raises:
+            TypeError: If ``self.input_state`` is not a ``torch.Tensor``. The
+            simulation graph expects tensor inputs, therefore other sequence
+            types (NumPy arrays, lists, etc.) cannot be used here.
+
+        Notes:
+            * ``self.input_state`` is normalised in place to avoid an extra
+              allocation.
+            * Zero-amplitude components are skipped to minimise the number of
+              calls to ``compute_batch``.
+            * The method is agnostic to the device: tensors remain on the device
+              they already occupy, so callers should ensure ``parameters`` and
+              ``self.input_state`` live on the same device.
         """
 
         unitary = self.converter.to_tensor(*parameters)

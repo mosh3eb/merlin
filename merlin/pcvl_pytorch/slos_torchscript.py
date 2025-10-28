@@ -163,18 +163,53 @@ def layer_compute_batch(
     p: list[int],
 ) -> torch.Tensor:
     """
-    Compute amplitudes for a single layer using vectorized operations for multiple input states.
+    Propagate a layer of the SLOS computation graph while evaluating several
+    coherent input components in parallel.
+
+    The pre-computed ``sources``, ``destinations`` and ``modes`` tensors encode
+    the sparse transitions that must be applied to go from the amplitudes of the
+    previous layer to the amplitudes of the current layer. Each transition picks
+    a value from ``prev_amplitudes`` using ``sources`` (the index of the parent
+    state), multiplies it by the relevant unitary element ``U[modes, p]`` for
+    the photon that is currently being injected, and scatters the contribution
+    into ``destinations`` (the index of the child state). When several input
+    superposition components need to be evaluated, ``p`` provides the photon
+    indices for every component and the computations are vectorised along the
+    last axis.
 
     Args:
-        unitary: Batch of unitary matrices [batch_size, m, m]
-        prev_amplitudes: Previous layer amplitudes [batch_size, prev_size, num_input_states]
-        sources: Source indices for operations [num_ops]
-        destinations: Destination indices for operations [num_ops]
-        modes: Mode indices for operations [num_ops]
-        p: List of photon indices, one per input state [num_input_states]
+        unitary (torch.Tensor): Batch of unitary matrices with shape
+            ``[batch_size, m, m]``. The unitary entries are looked up according
+            to ``modes`` and the photon indices ``p`` so the tensor can reside
+            on either CPU or CUDA as long as it matches the device of
+            ``prev_amplitudes``.
+        prev_amplitudes (torch.Tensor): Complex amplitudes produced by the
+            previous layer with shape ``[batch_size, prev_size, num_inputs]``.
+            The third dimension indexes the different coherent input components.
+        sources (torch.Tensor): Integer tensor of shape ``[num_ops]`` containing
+            the index of the parent state for every sparse transition.
+        destinations (torch.Tensor): Integer tensor of shape ``[num_ops]`` with
+            the index within the current layer where each contribution must be
+            accumulated.
+        modes (torch.Tensor): Integer tensor of shape ``[num_ops]`` describing
+            which output mode of the unitary matrix is involved in each
+            transition.
+        p (list[int]): Photon occupation indices for the layer, one entry per
+            superposition component. The list length must match the third
+            dimension of ``prev_amplitudes``.
 
     Returns:
-        Next layer amplitudes [batch_size, next_size, num_input_states]
+        torch.Tensor: Tensor with shape ``[batch_size, next_size, num_inputs]``
+        that contains the amplitudes of the current layer after applying all
+        transitions. ``next_size`` equals ``destinations.max() + 1`` so the
+        method adapts automatically to the sparsity structure.
+
+    Notes:
+        * The function is side-effect free: input tensors are never modified in
+          place.
+        * Zero operations (``len(sources) == 0``) short-circuit to the input in
+          order to keep TorchScript graphs simple and avoid unnecessary tensor
+          allocations.
     """
 
     batch_size = unitary.shape[0]
