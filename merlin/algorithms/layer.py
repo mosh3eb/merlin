@@ -101,7 +101,7 @@ class QuantumLayer(nn.Module):
         dtype: torch.dtype | None = None,
         shots: int = 0,
         sampling_method: str = "multinomial",
-        no_bunching: bool = True,
+        no_bunching: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -185,8 +185,17 @@ class QuantumLayer(nn.Module):
             raise RuntimeError("Experiment must be initialised.")
 
         self.circuit = resolved_circuit
-        self._detectors = resolve_detectors(self.experiment, resolved_circuit.m)
+        self._detectors, self._empty_detectors = resolve_detectors(
+            self.experiment, resolved_circuit.m
+        )
         self.detectors = self._detectors  # Backward compatibility alias
+
+        # Verify that no Detector was defined in experiement if using no_bunching=True:
+        if not self._empty_detectors and no_bunching:
+            raise RuntimeError(
+                "no_bunching must be False if Experiement contains at least one Detector."
+            )
+
         self._init_from_custom_circuit(
             resolved_circuit,
             input_state,
@@ -560,6 +569,10 @@ class QuantumLayer(nn.Module):
     @property
     def output_size(self) -> int:
         return self._output_size
+
+    @property
+    def empty_detectors(self) -> bool:
+        return self._empty_detectors
 
     @classmethod
     def simple(

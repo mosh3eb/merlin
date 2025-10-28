@@ -669,7 +669,13 @@ class FidelityKernel(torch.nn.Module):
             )
 
         m, n = len(input_state), sum(input_state)
-        self._detectors = resolve_detectors(self.experiment, m)
+        self._detectors, self._empty_detectors = resolve_detectors(self.experiment, m)
+
+        # Verify that no Detector was defined in experiement if using no_bunching=True:
+        if not self._empty_detectors and no_bunching:
+            raise RuntimeError(
+                "no_bunching must be False if Experiement contains at least one Detector."
+            )
 
         self._slos_graph = build_slos_graph(
             m=m,

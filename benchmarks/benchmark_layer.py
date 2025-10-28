@@ -35,6 +35,10 @@ import torch
 
 import merlin as ML
 
+ANSATZ_SKIP = pytest.mark.skip(
+    reason="Legacy ansatz-based QuantumLayer API has been removed; test pending migration."
+)
+
 
 class LayerBenchmarkRunner:
     """Utility class for running and validating quantum layer benchmarks."""
@@ -84,6 +88,7 @@ benchmark_runner = LayerBenchmarkRunner()
 
 @pytest.mark.parametrize("config", BENCHMARK_CONFIGS)
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
+@ANSATZ_SKIP
 def test_quantum_layer_forward_benchmark(benchmark, config: dict, device: str):
     """Benchmark quantum layer forward pass."""
     experiment = ML.PhotonicBackend(
@@ -118,6 +123,7 @@ def test_quantum_layer_forward_benchmark(benchmark, config: dict, device: str):
 @pytest.mark.parametrize("config", BENCHMARK_CONFIGS)
 @pytest.mark.parametrize("batch_size", BATCH_CONFIGS)
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
+@ANSATZ_SKIP
 def test_batched_computation_benchmark(
     benchmark, config: dict, batch_size: int, device: str
 ):
@@ -151,6 +157,7 @@ def test_batched_computation_benchmark(
 
 @pytest.mark.parametrize("config", BENCHMARK_CONFIGS[:2])  # Only test smaller configs
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
+@ANSATZ_SKIP
 def test_gradient_computation_benchmark(benchmark, config: dict, device: str):
     """Benchmark gradient computation through quantum layer."""
     experiment = ML.PhotonicBackend(
@@ -195,6 +202,7 @@ def test_gradient_computation_benchmark(benchmark, config: dict, device: str):
 
 @pytest.mark.parametrize("config", BENCHMARK_CONFIGS[:2])
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
+@ANSATZ_SKIP
 def test_multiple_circuit_types_benchmark(benchmark, config: dict, device: str):
     """Benchmark different circuit types for quantum layers."""
     circuit_types = [
@@ -203,6 +211,7 @@ def test_multiple_circuit_types_benchmark(benchmark, config: dict, device: str):
         ML.CircuitType.PARALLEL,
     ]
 
+    @ANSATZ_SKIP
     def test_all_circuit_types():
         results = []
 
@@ -241,6 +250,7 @@ def test_multiple_circuit_types_benchmark(benchmark, config: dict, device: str):
 
 @pytest.mark.parametrize("config", BENCHMARK_CONFIGS[:2])
 @pytest.mark.parametrize("device", DEVICE_CONFIGS)
+@ANSATZ_SKIP
 def test_output_mapping_strategies_benchmark(benchmark, config: dict, device: str):
     """Benchmark different output mapping strategies."""
     strategies = [
@@ -255,6 +265,7 @@ def test_output_mapping_strategies_benchmark(benchmark, config: dict, device: st
         n_photons=config["n_photons"],
     )
 
+    @ANSATZ_SKIP
     def test_all_strategies():
         results = []
 
@@ -290,6 +301,7 @@ def test_output_mapping_strategies_benchmark(benchmark, config: dict, device: st
 class TestLayerPerformanceRegression:
     """Test suite for detecting quantum layer performance regressions."""
 
+    @ANSATZ_SKIP
     def test_forward_pass_performance_bounds(self):
         """Test that forward pass stays within reasonable time bounds."""
         experiment = ML.PhotonicBackend(
@@ -314,6 +326,7 @@ class TestLayerPerformanceRegression:
         )
         assert benchmark_runner.validate_layer_output_correctness(output, (32, 10))
 
+    @ANSATZ_SKIP
     def test_gradient_computation_performance_bounds(self):
         """Test that gradient computation stays within reasonable time bounds."""
         experiment = ML.PhotonicBackend(

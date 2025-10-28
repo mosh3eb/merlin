@@ -292,7 +292,9 @@ class DetectorTransform(torch.nn.Module):
         return result
 
 
-def resolve_detectors(experiment: pcvl.Experiment, n_modes: int) -> list[pcvl.Detector]:
+def resolve_detectors(
+    experiment: pcvl.Experiment, n_modes: int
+) -> tuple[list[pcvl.Detector], bool]:
     """
     Build a per-mode detector list from a Perceval experiment.
 
@@ -301,8 +303,12 @@ def resolve_detectors(experiment: pcvl.Experiment, n_modes: int) -> list[pcvl.De
         n_modes: Number of photonic modes to cover.
 
     Returns:
-        List of detectors (defaulting to ideal PNR where unspecified).
+        normalized: list[pcvl.Detector]
+            List of detectors (defaulting to ideal PNR where unspecified),
+        empty_detectors: bool
+            If True, no Detector was defined in experiment. If False, at least one Detector was defined in experiement.
     """
+    empty_detectors = True
     detectors_attr = getattr(experiment, "detectors", None)
     normalized: list[pcvl.Detector] = []
 
@@ -317,11 +323,12 @@ def resolve_detectors(experiment: pcvl.Experiment, n_modes: int) -> list[pcvl.De
                     detector = getter(mode, None)
         if detector is None:
             detector = pcvl.Detector.pnr()
-        elif not hasattr(detector, "detect"):
-            raise TypeError(
-                f"Detector at mode {mode} does not implement a 'detect' method."
-            )
+        else:
+            empty_detectors = False  # At least one Detector was defined in experiment
+            if not hasattr(detector, "detect"):
+                raise TypeError(
+                    f"Detector at mode {mode} does not implement a 'detect' method."
+                )
         normalized.append(detector)
 
-    return normalized
-    # TODO
+    return normalized, empty_detectors
