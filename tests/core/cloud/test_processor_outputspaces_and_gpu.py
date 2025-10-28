@@ -1,5 +1,5 @@
 """
-Output-space sizing (local & cloud) and GPU roundtrips.
+Output-space sizing (local & cloud) and GPU roundtrips (new API).
 
 Focus:
 - Local QuantumLayer output sizes match combinatorial expectations
@@ -64,7 +64,7 @@ class TestOutputSpacesAndGPU:
         expected = comb(m, n)
 
         proc = MerlinProcessor(remote_processor)
-        y = proc.forward(layer, x, shots=2000)
+        y = proc.forward(layer, x, nsample=2000)
         assert y.shape == (bsz, expected)
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
@@ -79,6 +79,6 @@ class TestOutputSpacesAndGPU:
         layer = _make_layer(6, 2, 2, True)
         proc = MerlinProcessor(remote_processor)
         x = torch.rand(2, 2, device="cuda")
-        y = proc.forward(layer, x, shots=1500)
+        y = proc.forward(layer, x, nsample=1500)
         assert y.device.type == "cuda"
         assert y.shape[1] == comb(6, 2)

@@ -1,12 +1,16 @@
+# tests/core/cloud/test_processor_futures.py
+
 """
-Futures & cloud execution tests for MerlinProcessor.
+Futures & cloud execution tests for MerlinProcessor (current API).
 
 Focus:
 - forward_async returns torch Future with helpers (cancel_remote, status, job_ids)
 - Timeout & cancellation behavior (best-effort; skip if backend too fast)
-- resume(job_id, ...) yields same-shaped mapped tensor
 - concurrent futures
 - pipeline with two quantum layers accrues >=2 job_ids
+- context manager auto-cancels on exit
+- cancel_all() cancels multiple pending futures
+- default timeout via constructor
 
 Requires cloud; auto-skips if no token via `remote_processor` fixture.
 """
@@ -43,7 +47,7 @@ def _make_layer_6m2p_raw() -> QuantumLayer:
 
     return QuantumLayer(
         input_size=2,
-        output_size=None,
+        output_size=None,  # raw distribution
         builder=builder,
         n_photons=2,
         no_bunching=True,
@@ -55,7 +59,7 @@ class TestFuturesCloud:
     def test_forward_async_future_and_helpers(self, remote_processor):
         layer = _make_layer_6m2p_raw()
         proc = MerlinProcessor(remote_processor)
-        fut = proc.forward_async(layer, torch.rand(3, 2), shots=1500)
+        fut = proc.forward_async(layer, torch.rand(3, 2), nsample=1500)
 
         assert isinstance(fut, torch.futures.Future)
         assert hasattr(fut, "cancel_remote")
@@ -69,7 +73,7 @@ class TestFuturesCloud:
     def test_timeout_sets_timeouterror(self, remote_processor):
         layer = _make_layer_6m2p_raw()
         proc = MerlinProcessor(remote_processor)
-        fut = proc.forward_async(layer, torch.rand(8, 2), shots=50000, timeout=0.03)
+        fut = proc.forward_async(layer, torch.rand(8, 2), nsample=50000, timeout=0.03)
 
         done_in_time = _spin_until(lambda: fut.done(), timeout_s=2.0)
         if not done_in_time:
@@ -84,8 +88,9 @@ class TestFuturesCloud:
 
     def test_cancel_remote_cancelled_error(self, remote_processor):
         layer = _make_layer_6m2p_raw()
-        proc = MerlinProcessor(remote_processor, timeout=None)
-        fut = proc.forward_async(layer, torch.rand(8, 2), shots=40000, timeout=None)
+        # Constructor timeout must be a real number; keep default and set per-call timeout=None
+        proc = MerlinProcessor(remote_processor)
+        fut = proc.forward_async(layer, torch.rand(8, 2), nsample=40000, timeout=None)
 
         _spin_until(lambda f=fut: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
         if fut.done():
@@ -95,29 +100,11 @@ class TestFuturesCloud:
         with pytest.raises(_cf.CancelledError):
             fut.wait()
 
-    def test_resume_attaches_and_maps(self, remote_processor):
-        layer = _make_layer_6m2p_raw()
-        proc = MerlinProcessor(remote_processor)
-
-        fut = proc.forward_async(layer, torch.rand(2, 2), shots=2000)
-        _spin_until(lambda f=fut: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
-
-        if len(fut.job_ids) == 0:
-            out = fut.wait()
-            assert out.shape == (2, 15)
-            return
-
-        job_id = fut.job_ids[0]
-        resumed = proc.resume(job_id, layer=layer, batch_size=2, shots=2000)
-        out1 = fut.wait()
-        out2 = resumed.wait()
-        assert out1.shape == out2.shape == (2, 15)
-
     def test_multiple_concurrent_futures(self, remote_processor):
         layer = _make_layer_6m2p_raw()
         proc = MerlinProcessor(remote_processor)
         xs = [torch.rand(2, 2) for _ in range(4)]
-        futs = [proc.forward_async(layer, x, shots=1500) for x in xs]
+        futs = [proc.forward_async(layer, x, nsample=1500) for x in xs]
 
         for f in futs:
             _spin_until(lambda f=f: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
@@ -162,8 +149,52 @@ class TestFuturesCloud:
         ).eval()
 
         proc = MerlinProcessor(remote_processor)
-        fut = proc.forward_async(model, torch.rand(4, 3), shots=2000)
+        fut = proc.forward_async(model, torch.rand(4, 3), nsample=2000)
         _spin_until(lambda f=fut: len(f.job_ids) >= 2 or f.done(), timeout_s=20.0)
         y = fut.wait()
         assert y.shape == (4, 3)
         assert len(fut.job_ids) >= 2
+
+    def test_context_manager_auto_cancel_on_exit(self, remote_processor):
+        layer = _make_layer_6m2p_raw()
+        fut = None
+        # Constructor uses default timeout; use per-call timeout=None for infinite
+        with MerlinProcessor(remote_processor) as proc:
+            fut = proc.forward_async(layer, torch.rand(8, 2), nsample=40000, timeout=None)
+            _spin_until(lambda: len(fut.job_ids) > 0 or fut.done(), timeout_s=10.0)
+            # Exiting the context should cancel in-flight jobs
+        assert fut is not None
+        with pytest.raises(_cf.CancelledError):
+            fut.wait()
+
+    def test_cancel_all_cancels_multiple_futures(self, remote_processor):
+        layer = _make_layer_6m2p_raw()
+        proc = MerlinProcessor(remote_processor)
+        futs = [
+            proc.forward_async(layer, torch.rand(8, 2), nsample=40000, timeout=None)
+            for _ in range(3)
+        ]
+        _spin_until(lambda: all(len(f.job_ids) > 0 or f.done() for f in futs), timeout_s=10.0)
+        if any(f.done() for f in futs):
+            pytest.skip("Backend finished too quickly to test cancellation")
+        proc.cancel_all()
+        for f in futs:
+            with pytest.raises(_cf.CancelledError):
+                f.wait()
+
+    def test_default_timeout_via_constructor(self, remote_processor):
+        layer = _make_layer_6m2p_raw()
+        # Set default timeout small via constructor and rely on it (no per-call timeout)
+        proc = MerlinProcessor(remote_processor, timeout=0.03)
+        fut = proc.forward_async(layer, torch.rand(8, 2), nsample=50000)
+        # Robustness to fast backends:
+        done_in_time = _spin_until(lambda: fut.done(), timeout_s=2.0)
+        if not done_in_time:
+            with pytest.raises(TimeoutError):
+                fut.wait()
+        else:
+            try:
+                _ = fut.value()
+            except Exception:
+                with pytest.raises(TimeoutError):
+                    fut.wait()

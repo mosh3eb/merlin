@@ -1,5 +1,5 @@
 """
-Export & parameter-mapping tests (local-first; cloud optional).
+Export & parameter-mapping tests (local-first; cloud optional) — new API.
 
 Focus:
 - export_config applies current trainable params to the exported circuit
@@ -90,7 +90,7 @@ class TestExportAndParams:
 
         y_local = q(X)  # exact
         proc = MerlinProcessor(remote_processor)
-        y_remote = proc.forward(q, X, shots=20000)
+        y_remote = proc.forward(q, X, nsample=20000)
 
         assert y_local.shape == y_remote.shape
         assert torch.allclose(y_local.sum(dim=1), torch.ones(3), atol=1e-5)

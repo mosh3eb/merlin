@@ -1,5 +1,5 @@
 """
-Introspection & execution-policy tests for MerlinProcessor <-> QuantumLayer.
+Introspection & execution-policy tests for MerlinProcessor <-> QuantumLayer (new API).
 
 Focus:
 - Offload by default when not forced
@@ -64,7 +64,7 @@ class TestIntrospectionAndPolicy:
         dist_size = layer(x).shape[1]
 
         proc = MerlinProcessor(remote_processor)
-        fut = proc.forward_async(layer, x, shots=2000)
+        fut = proc.forward_async(layer, x, nsample=2000)
         y = _wait(fut)
 
         assert y.shape == (bsz, dist_size)
@@ -88,7 +88,7 @@ class TestIntrospectionAndPolicy:
         monkeypatch.setattr(layer, "forward", spy_forward, raising=True)
 
         proc = MerlinProcessor(remote_processor)
-        fut = proc.forward_async(layer, x, shots=2000)
+        fut = proc.forward_async(layer, x, nsample=2000)
         y = _wait(fut)
 
         assert y.shape == (bsz, dist_size)
@@ -109,7 +109,7 @@ class TestIntrospectionAndPolicy:
         model = nn.Sequential(q1, adapter, q2).eval()
 
         proc = MerlinProcessor(remote_processor)
-        fut = proc.forward_async(model, torch.rand(bsz, 2), shots=3000)
+        fut = proc.forward_async(model, torch.rand(bsz, 2), nsample=3000)
         y = _wait(fut)
 
         assert y.shape == (bsz, dist2)
@@ -124,12 +124,12 @@ class TestIntrospectionAndPolicy:
         proc = MerlinProcessor(remote_processor)
 
         with q.as_simulation():
-            fut_local = proc.forward_async(q, x, shots=2000)
+            fut_local = proc.forward_async(q, x, nsample=2000)
             y_local = _wait(fut_local)
             assert y_local.shape == (bsz, dist)
             assert len(fut_local.job_ids) == 0
 
-        fut_remote = proc.forward_async(q, x, shots=2000)
+        fut_remote = proc.forward_async(q, x, nsample=2000)
         y_remote = _wait(fut_remote)
         assert y_remote.shape == (bsz, dist)
         assert len(fut_remote.job_ids) >= 1

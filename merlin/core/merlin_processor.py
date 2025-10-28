@@ -1,22 +1,6 @@
-"""
-MerlinProcessor: PyTorch-friendly quantum processor with full async RPC semantics.
+# merlin/core/merlin_processor.py
 
-Traversal treats any module with `merlin_leaf == True` as an execution leaf
-(never recurses into its children like nn.Identity).
-
-Execution policy is delegated to the leaf:
-    * If `should_offload(processor, shots)` exists → use it
-    * Else `_is_quantum_layer` (has export_config & not force_simulation)
-
-If not offloading → call the leaf's own forward() locally (not an identity passthrough).
-
-Key design points:
-- Single async surface: forward_async(module, x, *, shots=..., timeout=...) -> Future[Tensor]
-- Always return Tensors (no raw Perceval dicts leak out)
-- Offloads allowed QuantumLayer instances in order (e.g., in nn.Sequential)
-- Futures: fut.cancel_remote(), fut.status(), fut.job_ids
-- Sync forward(...) waits on forward_async with timeout semantics
-"""
+from __future__ import annotations
 
 import logging
 import threading
@@ -25,7 +9,7 @@ import warnings
 from collections.abc import Iterable
 from contextlib import suppress
 from math import comb
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import perceval as pcvl
@@ -40,8 +24,12 @@ logger = logging.getLogger(__name__)
 
 class MerlinProcessor:
     """
-    Complete RPC-style processor for quantum execution.
-    Returns raw probability distributions without output mapping.
+    RPC-style processor for quantum execution with:
+      - Torch-friendly async interface (Future[Torch.Tensor])
+      - Cloud offload of QuantumLayer leaves
+      - Batch chunking per quantum leaf with limited concurrency
+      - Cancellation (per-future and global)
+      - Global timeouts that cancel in-flight jobs
     """
 
     MAX_BATCH_SIZE: int = 32
@@ -52,7 +40,9 @@ class MerlinProcessor:
         self,
         remote_processor: RemoteProcessor,
         max_batch_size: int = 32,
-        timeout: float = 60.0,
+        timeout: float = 3600.0,
+        max_shots_per_call: int | None = None,
+        chunk_concurrency: int = 1,
     ):
         if not isinstance(remote_processor, RemoteProcessor):
             raise TypeError(
@@ -74,9 +64,6 @@ class MerlinProcessor:
             self.available_commands = []
 
         self.max_batch_size = min(max_batch_size, self.MAX_BATCH_SIZE)
-        self.default_timeout = timeout
-        self.max_shots_per_call = self.DEFAULT_MAX_SHOTS
-
         if max_batch_size > self.MAX_BATCH_SIZE:
             warnings.warn(
                 f"Requested batch size {max_batch_size} exceeds limit {self.MAX_BATCH_SIZE}. "
@@ -84,102 +71,122 @@ class MerlinProcessor:
                 stacklevel=2,
             )
 
-        self._layer_cache: dict[int, tuple[Sampler, dict, RemoteProcessor]] = {}
+        self.default_timeout = float(timeout)
+        # When using RemoteProcessor, Perceval requires an explicit bound.
+        self.max_shots_per_call = (
+            None if max_shots_per_call is None else int(max_shots_per_call)
+        )
+
+        # Concurrency of chunk submissions inside a single quantum leaf
+        self.chunk_concurrency = max(1, int(chunk_concurrency))
+
+        # Caches & global tracking
+        self._layer_cache: dict[int, dict] = {}  # id(layer) -> {"config":..., "rp":...}
         self._job_history: list[RemoteJob] = []
 
-    @classmethod
-    def from_platform(
-        cls,
-        platform: str,
-        token: str | None = None,
-        url: str = "https://api.cloud.quandela.com",
-        **kwargs,
-    ) -> "MerlinProcessor":
-        remote_proc = RemoteProcessor(name=platform, token=token, url=url)
-        processor_kwargs = {
-            "max_batch_size": kwargs.pop("max_batch_size", 32),
-            "timeout": kwargs.pop("timeout", 60.0),
-        }
-        return cls(remote_proc, **processor_kwargs)
+        # Lifecycle/cancellation
+        self._lock = threading.Lock()
+        self._active_jobs: set[RemoteJob] = set()
+        self._closed = False
 
-    # ---------------- Public forward APIs ----------------
+    # ---------------- Public APIs ----------------
+
+    def __enter__(self):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("MerlinProcessor is closed")
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self.cancel_all()
+        finally:
+            with self._lock:
+                self._closed = True
+
+    def cancel_all(self) -> None:
+        """Cancel all in-flight jobs across all futures."""
+        with self._lock:
+            jobs = list(self._active_jobs)
+        for job in jobs:
+            cancel = getattr(job, "cancel", None)
+            if callable(cancel):
+                with suppress(Exception):
+                    cancel()
 
     def forward(
         self,
         module: nn.Module,
         input: torch.Tensor,
         *,
-        shots: int | None = None,
+        nsample: int | None = None,
         timeout: float | None = None,
     ) -> torch.Tensor:
-        timeout = self.default_timeout if timeout is None else timeout
-        fut = self.forward_async(module, input, shots=shots, timeout=timeout)
-        if timeout in (None, 0):
-            return fut.wait()
-        end = time.time() + float(timeout)
-        while not fut.done():
-            if time.time() >= end:
-                with suppress(Exception):
-                    fut.cancel_remote()  # type: ignore[attr-defined]
-                raise TimeoutError(
-                    f"Operation timed out after {timeout} seconds (remote cancel issued)"
-                )
-            time.sleep(0.01)
-        return fut.value()
+        """Synchronous convenience wrapper around forward_async()."""
+        fut = self.forward_async(module, input, nsample=nsample, timeout=timeout)
+        return fut.wait()
 
     def forward_async(
         self,
         module: nn.Module,
         input: torch.Tensor,
         *,
-        shots: int | None = None,
+        nsample: int | None = None,
         timeout: float | None = None,
     ) -> Future:
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("MerlinProcessor is closed")
+
         if module.training:
             raise RuntimeError(
                 "Remote quantum execution requires `.eval()` mode. Call `module.eval()` before forward."
             )
 
-        timeout = self.default_timeout if timeout is None else timeout
+        # Determine deadline
+        effective_timeout = self.default_timeout if timeout is None else timeout
+        deadline: Optional[float] = (
+            None if effective_timeout in (None, 0) else time.time() + float(effective_timeout)
+        )
+
         original_device = input.device
         original_dtype = input.dtype
-
         layers = list(self._iter_layers_in_order(module))
 
         fut: Future = Future()
         state = {
             "cancel_requested": False,
-            "current_job": None,
             "current_status": None,
-            "job_ids": [],
+            "job_ids": [],             # accumulated across all chunk jobs
+            "chunks_total": 0,
+            "chunks_done": 0,
+            "active_chunks": 0,
         }
 
         # ---- helpers attached to the Future ----
         def _cancel_remote():
             state["cancel_requested"] = True
-            job = state.get("current_job")
-            if job is not None:
-                cancel = getattr(job, "cancel", None)
-                if callable(cancel):
-                    with suppress(Exception):
-                        cancel()
+            # Also propagate to global jobs to reduce wasted credits
+            self.cancel_all()
             if not fut.done():
                 try:
                     from concurrent.futures import CancelledError
-                except Exception:  # pragma: no cover - very unlikely
-
-                    class CancelledError(RuntimeError):  # type: ignore[override]
+                except Exception:  # pragma: no cover
+                    class CancelledError(RuntimeError):
                         pass
-
                 fut.set_exception(CancelledError("Remote call was cancelled"))
 
         def _status():
             js = state.get("current_status")
-            if fut.done() and js is None:
-                return {"state": "COMPLETE", "progress": 1.0, "message": None}
-            if js is None:
-                return {"state": "IDLE", "progress": 0.0, "message": None}
-            return dict(js)
+            base = {
+                "state": "COMPLETE" if fut.done() and not js else (js.get("state") if js else "IDLE"),
+                "progress": js.get("progress") if js else 0.0,
+                "message": js.get("message") if js else None,
+                "chunks_total": state["chunks_total"],
+                "chunks_done": state["chunks_done"],
+                "active_chunks": state["active_chunks"],
+            }
+            return base
 
         fut.cancel_remote = _cancel_remote  # type: ignore[attr-defined]
         fut.status = _status  # type: ignore[attr-defined]
@@ -188,337 +195,286 @@ class MerlinProcessor:
         # ---- background worker ----
         def _run_pipeline():
             try:
-                deadline = (
-                    None if timeout in (None, 0) else (time.time() + float(timeout))
-                )
-
                 x = input
-                batch = x.shape[0]
                 for layer in layers:
-                    if state["cancel_requested"]:
-                        if not fut.done():
-                            try:
-                                from concurrent.futures import CancelledError
-                            except Exception:  # pragma: no cover
-
-                                class CancelledError(RuntimeError):  # type: ignore[override]
-                                    pass
-
-                            fut.set_exception(
-                                CancelledError("Remote call was cancelled")
-                            )
-                        return
-
-                    # Decide offload policy
+                    # Policy: offload quantum leaves; else run locally
                     should_offload = None
-                    if hasattr(layer, "should_offload") and callable(
-                        layer.should_offload
-                    ):
+                    if hasattr(layer, "should_offload") and callable(layer.should_offload):
                         try:
-                            should_offload = bool(
-                                layer.should_offload(self.remote_processor, shots)
-                            )
-                        except Exception:  # pragma: no cover - defensive
+                            should_offload = bool(layer.should_offload(self.remote_processor, nsample))
+                        except Exception:
                             should_offload = None
-
                     if should_offload is None:
-                        # default rule (export_config & not force_simulation)
                         should_offload = self._is_quantum_layer(layer)
 
+                    if state["cancel_requested"]:
+                        raise self._cancelled_error()
+
                     if should_offload:
-                        job = self._submit_quantum_layer(layer, x, shots)
-                        state["current_job"] = job
-                        job_id = getattr(job, "id", None) or getattr(
-                            job, "job_id", None
+                        x = self._offload_quantum_layer_with_chunking(
+                            layer, x, nsample, state, deadline
                         )
-                        if job_id is not None:
-                            state["job_ids"].append(job_id)
-
-                        sleep_ms = 50
-                        while True:
-                            if state["cancel_requested"]:
-                                cancel = getattr(job, "cancel", None)
-                                if callable(cancel):
-                                    with suppress(Exception):
-                                        cancel()
-                                if not fut.done():
-                                    try:
-                                        from concurrent.futures import CancelledError
-                                    except Exception:  # pragma: no cover
-
-                                        class CancelledError(RuntimeError):  # type: ignore[override]
-                                            pass
-
-                                    fut.set_exception(
-                                        CancelledError("Remote call was cancelled")
-                                    )
-                                return
-
-                            if deadline is not None and time.time() >= deadline:
-                                cancel = getattr(job, "cancel", None)
-                                if callable(cancel):
-                                    with suppress(Exception):
-                                        cancel()
-                                if not fut.done():
-                                    fut.set_exception(
-                                        TimeoutError(
-                                            "Remote call timed out (remote cancel issued)"
-                                        )
-                                    )
-                                return
-
-                            s = getattr(job, "status", None)
-                            state["current_status"] = {
-                                "state": getattr(s, "state", None) if s else None,
-                                "progress": getattr(s, "progress", None) if s else None,
-                                "message": getattr(s, "stop_message", None)
-                                if s
-                                else None,
-                            }
-
-                            if getattr(job, "is_failed", False):
-                                msg = state["current_status"].get("message")
-                                if not fut.done():
-                                    fut.set_exception(
-                                        RuntimeError(f"Remote call failed: {msg}")
-                                    )
-                                return
-
-                            if getattr(job, "is_complete", False):
-                                raw = job.get_results()
-                                x = self._process_batch_results(
-                                    raw, batch, layer, shots
-                                )
-                                state["current_job"] = None
-                                state["current_status"] = None
-                                break
-
-                            time.sleep(sleep_ms / 1000.0)
-                            sleep_ms = min(sleep_ms * 2, 400)
-
                     else:
-                        # NOT offloading → EXECUTE the leaf locally (call its forward), not its children.
                         with torch.no_grad():
                             x = layer(x)
 
                 if not fut.done():
-                    y = x.to(device=original_device, dtype=original_dtype)
-                    fut.set_result(y)
-
-            except BaseException as e:  # pragma: no cover - surfaced to caller
+                    fut.set_result(x.to(device=original_device, dtype=original_dtype))
+            except BaseException as e:
                 if not fut.done():
                     fut.set_exception(e)
 
         threading.Thread(target=_run_pipeline, daemon=True).start()
         return fut
 
-    # ---------------- Resume API ----------------
+    # ---------------- Chunked offload per quantum leaf ----------------
 
-    def resume(
+    def _offload_quantum_layer_with_chunking(
         self,
-        job_id: str,
-        *,
         layer: Any,
-        batch_size: int,
-        shots: int | None = None,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
-        timeout: float | None = None,
-    ) -> Future:
-        timeout = self.default_timeout if timeout is None else timeout
+        input_tensor: torch.Tensor,
+        nsample: int | None,
+        state: dict,
+        deadline: Optional[float],
+    ) -> torch.Tensor:
+        """
+        Split the batch into chunks of size <= max_batch_size,
+        submit up to chunk_concurrency jobs concurrently, and stitch.
+        """
+        if input_tensor.is_cuda:
+            input_tensor = input_tensor.cpu()
 
-        fut: Future = Future()
-        state = {
-            "cancel_requested": False,
-            "current_job": None,
-            "current_status": None,
-            "job_ids": [],
-        }
+        B = input_tensor.shape[0]
+        if B <= self.max_batch_size and self.chunk_concurrency == 1:
+            # Fast path: single chunk, single job.
+            return self._run_chunk_wrapper(layer, input_tensor, nsample, state, deadline)
 
-        def _cancel_remote():
-            state["cancel_requested"] = True
-            job = state.get("current_job")
-            if job is not None:
-                cancel = getattr(job, "cancel", None)
-                if callable(cancel):
-                    with suppress(Exception):
-                        cancel()
-            if not fut.done():
-                try:
-                    from concurrent.futures import CancelledError
-                except Exception:  # pragma: no cover
-
-                    class CancelledError(RuntimeError):  # type: ignore[override]
-                        pass
-
-                fut.set_exception(CancelledError("Remote call was cancelled"))
-
-        def _status():
-            js = state.get("current_status")
-            if fut.done() and js is None:
-                return {"state": "COMPLETE", "progress": 1.0, "message": None}
-            if js is None:
-                return {"state": "IDLE", "progress": 0.0, "message": None}
-            return dict(js)
-
-        fut.cancel_remote = _cancel_remote  # type: ignore[attr-defined]
-        fut.status = _status  # type: ignore[attr-defined]
-        fut.job_ids = state["job_ids"]  # type: ignore[attr-defined]
-
-        def _monitor():
-            try:
-                job = self.remote_processor.resume_job(job_id)
-                state["current_job"] = job
-                jid = getattr(job, "id", None) or getattr(job, "job_id", None) or job_id
-                state["job_ids"].append(jid)
-
-                deadline = (
-                    None if timeout in (None, 0) else (time.time() + float(timeout))
-                )
-                sleep_ms = 50
-
-                while True:
-                    if state["cancel_requested"]:
-                        cancel = getattr(job, "cancel", None)
-                        if callable(cancel):
-                            with suppress(Exception):
-                                cancel()
-                        if not fut.done():
-                            try:
-                                from concurrent.futures import CancelledError
-                            except Exception:  # pragma: no cover
-
-                                class CancelledError(RuntimeError):  # type: ignore[override]
-                                    pass
-
-                            fut.set_exception(
-                                CancelledError("Remote call was cancelled")
-                            )
-                        return
-
-                    if deadline is not None and time.time() >= deadline:
-                        cancel = getattr(job, "cancel", None)
-                        if callable(cancel):
-                            with suppress(Exception):
-                                cancel()
-                        if not fut.done():
-                            fut.set_exception(
-                                TimeoutError(
-                                    "Remote call timed out (remote cancel issued)"
-                                )
-                            )
-                        return
-
-                    s = getattr(job, "status", None)
-                    state["current_status"] = {
-                        "state": getattr(s, "state", None) if s else None,
-                        "progress": getattr(s, "progress", None) if s else None,
-                        "message": getattr(s, "stop_message", None) if s else None,
-                    }
-
-                    if getattr(job, "is_failed", False):
-                        msg = state["current_status"].get("message")
-                        if not fut.done():
-                            fut.set_exception(
-                                RuntimeError(f"Remote call failed: {msg}")
-                            )
-                        return
-
-                    if getattr(job, "is_complete", False):
-                        raw = job.get_results()
-                        t = self._process_batch_results(raw, batch_size, layer, shots)
-                        if device is not None or dtype is not None:
-                            t = t.to(device=device or t.device, dtype=dtype or t.dtype)
-                        if not fut.done():
-                            fut.set_result(t)
-                        return
-
-                    time.sleep(sleep_ms / 1000.0)
-                    sleep_ms = min(sleep_ms * 2, 400)
-            except BaseException as e:  # pragma: no cover
-                if not fut.done():
-                    fut.set_exception(e)
-
-        threading.Thread(target=_monitor, daemon=True).start()
-        return fut
-
-    # ---------------- Perceval integration (per-layer) ----------------
-
-    def _submit_quantum_layer(
-        self, layer: Any, input_data: torch.Tensor, shots: int | None
-    ) -> RemoteJob:
-        if input_data.is_cuda:
-            input_data = input_data.cpu()
-
-        batch_size = input_data.shape[0]
-        if batch_size > self.max_batch_size:
-            raise ValueError(
-                f"Batch size {batch_size} exceeds cloud limit {self.max_batch_size}. "
-                "Please split into smaller chunks (≤ max_batch_size)."
-            )
-
-        layer_id = id(layer)
-        if layer_id not in self._layer_cache:
+        # Ensure we have (and cache) layer config and a child remote processor
+        cache = self._layer_cache.get(id(layer))
+        if cache is None:
             config = layer.export_config()
-
-            layer_processor = RemoteProcessor(
-                name=self.remote_processor.name,
-                token=None,
-            )
-            layer_processor.set_circuit(config["circuit"])
-
+            child_rp = self._clone_remote_processor(self.remote_processor)
+            child_rp.set_circuit(config["circuit"])
             if config.get("input_state"):
                 input_state = pcvl.BasicState(config["input_state"])
-                layer_processor.with_input(input_state)
+                child_rp.with_input(input_state)
                 n_photons = sum(config["input_state"])
-                layer_processor.min_detected_photons_filter(n_photons)
-
-            sampler = Sampler(
-                layer_processor, max_shots_per_call=self.max_shots_per_call
-            )
-            self._layer_cache[layer_id] = (sampler, config, layer_processor)
+                child_rp.min_detected_photons_filter(n_photons)
+            cache = {"config": config, "rp": child_rp}
+            self._layer_cache[id(layer)] = cache
         else:
-            sampler, config, layer_processor = self._layer_cache[layer_id]
+            config = cache["config"]
+            child_rp = cache["rp"]
 
+        # Build chunks
+        chunks: list[tuple[int, int]] = []
+        start = 0
+        while start < B:
+            end = min(start + self.max_batch_size, B)
+            chunks.append((start, end))
+            start = end
+
+        state["chunks_total"] += len(chunks)
+        outputs: list[Optional[torch.Tensor]] = [None] * len(chunks)
+
+        errors: list[BaseException] = []
+
+        def _call(s: int, e: int, idx: int):
+            try:
+                t = self._run_chunk(layer, config, child_rp, input_tensor[s:e], nsample, state, deadline)
+                outputs[idx] = t
+            except BaseException as ex:
+                errors.append(ex)
+
+        # Submit with limited concurrency
+        in_flight = 0
+        idx = 0
+        futures: list[threading.Thread] = []
+        while idx < len(chunks) or in_flight > 0:
+            # Launch up to concurrency limit
+            while idx < len(chunks) and in_flight < self.chunk_concurrency:
+                s, e = chunks[idx]
+                with self._lock:
+                    state["active_chunks"] += 1
+                th = threading.Thread(target=_call, args=(s, e, idx), daemon=True)
+                th.start()
+                futures.append(th)
+                idx += 1
+                in_flight += 1
+
+            # Wait for any thread to finish
+            for th in list(futures):
+                if not th.is_alive():
+                    futures.remove(th)
+                    in_flight -= 1
+                    with self._lock:
+                        state["active_chunks"] = max(0, state["active_chunks"] - 1)
+                        state["chunks_done"] += 1
+
+            if deadline is not None and time.time() >= deadline:
+                self.cancel_all()
+                raise TimeoutError("Remote call timed out (remote cancel issued)")
+
+            time.sleep(0.01)
+
+        if errors:
+            # Raise first error (others are likely the same)
+            raise errors[0]
+
+        return torch.cat(outputs, dim=0)  # type: ignore[arg-type]
+
+    def _run_chunk_wrapper(
+        self,
+        layer: Any,
+        input_chunk: torch.Tensor,
+        nsample: int | None,
+        state: dict,
+        deadline: Optional[float],
+    ) -> torch.Tensor:
+        """Non-chunking simple path via a temporary child processor cache."""
+        cache = self._layer_cache.get(id(layer))
+        if cache is None:
+            config = layer.export_config()
+            child_rp = self._clone_remote_processor(self.remote_processor)
+            child_rp.set_circuit(config["circuit"])
+            if config.get("input_state"):
+                input_state = pcvl.BasicState(config["input_state"])
+                child_rp.with_input(input_state)
+                n_photons = sum(config["input_state"])
+                child_rp.min_detected_photons_filter(n_photons)
+            cache = {"config": config, "rp": child_rp}
+            self._layer_cache[id(layer)] = cache
+        else:
+            config = cache["config"]
+            child_rp = cache["rp"]
+
+        t = self._run_chunk(layer, config, child_rp, input_chunk, nsample, state, deadline)
+        state["chunks_total"] += 1
+        state["chunks_done"] += 1
+        return t
+
+    def _run_chunk(
+        self,
+        layer: Any,
+        config: dict,
+        child_rp: RemoteProcessor,
+        input_chunk: torch.Tensor,
+        nsample: int | None,
+        state: dict,
+        deadline: Optional[float],
+    ) -> torch.Tensor:
+        """Submit a single chunk job for the given layer and return mapped tensor."""
+        from concurrent.futures import CancelledError  # used for cancellation mapping
+
+        batch_size = input_chunk.shape[0]
+        if batch_size > self.max_batch_size:
+            raise ValueError(
+                f"Chunk size {batch_size} exceeds cloud limit {self.max_batch_size}. "
+                "Please report this bug."
+            )
+
+        # Prepare a fresh Sampler for THIS chunk (one sampler per worker for thread-safety)
+        max_shots_arg = (
+            self.DEFAULT_SHOTS_PER_CALL if self.max_shots_per_call is None else int(self.max_shots_per_call)
+        )
+        sampler = Sampler(child_rp, max_shots_per_call=max_shots_arg)
+
+        # Build iterations
         sampler.clear_iterations()
-
         input_param_names = self._extract_input_params(config)
-        input_np = input_data.detach().cpu().numpy()
-
+        input_np = input_chunk.detach().cpu().numpy()
         for i in range(batch_size):
             circuit_params = {}
             for j, param_name in enumerate(input_param_names):
-                if j < input_data.shape[1]:
-                    circuit_params[param_name] = float(input_np[i, j] * np.pi)
+                if j < input_chunk.shape[1]:
+                    circuit_params[param_name] = float(input_np[i, j] )
                 else:
                     circuit_params[param_name] = 0.0
             sampler.add_iteration(circuit_params=circuit_params)
 
+        # Choose execution primitive
         if "probs" in self.available_commands:
             job = sampler.probs.execute_async()
         elif "sample_count" in self.available_commands:
-            use_shots = self.DEFAULT_SHOTS_PER_CALL if shots is None else int(shots)
+            use_shots = self.DEFAULT_SHOTS_PER_CALL if nsample is None else int(nsample)
             job = sampler.sample_count.execute_async(max_samples=use_shots)
         elif "samples" in self.available_commands:
-            use_shots = self.DEFAULT_SHOTS_PER_CALL if shots is None else int(shots)
+            use_shots = self.DEFAULT_SHOTS_PER_CALL if nsample is None else int(nsample)
             job = sampler.samples.execute_async(max_samples=use_shots)
         else:
-            use_shots = self.DEFAULT_SHOTS_PER_CALL if shots is None else int(shots)
+            use_shots = self.DEFAULT_SHOTS_PER_CALL if nsample is None else int(nsample)
             job = sampler.sample_count.execute_async(max_samples=use_shots)
 
-        self._job_history.append(job)
-        return job
+        # Track globally for cancellation & history
+        with self._lock:
+            self._active_jobs.add(job)
+            self._job_history.append(job)
 
-    # ---------------- Results mapping & utilities ----------------
+        # Monitor until complete/failed/timeout
+        sleep_ms = 50
+        while True:
+            if state.get("cancel_requested"):
+                cancel = getattr(job, "cancel", None)
+                if callable(cancel):
+                    with suppress(Exception):
+                        cancel()
+                # Let the job fail on cloud; we’ll map it below if needed.
+                # Raise here to stop this worker quickly.
+                raise CancelledError("Remote call was cancelled")
+
+            if deadline is not None and time.time() >= deadline:
+                cancel = getattr(job, "cancel", None)
+                if callable(cancel):
+                    with suppress(Exception):
+                        cancel()
+                raise TimeoutError("Remote call timed out (remote cancel issued)")
+
+            s = getattr(job, "status", None)
+            state["current_status"] = {
+                "state": getattr(s, "state", None) if s else None,
+                "progress": getattr(s, "progress", None) if s else None,
+                "message": getattr(s, "stop_message", None) if s else None,
+            }
+
+            job_id = getattr(job, "id", None) or getattr(job, "job_id", None)
+            if job_id is not None and job_id not in state["job_ids"]:
+                state["job_ids"].append(job_id)
+
+            if getattr(job, "is_failed", False):
+                msg = state["current_status"].get("message")
+                # >>> CHANGE: map Perceval cancel to CancelledError <<<
+                if msg and "Cancel requested" in str(msg):
+                    with self._lock:
+                        self._active_jobs.discard(job)
+                    raise CancelledError("Remote call was cancelled")
+                with self._lock:
+                    self._active_jobs.discard(job)
+                raise RuntimeError(f"Remote call failed: {msg}")
+
+            if getattr(job, "is_complete", False):
+                raw = job.get_results()
+                with self._lock:
+                    self._active_jobs.discard(job)
+                return self._process_batch_results(raw, batch_size, layer, nsample)
+
+            time.sleep(sleep_ms / 1000.0)
+            sleep_ms = min(sleep_ms * 2, 400)
+
+    # ---------------- Utilities & mapping ----------------
+
+    def _clone_remote_processor(self, rp: RemoteProcessor) -> RemoteProcessor:
+        """Create a sibling RemoteProcessor sharing auth/endpoint, for parallel jobs."""
+        # Reuse the underlying RPC handler auth / proxies via constructor args
+        return RemoteProcessor(
+            name=rp.name,
+            token=None,  # RemoteConfig will pick it up from cache; handler also exists
+            url=rp.get_rpc_handler().url if hasattr(rp.get_rpc_handler(), "url") else None,
+            proxies=rp.proxies,
+            rpc_handler=rp.get_rpc_handler(),  # share handler to avoid re-auth cost
+        )
 
     def _iter_layers_in_order(self, module: nn.Module) -> Iterable[nn.Module]:
-        """
-        Depth-first, left-to-right traversal that yields *execution* leaves.
-
-        RULE:
-          - If a module declares `merlin_leaf == True`, treat it as a LEAF and DO NOT recurse.
-          - Otherwise, recurse into children until we reach nn.Modules with no children.
-        """
+        """Yield execution leaves in a deterministic order."""
         if getattr(module, "merlin_leaf", False):
             yield module
             return
@@ -530,6 +486,11 @@ class MerlinProcessor:
 
         for child in children:
             yield from self._iter_layers_in_order(child)
+
+    def _is_quantum_layer(self, module: Any) -> bool:
+        if getattr(module, "force_simulation", False):
+            return False
+        return hasattr(module, "export_config") and callable(module.export_config)
 
     def _extract_input_params(self, config: dict) -> list[str]:
         circuit = config["circuit"]
@@ -553,7 +514,7 @@ class MerlinProcessor:
         raw_results: dict,
         batch_size: int,
         layer: Any,
-        shots: int | None = None,
+        nsample: int | None = None,
     ) -> torch.Tensor:
         dist_size, state_to_index, valid_states = self._get_state_mapping(layer)
         output_tensors: list[torch.Tensor] = []
@@ -570,10 +531,7 @@ class MerlinProcessor:
                     probs = torch.zeros(dist_size)
 
                     if state_counts:
-                        if (
-                            getattr(layer, "no_bunching", False)
-                            and valid_states is not None
-                        ):
+                        if getattr(layer, "no_bunching", False) and valid_states is not None:
                             filtered_counts = {}
                             for state_str, count in state_counts.items():
                                 state_tuple = self._parse_perceval_state(state_str)
@@ -693,6 +651,65 @@ class MerlinProcessor:
         generate_states([0] * n_modes, n_photons, 0)
         return sorted(valid_states)
 
+        # merlin/core/merlin_processor.py  (inside class MerlinProcessor)
+
+    def estimate_required_shots_per_input(
+            self,
+            layer: nn.Module,
+            input: torch.Tensor,
+            desired_samples_per_input: int,
+    ) -> list[int]:
+        """
+        Estimate required shots per input row for a QuantumLayer using the
+        platform's RemoteProcessor estimator (transmittance, filters, etc.).
+
+        - Accepts a single vector (shape: [D]) or a batch (shape: [B, D]).
+        - Returns a list[int] with one entry per input row (0 means 'not viable').
+
+        NOTE: This does not submit any cloud jobs; it only uses the estimator.
+        """
+        if not hasattr(layer, "export_config") or not callable(layer.export_config):
+            raise TypeError("layer must provide export_config() like QuantumLayer")
+
+        # Normalize input to [B, D]
+        if input.dim() == 1:
+            x = input.unsqueeze(0)
+        elif input.dim() == 2:
+            x = input
+        else:
+            raise ValueError("input must be 1D or 2D tensor")
+
+        # Prepare a child RemoteProcessor mirroring user's processor (token/proxies)
+        config = layer.export_config()
+        child_rp = self._clone_remote_processor(self.remote_processor)
+        child_rp.set_circuit(config["circuit"])
+
+        # Mirror input_state & min_detected_photons if present in the exported config
+        if config.get("input_state"):
+            input_state = pcvl.BasicState(config["input_state"])
+            child_rp.with_input(input_state)
+            n_photons = sum(config["input_state"])
+            # The estimator accounts for min_detected_photons via the processor setting
+            child_rp.min_detected_photons_filter(n_photons if getattr(layer, "no_bunching", False) else 1)
+
+        # Build param name list as Merlin does for execution
+        input_param_names = self._extract_input_params(config)
+
+        # For each row, map x -> param_values and query RP estimator
+        x_np = x.detach().cpu().numpy()
+        estimates: list[int] = []
+        for i in range(x_np.shape[0]):
+            row = x_np[i]
+            param_values: dict[str, float] = {}
+            for j, pname in enumerate(input_param_names):
+                param_values[pname] = float(row[j] * np.pi) if j < row.shape[0] else 0.0
+
+            # RemoteProcessor returns an int or None (if zero probability path)
+            est = child_rp.estimate_required_shots(desired_samples_per_input, param_values=param_values)
+            estimates.append(int(est) if est is not None else 0)
+
+        return estimates
+
     def _parse_perceval_state(self, state_str: Any) -> tuple:
         if isinstance(state_str, str):
             if "|" in state_str and ">" in state_str:
@@ -710,38 +727,12 @@ class MerlinProcessor:
             return tuple(state_str)
         return ()
 
-    # ---------------- Platform & diagnostics ----------------
-
-    @property
-    def platform_info(self) -> dict:
-        info = {
-            "name": self.backend_name,
-            "available_commands": self.available_commands,
-            "max_batch_size": self.max_batch_size,
-            "max_shots_per_call": self.max_shots_per_call,
-        }
-        if hasattr(self.remote_processor, "specs"):
-            info["specs"] = self.remote_processor.specs
-        if hasattr(self.remote_processor, "status"):
-            info["status"] = self.remote_processor.status
-        if hasattr(self.remote_processor, "constraints"):
-            info["constraints"] = self.remote_processor.constraints
-        if hasattr(self.remote_processor, "performance"):
-            info["performance"] = self.remote_processor.performance
-        return info
-
     def get_job_history(self) -> list[RemoteJob]:
         return self._job_history
 
     def clear_job_history(self) -> None:
         self._job_history = []
 
-    def _is_quantum_layer(self, module: Any) -> bool:
-        """
-        Offload decision when a layer doesn't provide `should_offload`:
-          - If module.force_simulation is True -> simulate locally.
-          - Else -> offload iff export_config exists (capability check).
-        """
-        if getattr(module, "force_simulation", False):
-            return False
-        return hasattr(module, "export_config") and callable(module.export_config)
+    def _cancelled_error(self):
+        from concurrent.futures import CancelledError
+        return CancelledError("Remote call was cancelled")
