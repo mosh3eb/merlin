@@ -23,20 +23,24 @@ from merlin.measurement.strategies import MeasurementStrategy
 
 def classical_method_ebs(layer, input_state):
     """Classical method for computing superposition states using individual state computations."""
-    output_classical = torch.zeros(1, layer.output_size)
     dtype = (
         layer.computation_process.simulation_graph.prev_amplitudes.dtype
         if layer.computation_process.simulation_graph.prev_amplitudes is not None
         else torch.complex128
     )
-    output_classical = output_classical.to(dtype)
+    device = layer.device or torch.device("cpu")
+    output_classical = torch.zeros(1, layer.output_size, dtype=dtype, device=device)
 
     for key, value in input_state.items():
         layer.computation_process.input_state = key
         _ = layer()
-        output_classical += (
-            value * layer.computation_process.simulation_graph.prev_amplitudes
-        )
+        coeff = value.to(device=output_classical.device, dtype=dtype)
+        prev_amplitudes = layer.computation_process.simulation_graph.prev_amplitudes
+        if prev_amplitudes.device != output_classical.device:
+            prev_amplitudes = prev_amplitudes.to(output_classical.device)
+        if prev_amplitudes.dtype != dtype:
+            prev_amplitudes = prev_amplitudes.to(dtype)
+        output_classical += coeff * prev_amplitudes
 
     distribution = output_classical.real**2 + output_classical.imag**2
 

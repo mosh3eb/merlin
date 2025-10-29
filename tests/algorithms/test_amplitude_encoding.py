@@ -207,19 +207,19 @@ def test_amplitude_encoding_gpu_roundtrip(
     outputs = layer(amplitude_input)
 
     assert outputs.shape[-1] == expected_size
-    assert outputs.device == device
+    assert outputs.device.type == device.type
 
     loss = outputs.real.sum()
     loss.backward()
 
     assert amplitude_input.grad is not None
-    assert amplitude_input.grad.device == device
+    assert amplitude_input.grad.device.type == device.type
     assert amplitude_input.grad.shape == amplitude_input.shape
 
     trainable_params = [p for p in layer.parameters() if p.requires_grad]
     for param in trainable_params:
         assert param.grad is not None
-        assert param.grad.device == device
+        assert param.grad.device.type == device.type
         assert param.grad.shape == param.shape
 
 
