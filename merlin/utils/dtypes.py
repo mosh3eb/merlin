@@ -26,8 +26,6 @@ Utilities for converting between various dtype representations and torch dtypes.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-
 import numpy as np
 import torch
 
@@ -104,18 +102,29 @@ def resolve_float_complex(dtype: torch.dtype) -> tuple[torch.dtype, torch.dtype]
     Raises:
         TypeError: If the dtype is not one of the supported float/complex types.
     """
-    float_complex_pairs: Iterable[tuple[torch.dtype, torch.dtype]] = (
+    # Build the supported pairs dynamically so we can optionally include
+    # float16/complex32 when the running PyTorch exposes complex32.
+    float_complex_pairs: list[tuple[torch.dtype, torch.dtype]] = []
+
+    # Prefer to include float16 if complex32 is available in this build
+    if hasattr(torch, "complex32"):
+        float_complex_pairs.append((torch.float16, torch.complex32))
+
+    # Always include float32/complex64 and float64/complex128
+    float_complex_pairs.extend([
         (torch.float32, torch.complex64),
         (torch.float64, torch.complex128),
-    )
+    ])
 
     for float_dtype, complex_dtype in float_complex_pairs:
         if dtype in (float_dtype, complex_dtype):
             return float_dtype, complex_dtype
 
+    supported = ", ".join(
+        f"({f.dtype if hasattr(f, 'dtype') else f},{c})" for f, c in float_complex_pairs
+    )
     raise TypeError(
-        f"Unsupported dtype {dtype}. Supported dtypes are torch.float32, "
-        f"torch.float64, torch.complex64, and torch.complex128."
+        f"Unsupported dtype {dtype}. Supported float/complex pairs: {supported}."
     )
 
 

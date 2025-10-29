@@ -38,33 +38,30 @@ import torch.jit as jit
 
 from merlin.core.computation_space import ComputationSpace
 
-
-def _get_complex_dtype_for_float(dtype):
-    """Helper function to get the corresponding complex dtype for a float dtype."""
-    if dtype == torch.float16 and hasattr(torch, "complex32"):
-        return torch.complex32
-    elif dtype == torch.float:
-        return torch.cfloat
-    elif dtype == torch.float64:
-        return torch.cdouble
-    else:
-        raise ValueError(
-            f"Unsupported dtype: {dtype}. Must be torch.float16, torch.float, or torch.float64"
-        )
+from ..utils.dtypes import resolve_float_complex
 
 
-def _get_float_dtype_for_complex(dtype):
-    """Helper function to get the corresponding float dtype for a complex dtype."""
-    if dtype == torch.complex32:
-        return torch.float16
-    elif dtype == torch.cfloat:
-        return torch.float
-    elif dtype == torch.cdouble:
-        return torch.float64
-    else:
-        raise ValueError(
-            f"Unsupported complex dtype: {dtype}. Must be torch.complex32, torch.cfloat, or torch.cdouble"
-        )
+def _get_complex_dtype_for_float(dtype: torch.dtype) -> torch.dtype:
+    """Return the complex dtype corresponding to the provided float dtype.
+
+    This wrapper uses `resolve_float_complex` from `merlin.utils.dtypes` so the
+    logic is centralized and automatically picks up optional `complex32` support
+    when present in the running PyTorch build.
+    """
+    try:
+        float_dt, complex_dt = resolve_float_complex(dtype)
+    except TypeError as exc:
+        raise ValueError(str(exc)) from exc
+    return complex_dt
+
+
+def _get_float_dtype_for_complex(dtype: torch.dtype) -> torch.dtype:
+    """Return the float dtype corresponding to the provided complex dtype."""
+    try:
+        float_dt, complex_dt = resolve_float_complex(dtype)
+    except TypeError as exc:
+        raise ValueError(str(exc)) from exc
+    return float_dt
 
 
 def prepare_vectorized_operations(operations_list, device=None):
