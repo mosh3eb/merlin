@@ -24,7 +24,10 @@ def test_simple_no_bunching_converts_to_unbunched_and_no_warning():
         model = QuantumLayer.simple(input_size=1, n_params=10, no_bunching=True)
 
     # Ensure no DeprecationWarning in the captured warnings
-    assert not any(isinstance(w.message, DeprecationWarning) or w.category is DeprecationWarning for w in rec)
+    assert not any(
+        isinstance(w.message, DeprecationWarning) or w.category is DeprecationWarning
+        for w in rec
+    )
 
     # The returned model wraps the actual QuantumLayer under attribute `quantum_layer`
     qlayer = model.quantum_layer

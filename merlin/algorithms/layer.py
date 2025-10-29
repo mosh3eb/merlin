@@ -92,9 +92,13 @@ class QuantumLayer(nn.Module):
                     message, raise_error = (str(val), True)
 
                 if raise_error:
-                    deprecated_raise.append(f"Parameter '{key}' is deprecated. {message}")
+                    deprecated_raise.append(
+                        f"Parameter '{key}' is deprecated. {message}"
+                    )
                 else:
-                    deprecated_warn.append(f"Parameter '{key}' is deprecated. {message}")
+                    deprecated_warn.append(
+                        f"Parameter '{key}' is deprecated. {message}"
+                    )
             else:
                 unknown.append(key)
 
@@ -926,15 +930,15 @@ class QuantumLayer(nn.Module):
         # avoid triggering deprecation in QuantumLayer.__init__ when callers use
         # the `simple` convenience constructor. If no_bunching was not provided
         # (None), let QuantumLayer decide the default.
-        quantum_layer_kwargs = dict(
-            input_size=input_size,
-            builder=builder,
-            n_photons=n_photons,
-            measurement_strategy=MeasurementStrategy.PROBABILITIES,
-            shots=shots,
-            device=device,
-            dtype=dtype,
-        )
+        quantum_layer_kwargs = {
+            "input_size": input_size,
+            "builder": builder,
+            "n_photons": n_photons,
+            "measurement_strategy": MeasurementStrategy.PROBABILITIES,
+            "shots": shots,
+            "device": device,
+            "dtype": dtype,
+        }
 
         if no_bunching is not None:
             quantum_layer_kwargs["computation_space"] = ComputationSpace.default(
