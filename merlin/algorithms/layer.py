@@ -119,7 +119,7 @@ class QuantumLayer(nn.Module):
         self.amplitude_encoding = amplitude_encoding
 
         # managing computation_space and no_bunching arguments
-        #TODO: support dual_rail
+        # TODO: support dual_rail
         allowed_spaces = {"fock", "no_bunching"}
         if computation_space is not None and computation_space not in allowed_spaces:
             raise ValueError(
@@ -171,7 +171,6 @@ class QuantumLayer(nn.Module):
                 not experiment.is_unitary
                 or experiment.post_select_fn is not None
                 or experiment.heralds
-            #TODO: maybe remove this line
                 or experiment.in_heralds
             ):
                 raise ValueError(
@@ -360,12 +359,6 @@ class QuantumLayer(nn.Module):
             self.computation_process.no_bunching,
             keys,
         )
-
-        # Ensure output mapping has correct dtype and device
-        if hasattr(self.output_mapping, "weight"):
-            self.output_mapping = self.output_mapping.to(
-                dtype=self.dtype, device=self.device
-            )
 
     def _create_dummy_parameters(self) -> list[torch.Tensor]:
         """Create dummy parameters for initialization."""
@@ -624,7 +617,7 @@ class QuantumLayer(nn.Module):
         *input_parameters: torch.Tensor,
         apply_sampling: bool | None = None,
         shots: int | None = None,
-        simultaneous_process: int = 1,
+        simultaneous_processes: int = 1,
     ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         """Forward pass through the quantum layer.
 
@@ -645,7 +638,9 @@ class QuantumLayer(nn.Module):
                 )
             # verify that inputs is of the shape of layer.compute_graph.mapped_keys
             amplitude_input = self._validate_amplitude_input(inputs.pop(0))
-            original_input_state = getattr(self.computation_process, "input_state", None)
+            original_input_state = getattr(
+                self.computation_process, "input_state", None
+            )
             # amplitude_input becomes the new input_state
             self.set_input_state(amplitude_input)
 

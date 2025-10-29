@@ -2,8 +2,9 @@ import perceval as pcvl
 import pytest
 import torch
 
-from merlin import OutputMappingStrategy, QuantumLayer
+from merlin import QuantumLayer
 from merlin.core.process import ComputationProcess
+from merlin.measurement.strategies import MeasurementStrategy
 
 
 def classical_method_ebs(layer, input_state):
@@ -53,7 +54,7 @@ class TestComputeEbsSimultaneously:
             input_size=0,
             circuit=self.circuit,
             n_photons=self.n_photons,
-            output_mapping_strategy=OutputMappingStrategy.NONE,
+            measurement_strategy=MeasurementStrategy.PROBABILITIES,
             input_state=self.input_state_tensor,
             trainable_parameters=self.trainable_parameters,
             input_parameters=self.input_parameters,

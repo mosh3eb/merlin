@@ -1,12 +1,12 @@
-from types import MethodType
 import warnings
+from types import MethodType
 
 import perceval as pcvl
 import pytest
 import torch
 
 from merlin.algorithms.layer import QuantumLayer
-from merlin.sampling.strategies import OutputMappingStrategy
+from merlin.measurement.strategies import MeasurementStrategy
 
 
 @pytest.fixture
@@ -21,10 +21,10 @@ def make_layer():
             "input_size": 0,
             "circuit": circuit,
             "n_photons": 1,
-            "output_mapping_strategy": OutputMappingStrategy.NONE,
+            "measurement_strategy": MeasurementStrategy.AMPLITUDES,
             "trainable_parameters": ["phi"],
             "input_parameters": [],
-            "dtype": torch.float64,
+            "dtype": torch.float32,
             "amplitude_encoding": True,
             "computation_space": "no_bunching",
         }
@@ -44,9 +44,9 @@ def test_amplitude_encoding_matches_superposition(make_layer):
     params = layer.prepare_parameters([])
     expected = layer.computation_process.compute_superposition_state(params)
 
-    _, amplitudes = layer(raw_amplitude, return_amplitudes=True)
+    amplitudes = layer(raw_amplitude)
 
-    assert torch.allclose(amplitudes, expected, rtol=1e-12, atol=1e-14)
+    assert torch.allclose(amplitudes, expected, rtol=1e-6, atol=1e-8)
 
 
 def test_amplitude_encoding_batches_use_vectorised_kernel(make_layer):
@@ -59,9 +59,7 @@ def test_amplitude_encoding_batches_use_vectorised_kernel(make_layer):
 
     def tracked_ebs(self, parameters, simultaneous_processes=1):
         call_tracker["ebs"] += 1
-        return original_ebs(
-            parameters, simultaneous_processes=simultaneous_processes
-        )
+        return original_ebs(parameters, simultaneous_processes=simultaneous_processes)
 
     def tracked_super(self, parameters):
         call_tracker["super"] += 1
@@ -131,3 +129,19 @@ def test_computation_space_consistency_no_warning(make_layer):
     assert layer.no_bunching is True
     assert layer.computation_space == "no_bunching"
     assert caught == []
+
+
+def test_amplitude_encoding_probabilities_strategy(make_layer):
+    layer = make_layer(measurement_strategy=MeasurementStrategy.PROBABILITIES)
+    num_states = len(layer.computation_process.simulation_graph.mapped_keys)
+    raw_amplitude = torch.arange(1, num_states + 1, dtype=torch.float32)
+
+    prepared_state = layer._validate_amplitude_input(raw_amplitude)
+    layer.set_input_state(prepared_state)
+    params = layer.prepare_parameters([])
+    expected_amplitudes = layer.computation_process.compute_superposition_state(params)
+    expected_probabilities = expected_amplitudes.abs() ** 2
+
+    probabilities = layer(raw_amplitude)
+
+    assert torch.allclose(probabilities, expected_probabilities, rtol=1e-6, atol=1e-8)
