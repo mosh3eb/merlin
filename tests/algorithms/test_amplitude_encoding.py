@@ -250,3 +250,52 @@ def test_mapped_keys_fock_space():
     assert len(mapped_keys) == expected_states
     assert len(set(mapped_keys)) == expected_states
     assert set(mapped_keys) == _fock_keys(circuit.m, n_photons)
+
+
+@pytest.mark.parametrize("computation_space", ["fock", "no_bunching"])
+def test_ebs_batches_group_fock_states(computation_space):
+    circuit = pcvl.components.GenericInterferometer(
+        4,
+        pcvl.components.catalog["mzi phase last"].generate,
+        shape=pcvl.InterferometerShape.RECTANGLE,
+    )
+    n_photons = 2
+
+    layer = QuantumLayer(
+        input_size=0,
+        circuit=circuit,
+        n_photons=n_photons,
+        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        input_state=None,
+        trainable_parameters=["phi"],
+        input_parameters=[],
+        dtype=torch.float32,
+        amplitude_encoding=True,
+        computation_space=computation_space,
+        no_bunching=False,
+    )
+
+    expected_states = len(layer.state_keys)
+    amplitude = torch.rand(8, expected_states, dtype=torch.float32)
+
+    process = layer.computation_process
+    original_compute_batch = process.simulation_graph.compute_batch
+    recorded_batches: list[list[tuple[int, ...]]] = []
+    print(f"Initial recorded batches: {recorded_batches}")
+
+    def tracked_compute_batch(unitary, batch_fock_states):
+        recorded_batches.append([tuple(state) for state in batch_fock_states])
+        return original_compute_batch(unitary, batch_fock_states)
+
+    process.simulation_graph.compute_batch = tracked_compute_batch  # type: ignore[assignment]
+    try:
+        layer(amplitude, simultaneous_processes=8)
+        print(f"Recorded batches: {recorded_batches}")
+    finally:
+        process.simulation_graph.compute_batch = original_compute_batch  # type: ignore[assignment]
+        print(f"Finally Recorded batches: {recorded_batches}")
+    expected_batches = [
+        [tuple(state) for state in layer.state_keys[i : i + 8]]
+        for i in range(0, expected_states, 8)
+    ]
+    assert recorded_batches == expected_batches
