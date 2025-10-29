@@ -534,8 +534,9 @@ class QuantumLayer(nn.Module):
         feature_dim = amplitude.shape[-1]
         if feature_dim != expected_dim:
             raise ValueError(
-                f"Amplitude input expects {expected_dim} components, received {feature_dim}"
+                f"Amplitude input expects {expected_dim} components, received {feature_dim} : we encourage you to complete your input vector with zeros (zerro-padding)."
             )
+            # TODO: suggest/implement zero-padding or sparsity tensor format
 
         if amplitude.dtype not in (
             torch.float32,

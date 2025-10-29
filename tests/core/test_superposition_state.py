@@ -1,5 +1,17 @@
-from types import MethodType
+"""
+Core-level integration tests for superposition handling in QuantumLayer.
+
+These cases exercise the full layer pipeline, including:
+* Interaction with the measurement strategies when superposed input states are provided.
+* Runtime heuristics that choose between single-state and batched EBS pathways.
+* Benchmarks comparing classical recombination versus the internal quantum layer execution.
+
+They sit under `tests/core` because they touch the broader stack (process graphs,
+simulation caches, benchmarking), complementing the algorithm-specific suites.
+"""
+
 import math
+from types import MethodType
 
 import perceval as pcvl
 import torch

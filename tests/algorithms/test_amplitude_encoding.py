@@ -1,3 +1,17 @@
+"""
+Algorithms-level tests for amplitude-encoded QuantumLayer workflows.
+
+These cases validate:
+* Construction and execution of QuantumLayer when amplitude encoding is enabled.
+* Measurement strategies applied to amplitude vectors (e.g. returning probabilities).
+* The combinatorial integrity of `state_keys` for both `no_bunching` and full Fock spaces.
+
+Keeping these checks here ensures the public algorithms facade keeps exposing
+the right behaviour for amplitude-centric users without dipping into lower-level tests.
+"""
+
+import itertools
+import math
 import warnings
 from types import MethodType
 
@@ -145,3 +159,94 @@ def test_amplitude_encoding_probabilities_strategy(make_layer):
     probabilities = layer(raw_amplitude)
 
     assert torch.allclose(probabilities, expected_probabilities, rtol=1e-6, atol=1e-8)
+
+
+def _normalised_state(n_states: int, dtype: torch.dtype) -> torch.Tensor:
+    state = torch.rand(1, n_states, dtype=dtype)
+    norm = state.abs().pow(2).sum(dim=1, keepdim=True).sqrt()
+    return state / norm
+
+
+def _fock_keys(modes: int, n_photons: int) -> set[tuple[int, ...]]:
+    keys: set[tuple[int, ...]] = set()
+
+    def build(prefix: list[int], remaining: int, idx: int) -> None:
+        if idx == modes - 1:
+            keys.add(tuple(prefix + [remaining]))
+            return
+        for value in range(remaining + 1):
+            build(prefix + [value], remaining - value, idx + 1)
+
+    build([], n_photons, 0)
+    return keys
+
+
+def _no_bunching_keys(modes: int, n_photons: int) -> set[tuple[int, ...]]:
+    return {
+        tuple(1 if i in combo else 0 for i in range(modes))
+        for combo in itertools.combinations(range(modes), n_photons)
+    }
+
+
+def test_mapped_keys_no_bunching_space():
+    circuit = pcvl.components.GenericInterferometer(
+        4,
+        pcvl.components.catalog["mzi phase last"].generate,
+        shape=pcvl.InterferometerShape.RECTANGLE,
+    )
+    n_photons = 2
+    expected_states = math.comb(circuit.m, n_photons)
+    input_state = _normalised_state(expected_states, dtype=torch.float32)
+
+    layer = QuantumLayer(
+        input_size=0,
+        circuit=circuit,
+        n_photons=n_photons,
+        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        input_state=input_state,
+        trainable_parameters=["phi"],
+        input_parameters=[],
+        dtype=torch.float32,
+        amplitude_encoding=True,
+        computation_space="no_bunching",
+        no_bunching=True,
+    )
+
+    mapped_keys = layer.state_keys
+    print(f"Mapped keys: {mapped_keys}")
+    print(f"No bunching keys: {_no_bunching_keys(circuit.m, n_photons)}")
+    assert len(mapped_keys) == expected_states
+    assert len(set(mapped_keys)) == expected_states
+    assert set(mapped_keys) == _no_bunching_keys(circuit.m, n_photons)
+
+
+def test_mapped_keys_fock_space():
+    circuit = pcvl.components.GenericInterferometer(
+        4,
+        pcvl.components.catalog["mzi phase last"].generate,
+        shape=pcvl.InterferometerShape.RECTANGLE,
+    )
+    n_photons = 2
+    expected_states = math.comb(circuit.m + n_photons - 1, n_photons)
+    input_state = _normalised_state(expected_states, dtype=torch.float32)
+
+    layer = QuantumLayer(
+        input_size=0,
+        circuit=circuit,
+        n_photons=n_photons,
+        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        input_state=input_state,
+        trainable_parameters=["phi"],
+        input_parameters=[],
+        dtype=torch.float32,
+        amplitude_encoding=True,
+        computation_space="fock",
+        no_bunching=False,
+    )
+
+    mapped_keys = layer.state_keys
+    print(f"Mapped keys: {mapped_keys}")
+    print(f"Fock keys: {_fock_keys(circuit.m, n_photons)}")
+    assert len(mapped_keys) == expected_states
+    assert len(set(mapped_keys)) == expected_states
+    assert set(mapped_keys) == _fock_keys(circuit.m, n_photons)

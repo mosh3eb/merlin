@@ -317,9 +317,7 @@ class ComputationProcess(AbstractComputationProcess):
         if state_dim != expected:
             space = "no_bunching" if self.no_bunching else "fock"
             if self.no_bunching:
-                explanation = (
-                    f"expected C(m, n_photons) = C({self.m}, {self.n_photons}) = {expected}"
-                )
+                explanation = f"expected C(m, n_photons) = C({self.m}, {self.n_photons}) = {expected}"
             else:
                 explanation = (
                     f"expected C(m + n_photons - 1, n_photons) = "
@@ -346,7 +344,9 @@ class ComputationProcess(AbstractComputationProcess):
         elif tensor.dtype == torch.float64:
             tensor = tensor.to(torch.complex128)
         elif tensor.dtype not in (torch.complex64, torch.complex128):
-            raise TypeError(f"Unsupported dtype for superposition state: {tensor.dtype}")
+            raise TypeError(
+                f"Unsupported dtype for superposition state: {tensor.dtype}"
+            )
 
         norm = tensor.abs().pow(2).sum(dim=1, keepdim=True).sqrt()
         tensor = tensor / norm

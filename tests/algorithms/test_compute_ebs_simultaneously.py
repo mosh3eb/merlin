@@ -1,3 +1,15 @@
+"""
+Low-level tests for the compute_ebs_simultaneously kernel and related plumbing.
+
+These scenarios concentrate on:
+* Numerical equivalence between the batch EBS kernel and the single-state paths.
+* Gradient propagation and dtype handling for the ComputationProcess internals.
+* Validation of superposition dimensions under different computation spaces.
+
+By keeping these checks isolated we can evolve the high-level QuantumLayer API
+without losing coverage of the specialised batch kernel behaviours.
+"""
+
 import math
 
 import perceval as pcvl
@@ -6,7 +18,6 @@ import torch
 
 from merlin import QuantumLayer
 from merlin.core.process import ComputationProcess
-from merlin.measurement.strategies import MeasurementStrategy
 from merlin.measurement.strategies import MeasurementStrategy
 
 
@@ -187,9 +198,13 @@ class TestComputeEbsSimultaneously:
 
     def test_invalid_superposition_dimension_fock(self):
         """Input state dimension mismatch in Fock space raises a ValueError."""
-        expected_fock_states = math.comb(self.circuit.m + self.n_photons - 1, self.n_photons)
+        expected_fock_states = math.comb(
+            self.circuit.m + self.n_photons - 1, self.n_photons
+        )
         valid_state = torch.rand(1, expected_fock_states, dtype=torch.float64)
-        valid_state = valid_state / valid_state.abs().pow(2).sum(dim=1, keepdim=True).sqrt()
+        valid_state = (
+            valid_state / valid_state.abs().pow(2).sum(dim=1, keepdim=True).sqrt()
+        )
 
         process_fock = ComputationProcess(
             circuit=self.circuit,
@@ -209,9 +224,7 @@ class TestComputeEbsSimultaneously:
         params = [p.clone() for p in self.test_parameters]
 
         with pytest.raises(ValueError, match="Input state dimension mismatch"):
-            process_fock.compute_ebs_simultaneously(
-                params, simultaneous_processes=1
-            )
+            process_fock.compute_ebs_simultaneously(params, simultaneous_processes=1)
 
     def test_error_handling(self):
         """Test error handling for invalid inputs."""
