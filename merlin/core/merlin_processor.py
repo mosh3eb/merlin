@@ -146,10 +146,10 @@ class MerlinProcessor:
         # Determine deadline
         effective_timeout = self.default_timeout if timeout is None else timeout
         deadline: float | None = (
-                        None
-             if effective_timeout in (None, 0)
-                  else time.time() + float(effective_timeout)
-                        )
+            None
+            if effective_timeout in (None, 0)
+            else time.time() + float(effective_timeout)
+        )
 
         original_device = input.device
         original_dtype = input.dtype
@@ -159,7 +159,7 @@ class MerlinProcessor:
         state = {
             "cancel_requested": False,
             "current_status": None,
-            "job_ids": [],             # accumulated across all chunk jobs
+            "job_ids": [],  # accumulated across all chunk jobs
             "chunks_total": 0,
             "chunks_done": 0,
             "active_chunks": 0,
@@ -174,14 +174,18 @@ class MerlinProcessor:
                 try:
                     from concurrent.futures import CancelledError
                 except Exception:  # pragma: no cover
+
                     class CancelledError(RuntimeError):
                         pass
+
                 fut.set_exception(CancelledError("Remote call was cancelled"))
 
         def _status():
             js = state.get("current_status")
             base = {
-                "state": "COMPLETE" if fut.done() and not js else (js.get("state") if js else "IDLE"),
+                "state": "COMPLETE"
+                if fut.done() and not js
+                else (js.get("state") if js else "IDLE"),
                 "progress": js.get("progress") if js else 0.0,
                 "message": js.get("message") if js else None,
                 "chunks_total": state["chunks_total"],
@@ -201,9 +205,13 @@ class MerlinProcessor:
                 for layer in layers:
                     # Policy: offload quantum leaves; else run locally
                     should_offload = None
-                    if hasattr(layer, "should_offload") and callable(layer.should_offload):
+                    if hasattr(layer, "should_offload") and callable(
+                        layer.should_offload
+                    ):
                         try:
-                            should_offload = bool(layer.should_offload(self.remote_processor, nsample))
+                            should_offload = bool(
+                                layer.should_offload(self.remote_processor, nsample)
+                            )
                         except Exception:
                             should_offload = None
                     if should_offload is None:
@@ -249,7 +257,9 @@ class MerlinProcessor:
         B = input_tensor.shape[0]
         if B <= self.max_batch_size and self.chunk_concurrency == 1:
             # Fast path: single chunk, single job.
-            return self._run_chunk_wrapper(layer, input_tensor, nsample, state, deadline)
+            return self._run_chunk_wrapper(
+                layer, input_tensor, nsample, state, deadline
+            )
 
         # Ensure we have (and cache) layer config and a child remote processor
         cache = self._layer_cache.get(id(layer))
@@ -283,7 +293,9 @@ class MerlinProcessor:
 
         def _call(s: int, e: int, idx: int):
             try:
-                t = self._run_chunk(layer, config, child_rp, input_tensor[s:e], nsample, state, deadline)
+                t = self._run_chunk(
+                    layer, config, child_rp, input_tensor[s:e], nsample, state, deadline
+                )
                 outputs[idx] = t
             except BaseException as ex:
                 errors.append(ex)
@@ -350,7 +362,9 @@ class MerlinProcessor:
             config = cache["config"]
             child_rp = cache["rp"]
 
-        t = self._run_chunk(layer, config, child_rp, input_chunk, nsample, state, deadline)
+        t = self._run_chunk(
+            layer, config, child_rp, input_chunk, nsample, state, deadline
+        )
         state["chunks_total"] += 1
         state["chunks_done"] += 1
         return t
@@ -377,7 +391,9 @@ class MerlinProcessor:
 
         # Prepare a fresh Sampler for THIS chunk (one sampler per worker for thread-safety)
         max_shots_arg = (
-            self.DEFAULT_SHOTS_PER_CALL if self.max_shots_per_call is None else int(self.max_shots_per_call)
+            self.DEFAULT_SHOTS_PER_CALL
+            if self.max_shots_per_call is None
+            else int(self.max_shots_per_call)
         )
         sampler = Sampler(child_rp, max_shots_per_call=max_shots_arg)
 
@@ -471,7 +487,9 @@ class MerlinProcessor:
         return RemoteProcessor(
             name=rp.name,
             token=None,  # RemoteConfig will pick it up from cache; handler also exists
-            url=rp.get_rpc_handler().url if hasattr(rp.get_rpc_handler(), "url") else None,
+            url=rp.get_rpc_handler().url
+            if hasattr(rp.get_rpc_handler(), "url")
+            else None,
             proxies=rp.proxies,
             rpc_handler=rp.get_rpc_handler(),  # share handler to avoid re-auth cost
         )
@@ -534,7 +552,10 @@ class MerlinProcessor:
                     probs = torch.zeros(dist_size)
 
                     if state_counts:
-                        if getattr(layer, "no_bunching", False) and valid_states is not None:
+                        if (
+                            getattr(layer, "no_bunching", False)
+                            and valid_states is not None
+                        ):
                             filtered_counts = {}
                             for state_str, count in state_counts.items():
                                 state_tuple = self._parse_perceval_state(state_str)
@@ -710,7 +731,9 @@ class MerlinProcessor:
                 param_values[pname] = float(row[j] * np.pi) if j < row.shape[0] else 0.0
 
             # RemoteProcessor returns an int or None (if zero probability path)
-            est = child_rp.estimate_required_shots(desired_samples_per_input, param_values=param_values)
+            est = child_rp.estimate_required_shots(
+                desired_samples_per_input, param_values=param_values
+            )
             estimates.append(int(est) if est is not None else 0)
 
         return estimates
@@ -742,4 +765,5 @@ class MerlinProcessor:
 
     def _cancelled_error(self):
         from concurrent.futures import CancelledError
+
         return CancelledError("Remote call was cancelled")
