@@ -107,8 +107,8 @@ class ComputationProcess(AbstractComputationProcess):
         return amplitudes
 
     def compute_superposition_state(
-        self, parameters: list[torch.Tensor]
-    ) -> torch.Tensor:
+        self, parameters: list[torch.Tensor], return_keys: bool = False
+    ) -> torch.Tensor | tuple[list[tuple[int, ...]], torch.Tensor]:
         unitary = self.converter.to_tensor(*parameters)
         changed_unitary = True
 
@@ -165,7 +165,7 @@ class ComputationProcess(AbstractComputationProcess):
 
         prev_state_index, prev_state = state_list.pop(0)
 
-        _, amplitude = self.simulation_graph.compute(unitary, prev_state)
+        keys, amplitude = self.simulation_graph.compute(unitary, prev_state)
         amplitudes = torch.zeros(
             (self.input_state.shape[-1], len(self.simulation_graph.mapped_keys)),
             dtype=amplitude.dtype,
@@ -185,7 +185,8 @@ class ComputationProcess(AbstractComputationProcess):
         input_state = self.input_state.to(amplitudes.dtype)
 
         final_amplitudes = input_state @ amplitudes
-
+        if return_keys:
+            return keys, final_amplitudes
         return final_amplitudes
 
     def compute_ebs_simultaneously(

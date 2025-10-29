@@ -20,11 +20,21 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from .torch_codes import (
-    FeatureEncoder,
-    LexGroupingMapper,
-    ModGroupingMapper,
-    OutputMapper,
-)
+"""
+Utility subpackages for Merlin.
 
-__all__ = ["FeatureEncoder", "OutputMapper", "LexGroupingMapper", "ModGroupingMapper"]
+This module exposes commonly used utility helpers so they can be imported from
+``merlin.utils``.
+"""
+
+from .dtypes import resolve_float_complex, to_torch_dtype
+from .grouping import LexGrouping, ModGrouping
+from .torch_codes import FeatureEncoder
+
+__all__ = [
+    "LexGrouping",
+    "ModGrouping",
+    "FeatureEncoder",
+    "resolve_float_complex",
+    "to_torch_dtype",
+]
