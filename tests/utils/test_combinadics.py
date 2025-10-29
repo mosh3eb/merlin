@@ -1,7 +1,9 @@
 import math
 
+import perceval as pcvl
 import pytest
 
+from merlin import QuantumLayer
 from merlin.utils.combinadics import Combinadics
 
 
@@ -62,3 +64,35 @@ def test_fock_enumeration_desc_lex_and_size():
 def test_dual_rail_requires_twice_as_many_modes():
     with pytest.raises(ValueError):
         Combinadics("dual_rail", n=4, m=6)
+
+
+@pytest.mark.parametrize(
+    "scheme,no_bunching,n,m",
+    [
+        ("unbunched", True, 4, 8),
+        ("fock", False, 4, 8),
+        ("unbunched", True, 5, 3),
+        ("fock", False, 5, 3),
+        ("unbunched", True, 2, 10),
+        ("fock", False, 2, 10),
+    ],
+)
+def test_iteration_order_matches_quantum_layer(
+    scheme: str, no_bunching: bool, n: int, m: int
+):
+    n, m = 4, 8
+    ql = QuantumLayer(
+        input_size=0,
+        circuit=pcvl.Circuit(m),
+        n_photons=n,
+        no_bunching=no_bunching,
+    )
+
+    mapped_keys = [
+        tuple(state) for state in ql.computation_process.simulation_graph.mapped_keys
+    ]
+
+    combo = Combinadics(scheme, n=n, m=m)
+    states = [combo.index_to_fock(i) for i in range(combo.compute_space_size())]
+
+    assert mapped_keys == states
