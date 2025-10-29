@@ -33,7 +33,7 @@ Could be optimized further using numba, and caching of binomial coefficients.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 
 TupleInt = tuple[int, ...]
 
@@ -145,6 +145,33 @@ class Combinadics:
             return math.comb(self.m, self.n)
         return 1 << (self.m // 2)
 
+    def iter_states(self) -> Iterator[TupleInt]:
+        """Yield admissible states in descending lexicographic order.
+
+        Returns
+        -------
+        Iterator[Tuple[int, ...]]
+            Generator over states matching the configured scheme.
+        """
+
+        if self.scheme == "fock":
+            yield from self._iter_fock(self.n, 0, ())
+        elif self.scheme == "unbunched":
+            yield from self._iter_unbunched(self.n, 0, ())
+        else:
+            yield from self._iter_dualrail()
+
+    def enumerate_states(self) -> list[TupleInt]:
+        """Return all admissible states in descending lexicographic order.
+
+        Returns
+        -------
+        list[Tuple[int, ...]]
+            State list matching :meth:`iter_states`.
+        """
+
+        return list(self.iter_states())
+
     # --------------------------------------------------------------------- #
     # Validation helpers
     # --------------------------------------------------------------------- #
@@ -199,6 +226,15 @@ class Combinadics:
         counts[-1] = remaining
         return tuple(counts)
 
+    def _iter_fock(
+        self, remaining: int, position: int, prefix: TupleInt
+    ) -> Iterator[TupleInt]:
+        if position == self.m - 1:
+            yield prefix + (remaining,)
+            return
+        for a in range(remaining, -1, -1):
+            yield from self._iter_fock(remaining - a, position + 1, prefix + (a,))
+
     # --------------------------------------------------------------------- #
     # Unbunched (collision free)
     # --------------------------------------------------------------------- #
@@ -238,6 +274,23 @@ class Combinadics:
                 r -= with_one
         return tuple(counts)
 
+    def _iter_unbunched(
+        self, ones_left: int, position: int, prefix: TupleInt
+    ) -> Iterator[TupleInt]:
+        if position == self.m:
+            if ones_left == 0:
+                yield prefix
+            return
+
+        remaining_positions = self.m - position
+        if ones_left > remaining_positions:
+            return
+
+        if ones_left > 0:
+            yield from self._iter_unbunched(ones_left - 1, position + 1, prefix + (1,))
+        if remaining_positions - 1 >= ones_left:
+            yield from self._iter_unbunched(ones_left, position + 1, prefix + (0,))
+
     # --------------------------------------------------------------------- #
     # Dual rail (exactly one photon per pair)
     # --------------------------------------------------------------------- #
@@ -276,3 +329,17 @@ class Combinadics:
             else:
                 counts[i], counts[i + 1] = 0, 1
         return tuple(counts)
+
+    def _iter_dualrail(self) -> Iterator[TupleInt]:
+        total = self.compute_space_size()
+        pairs = self.m // 2
+        for value in range(total - 1, -1, -1):
+            counts = [0] * self.m
+            for k in range(pairs - 1, -1, -1):
+                bit = (value >> (pairs - 1 - k)) & 1
+                i = 2 * k
+                if bit == 1:
+                    counts[i], counts[i + 1] = 1, 0
+                else:
+                    counts[i], counts[i + 1] = 0, 1
+            yield tuple(counts)
