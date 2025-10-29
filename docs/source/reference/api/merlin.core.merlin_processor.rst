@@ -122,7 +122,7 @@ Synchronous
     (Subject to your platform limits and ``max_shots_per_call``.)
 
 * **timeout (float | None)**: overrides the constructor default for this call.
-  * ``None`` → no time limit for this call.
+  * ``None`` --> no time limit for this call.
   * ``0`` or falsy is treated as "no limit".
   * Otherwise --> seconds until a **global timeout** cancels all in-flight jobs
     launched for this call and raises ``TimeoutError``.
@@ -235,6 +235,136 @@ Controlling Shots Explicitly
 * Use ``estimate_required_shots_per_input`` ahead of time to pick good values.
 * ``max_shots_per_call`` lets you enforce a **hard cap** for each cloud job.
 
+Workflow Recipes (End-to-End Examples)
+--------------------------------------
+
+The following examples mirror tested workflows (see ``tests/core/cloud/test_userguide_examples.py``).
+
+Mixed classical --> quantum --> classical
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    # Build the quantum layer and probe its output size
+    q = QuantumLayer(...).eval()  # see Quick Start builder pattern
+    dist = q(torch.rand(2, q.input_size)).shape[1]
+
+    model = nn.Sequential(
+        nn.Linear(3, q.input_size, bias=False),
+        q,                          # offloaded by Merlin
+        nn.Linear(dist, 4, bias=False),
+        nn.Softmax(dim=-1),
+    ).eval()
+
+    proc = MerlinProcessor(pcvl.RemoteProcessor("sim:slos"))
+    # Prefer exact probabilities if supported; else sample.
+    use_probs = "probs" in getattr(proc, "available_commands", [])
+    nsamp = None if use_probs else 20_000
+
+    X = torch.rand(6, 3)
+    fut = proc.forward_async(model, X, nsample=nsamp)
+    Y = fut.wait()
+    print("shape:", Y.shape, "job_ids:", len(fut.job_ids))  # expect >= 1
+
+Gradient-free fine-tuning with COBYLA (no autograd on quantum layer)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    # Optional dependency: SciPy
+    from scipy.optimize import minimize
+
+    # Small model: Linear -> Quantum -> Linear(scalar)
+    q = QuantumLayer(...).eval()
+    dist = q(torch.rand(2, q.input_size)).shape[1]
+    readout = nn.Linear(dist, 1, bias=False).eval()
+    pre = nn.Linear(3, q.input_size, bias=False).eval()
+    model = nn.Sequential(pre, q, readout).eval()
+
+    # Flatten quantum params we will tune (keep classical layers fixed)
+    q_params = [(n, p) for n, p in q.named_parameters() if p.requires_grad]
+    shapes = [p.shape for _, p in q_params]
+    sizes = [p.numel() for _, p in q_params]
+
+    def get_flat():
+        import torch
+        return torch.cat([p.detach().flatten().cpu() for _, p in q_params], dim=0)
+
+    def set_from_flat(vec):
+        import torch
+        off = 0
+        with torch.no_grad():
+            for (_, p), sz, shp in zip(q_params, sizes, shapes, strict=False):
+                chunk = vec[off:off+sz].view(shp).to(p.dtype)
+                p.data.copy_(chunk.to(p.device))
+                off += sz
+
+    x0 = get_flat().double().numpy()
+    proc = MerlinProcessor(pcvl.RemoteProcessor("sim:slos"))
+    nsamp = None if "probs" in getattr(proc, "available_commands", []) else 20_000
+    X = torch.rand(8, 3)
+
+    # Objective: maximize mean scalar output -> minimize negative
+    def objective(v_np):
+        v = torch.from_numpy(v_np).to(torch.float64)
+        set_from_flat(v.to(torch.float32))
+        with torch.no_grad():
+            y = proc.forward(model, X, nsample=nsamp)
+            return -float(y.mean().item())
+
+    res = minimize(objective, x0, method="COBYLA",
+                   options={"maxiter": 12, "rhobeg": 0.5})
+    print("final objective:", res.fun)
+
+Local vs remote A/B (force simulation)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    q = QuantumLayer(...).eval()
+    X = torch.rand(4, q.input_size)
+    proc = MerlinProcessor(pcvl.RemoteProcessor("sim:slos"))
+
+    # Remote path (offloaded)
+    y_remote = proc.forward(q, X, nsample=5000)
+
+    # Local path (force simulation)
+    q.force_simulation = True
+    y_local = proc.forward(q, X, nsample=5000)
+
+    # Compare distributions (allowing some sampling noise)
+    print((y_local - y_remote).abs().mean())
+
+Monitoring status & safe cancellation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    fut = proc.forward_async(q, torch.rand(16, q.input_size), nsample=40000, timeout=None)
+    # Poll status (state/progress/message + chunk counters)
+    print(fut.status())
+    # If needed, cancel cooperatively
+    fut.cancel_remote()
+    try:
+        _ = fut.wait()
+    except Exception as e:
+        print("Cancelled:", type(e).__name__)
+
+High-throughput batching with chunking
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+    proc = MerlinProcessor(
+        pcvl.RemoteProcessor("sim:slos"),
+        max_batch_size=8,          # split big batches into <=8 rows per job
+        chunk_concurrency=2        # up to 2 chunk-jobs in flight per quantum leaf
+    )
+    X = torch.rand(64, q.input_size)  # big batch
+    fut = proc.forward_async(q, X, nsample=3000)
+    Y = fut.wait()
+    print("chunks_total/done/active:", proc.forward_async.__self__ if False else fut.status())
+
 Troubleshooting
 ---------------
 
@@ -247,34 +377,6 @@ Troubleshooting
 * **Timeouts in CI**:
   * Backends vary. Make tests resilient to fast or slow responses by polling
     ``future.done()`` before asserting on timeout exceptions.
-
-Examples
---------
-
-Asynchronous pipeline with cancellation
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. code-block:: python
-
-    fut = proc.forward_async(model, X_big, nsample=40000, timeout=None)
-    # Give the backend time to allocate and start
-    _ = fut.status()
-    # Cancel if needed
-    fut.cancel_remote()
-    try:
-        fut.wait()
-    except Exception as e:
-        print("Cancelled:", type(e).__name__)
-
-Two quantum leaves, chunked in parallel
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. code-block:: python
-
-    proc = MerlinProcessor(rp, max_batch_size=8, chunk_concurrency=2)
-    fut = proc.forward_async(two_q_layers_model, torch.rand(32, din), nsample=3000)
-    y = fut.wait()
-    print("jobs:", len(fut.job_ids))
 
 API Reference (Summary)
 -----------------------

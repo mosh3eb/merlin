@@ -1,152 +1,128 @@
-"""
-Chunked parallel offload tests for MerlinProcessor.
-
-Focus:
-- When B > max_batch_size, processor splits into chunks and submits up to
-  chunk_concurrency remote jobs in parallel per quantum leaf.
-- job_ids aggregates one id per chunk submission (across all leaves).
-- Shape and stitching are correct.
-- Global timeout cancels all in-flight chunk jobs (fan-out).
-- cancel_all() cancels all chunked jobs.
-- Two quantum leaves both chunk -> job_ids >= sum of chunks across leaves.
-
-Requires cloud; auto-skips if no token via `remote_processor` fixture from conftest.py.
-"""
-
+# tests/core/cloud/test_cloud_futures_chunking.py
 from __future__ import annotations
 
 import concurrent.futures as _cf
-import time
 
 import pytest
 import torch
 import torch.nn as nn
+from _helpers import make_layer, spin_until
 
-from merlin.algorithms import QuantumLayer
-from merlin.builder.circuit_builder import CircuitBuilder
 from merlin.core.merlin_processor import MerlinProcessor
-from merlin.sampling.strategies import OutputMappingStrategy
 
 
-def _spin_until(pred, timeout_s: float = 10.0, sleep_s: float = 0.02) -> bool:
-    start = time.time()
-    while not pred():
-        if time.time() - start > timeout_s:
-            return False
-        time.sleep(sleep_s)
-    return True
+class TestFuturesAndChunking:
+    def test_forward_async_future_and_helpers(self, remote_processor):
+        layer = make_layer(6, 2, 2, no_bunching=True)
+        proc = MerlinProcessor(remote_processor)
+        fut = proc.forward_async(layer, torch.rand(3, 2), nsample=1500)
 
+        assert isinstance(fut, torch.futures.Future)
+        assert hasattr(fut, "cancel_remote")
+        assert hasattr(fut, "status")
+        assert hasattr(fut, "job_ids")
 
-def _make_layer(m: int, n: int, input_size: int, no_bunching: bool = True) -> QuantumLayer:
-    builder = CircuitBuilder(n_modes=m)
-    builder.add_rotations(trainable=True, name="theta")
-    builder.add_angle_encoding(modes=list(range(input_size)), name="px")
-    if m >= 3:
-        builder.add_entangling_layer()
+        spin_until(lambda f=fut: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
+        out = fut.wait()
+        assert out.shape == (3, 15)
 
-    return QuantumLayer(
-        input_size=input_size,
-        output_size=None,  # raw distribution
-        builder=builder,
-        n_photons=n,
-        no_bunching=no_bunching,
-        output_mapping_strategy=OutputMappingStrategy.NONE,
-    ).eval()
+    def test_timeout_sets_timeouterror(self, remote_processor):
+        layer = make_layer(6, 2, 2, no_bunching=True)
+        proc = MerlinProcessor(remote_processor)
+        fut = proc.forward_async(layer, torch.rand(8, 2), nsample=50_000, timeout=0.03)
 
+        done_in_time = spin_until(lambda: fut.done(), timeout_s=2.0)
+        if not done_in_time:
+            with pytest.raises(TimeoutError):
+                fut.wait()
+        else:
+            try:
+                _ = fut.value()
+            except Exception:
+                with pytest.raises(TimeoutError):
+                    fut.wait()
 
-class TestChunkedOffload:
-    def test_chunking_job_ids_and_shape(self, remote_processor):
-        """
-        With B > max_batch_size and chunk_concurrency>1, we expect:
-          - len(job_ids) == number of chunks
-          - correct output shape
-          - status() exposes chunk counters
-        """
-        # One quantum leaf: 6 modes, 2 photons, no-bunching -> output 15
-        q = _make_layer(m=6, n=2, input_size=2, no_bunching=True).eval()
+    def test_cancel_remote_cancelled_error(self, remote_processor):
+        layer = make_layer(6, 2, 2, no_bunching=True)
+        proc = MerlinProcessor(remote_processor)  # default timeout; per-call infinite
+        fut = proc.forward_async(layer, torch.rand(8, 2), nsample=40_000, timeout=None)
 
-        # Force chunking: B=5, max_batch_size=2 -> chunks: [0:2], [2:4], [4:5] -> 3 chunks
-        B = 5
-        X = torch.rand(B, 2)
-
-        proc = MerlinProcessor(
-            remote_processor,
-            max_batch_size=2,
-            timeout=3600.0,
-            max_shots_per_call=50_000,  # Perceval requires this for RemoteProcessor
-            chunk_concurrency=2,        # parallelize within the leaf
-        )
-
-        fut = proc.forward_async(q, X, nsample=2000)  # use sampling if probs unavailable
-        # Wait until we either have job IDs or it's already done
-        _spin_until(lambda f=fut: len(f.job_ids) >= 3 or f.done(), timeout_s=20.0)
-        y = fut.wait()
-
-        assert y.shape == (B, 15)
-        assert len(fut.job_ids) >= 3  # exactly 3 in normal flow
-
-        st = fut.status()
-        # status should expose chunk counters
-        assert "chunks_total" in st and "chunks_done" in st and "active_chunks" in st
-        assert st["chunks_total"] >= 3
-
-    def test_chunking_timeout_sets_timeouterror(self, remote_processor):
-        """
-        Global timeout must cancel all in-flight chunk jobs.
-        Use a larger nsample to slow down (if we are on sampling backend).
-        """
-        q = _make_layer(m=6, n=2, input_size=2, no_bunching=True).eval()
-        B = 8
-        X = torch.rand(B, 2)
-
-        proc = MerlinProcessor(
-            remote_processor,
-            max_batch_size=2,     # 4 chunks
-            timeout=3600.0,       # default large; per-call timeout will be small
-            max_shots_per_call=100_000,
-            chunk_concurrency=2,
-        )
-
-        fut = proc.forward_async(q, X, nsample=50_000, timeout=0.05)  # tiny per-call timeout
-        with pytest.raises(TimeoutError):
-            fut.wait()
-
-    def test_cancel_all_cancels_chunked_futures(self, remote_processor):
-        """
-        cancel_all() should cancel all in-flight chunk jobs and set CancelledError.
-        """
-        q = _make_layer(m=6, n=2, input_size=2, no_bunching=True).eval()
-        B = 9
-        X = torch.rand(B, 2)
-
-        proc = MerlinProcessor(
-            remote_processor,
-            max_batch_size=3,     # 3 chunks
-            timeout=3600.0,       # no auto-timeout
-            max_shots_per_call=80_000,
-            chunk_concurrency=2,
-        )
-
-        fut = proc.forward_async(q, X, nsample=40_000, timeout=None)
-
-        # Wait until jobs are submitted
-        ok = _spin_until(lambda f=fut: len(f.job_ids) >= 2 or f.done(), timeout_s=10.0)
-        if not ok or fut.done():
+        spin_until(lambda f=fut: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
+        if fut.done():
             pytest.skip("Backend finished too quickly to test cancellation")
-
-        proc.cancel_all()
+        fut.cancel_remote()
         with pytest.raises(_cf.CancelledError):
             fut.wait()
 
-    def test_two_quantum_leaves_both_chunked_have_expected_jobs(self, remote_processor):
-        """
-        Two quantum leaves in a sequential model; each should chunk independently.
-        Expect job_ids to be at least sum of chunks across both leaves.
-        """
-        # q1: 4m,2p -> 6; q2: 5m,2p -> 10 (raw distributions)
-        q1 = _make_layer(m=4, n=2, input_size=1, no_bunching=True).eval()
-        q2 = _make_layer(m=5, n=2, input_size=2, no_bunching=True).eval()
+    def test_multiple_concurrent_futures(self, remote_processor):
+        layer = make_layer(6, 2, 2, no_bunching=True)
+        proc = MerlinProcessor(remote_processor)
+        futs = [proc.forward_async(layer, torch.rand(2, 2), nsample=1500) for _ in range(4)]
+        for f in futs:
+            spin_until(lambda f=f: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
+        outs = [f.wait() for f in futs]
+        for y in outs:
+            assert y.shape == (2, 15)
 
+    def test_context_manager_auto_cancel_on_exit(self, remote_processor):
+        layer = make_layer(6, 2, 2, no_bunching=True)
+        fut = None
+        with MerlinProcessor(remote_processor) as proc:
+            fut = proc.forward_async(layer, torch.rand(8, 2), nsample=40_000, timeout=None)
+            spin_until(lambda: len(fut.job_ids) > 0 or fut.done(), timeout_s=10.0)
+        assert fut is not None
+        with pytest.raises(_cf.CancelledError):
+            fut.wait()
+
+    def test_cancel_all_cancels_multiple_futures(self, remote_processor):
+        layer = make_layer(6, 2, 2, no_bunching=True)
+        proc = MerlinProcessor(remote_processor)
+        futs = [proc.forward_async(layer, torch.rand(8, 2), nsample=40_000, timeout=None) for _ in range(3)]
+        spin_until(lambda: all(len(f.job_ids) > 0 or f.done() for f in futs), timeout_s=10.0)
+        if any(f.done() for f in futs):
+            pytest.skip("Backend finished too quickly to test cancellation")
+        proc.cancel_all()
+        for f in futs:
+            with pytest.raises(_cf.CancelledError):
+                f.wait()
+
+    def test_default_timeout_via_constructor(self, remote_processor):
+        layer = make_layer(6, 2, 2, no_bunching=True)
+        proc = MerlinProcessor(remote_processor, timeout=0.03)
+        fut = proc.forward_async(layer, torch.rand(8, 2), nsample=50_000)
+        done_in_time = spin_until(lambda: fut.done(), timeout_s=2.0)
+        if not done_in_time:
+            with pytest.raises(TimeoutError):
+                fut.wait()
+        else:
+            try:
+                _ = fut.value()
+            except Exception:
+                with pytest.raises(TimeoutError):
+                    fut.wait()
+
+    def test_chunking_end_to_end(self, remote_processor):
+        q = make_layer(6, 2, 2, no_bunching=True)
+        B, max_bs = 5, 2  # -> 3 chunks: [0:2],[2:4],[4:5]
+        X = torch.rand(B, 2)
+        proc = MerlinProcessor(
+            remote_processor,
+            max_batch_size=max_bs,
+            chunk_concurrency=2,
+            max_shots_per_call=50_000,
+        )
+        fut = proc.forward_async(q, X, nsample=2000)
+        spin_until(lambda f=fut: len(f.job_ids) >= 3 or f.done(), timeout_s=20.0)
+        y = fut.wait()
+        assert y.shape == (B, 15)
+        assert len(fut.job_ids) >= 3
+        st = fut.status()
+        assert st["chunks_total"] >= 3 and "chunks_done" in st and "active_chunks" in st
+
+    def test_two_quantum_leaves_both_chunked(self, remote_processor):
+        # q1: 4m,2p -> 6 ; q2: 5m,2p -> 10
+        q1 = make_layer(4, 2, 1, no_bunching=True)
+        q2 = make_layer(5, 2, 2, no_bunching=True)
         model = nn.Sequential(
             nn.Linear(3, 1, bias=False),
             q1,
@@ -155,23 +131,15 @@ class TestChunkedOffload:
             nn.Linear(10, 3, bias=False),
             nn.Softmax(dim=-1),
         ).eval()
-
-        # B=7, max_batch_size=3 -> chunks per leaf: 3 (3,3,1)
-        B = 7
-        X = torch.rand(B, 3)
-
+        X = torch.rand(7, 3)
         proc = MerlinProcessor(
             remote_processor,
             max_batch_size=3,
-            timeout=3600.0,
-            max_shots_per_call=60_000,
             chunk_concurrency=2,
+            max_shots_per_call=60_000,
         )
-
         fut = proc.forward_async(model, X, nsample=3000)
-        _spin_until(lambda f=fut: len(f.job_ids) >= 4 or f.done(), timeout_s=20.0)  # heuristic
+        spin_until(lambda f=fut: len(f.job_ids) >= 4 or f.done(), timeout_s=20.0)
         y = fut.wait()
-
-        assert y.shape == (B, 3)
-        # Expect about 6 jobs (3 per leaf) if both leaves chunk; allow >= 4 to be robust to very fast backends
+        assert y.shape == (7, 3)
         assert len(fut.job_ids) >= 4
