@@ -646,6 +646,7 @@ class FidelityKernel(torch.nn.Module):
                 not experiment.is_unitary
                 or experiment.post_select_fn is not None
                 or experiment.heralds
+                or experiment.in_heralds
             ):
                 raise ValueError(
                     "The provided experiment must be unitary, and must not have post-selection or heralding."
@@ -801,15 +802,12 @@ class FidelityKernel(torch.nn.Module):
             )
             all_circuits = U_forward[upper_idx[0]] @ U_adjoint[upper_idx[1]]
 
-        # Distribution for every evaluated circuit
-        _, amplitudes = self._slos_graph.compute(all_circuits, self.input_state)
-        _, probabilities = self._slos_graph.compute_probs_from_amplitudes(amplitudes)
-        if probabilities.ndim == 1:
-            probabilities = probabilities.unsqueeze(0)
-        probabilities = probabilities.to(dtype=self.dtype)
         # Distribution for every evaluated circuit (before detection)
         amplitudes = self._slos_graph.compute(all_circuits, self.input_state)[1]
         probabilities = torch.abs(amplitudes).square()
+        if probabilities.ndim == 1:
+            probabilities = probabilities.unsqueeze(0)
+        probabilities = probabilities.to(dtype=self.dtype)
         detection_probs = self._detector_transform(probabilities)
 
         if self.shots > 0:

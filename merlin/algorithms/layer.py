@@ -27,6 +27,7 @@ Main QuantumLayer implementation
 from __future__ import annotations
 
 import warnings
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 import perceval as pcvl
@@ -185,18 +186,19 @@ class QuantumLayer(nn.Module):
             raise RuntimeError("Experiment must be initialised.")
 
         self.circuit = resolved_circuit
-        self._detectors, self._empty_detectors = resolve_detectors(
+        self._detectors, empty_detectors = resolve_detectors(
             self.experiment, resolved_circuit.m
         )
+        self._has_custom_detectors = not empty_detectors
         self.detectors = self._detectors  # Backward compatibility alias
 
-        # Verify that no Detector was defined in experiement if using no_bunching=True:
-        if not self._empty_detectors and no_bunching:
+        # Verify that detectors are allowed:
+        if self._has_custom_detectors and no_bunching:
             raise RuntimeError(
                 "no_bunching must be False if Experiement contains at least one Detector."
             )
         if (
-            not self._empty_detectors
+            self._has_custom_detectors
             and measurement_strategy == MeasurementStrategy.AMPLITUDES
         ):
             raise RuntimeError(
@@ -252,22 +254,9 @@ class QuantumLayer(nn.Module):
 
         # Setup DetectorTransform
         self.n_photons = self.computation_process.n_photons
-        raw_keys = list(self.computation_process.simulation_graph.mapped_keys)
-        self._raw_output_keys = []
-        for key in raw_keys:
-            if isinstance(key, torch.Tensor):
-                iterable = key.tolist()
-            else:
-                iterable = key
-            self._raw_output_keys.append(tuple(int(v) for v in iterable))
-        self._detector_transform = DetectorTransform(
-            self._raw_output_keys,
-            self._detectors,
-            dtype=self.dtype,
-            device=self.device,
-        )
-        self._detector_keys = self._detector_transform.output_keys
-        self._detector_is_identity = self._detector_transform.is_identity
+        raw_keys = self.computation_process.simulation_graph.mapped_keys
+        self._raw_output_keys = [self._normalize_output_key(key) for key in raw_keys]
+        self._initialize_detector_transform()
 
         # Validate that the declared input size matches the builder-provided parameters
         spec_mappings = self.computation_process.converter.spec_mappings
@@ -609,29 +598,21 @@ class QuantumLayer(nn.Module):
                     ),
                     amplitudes,
                 )
-        if (
-            self.measurement_strategy == MeasurementStrategy.PROBABILITIES
-            or self.measurement_strategy == MeasurementStrategy.MODE_EXPECTATIONS
+        if self.measurement_strategy in (
+            MeasurementStrategy.PROBABILITIES,
+            MeasurementStrategy.MODE_EXPECTATIONS,
         ):
-            if self._detector_transform is not None:
-                distribution = self._detector_transform(distribution)
+            distribution = self._apply_detector_transform(distribution)
 
             if apply_sampling and shots > 0:
-                counts = self.autodiff_process.sampling_noise.pcvl_sampler(
+                distribution = self.autodiff_process.sampling_noise.pcvl_sampler(
                     distribution, shots
                 )
-                results = counts
-            else:
-                results = distribution
-            # Apply measurement_strategy
-            results = self.measurement_mapping(results)
 
-        # MeasurementStrategy.AMPLITUDES
+            results = self.measurement_mapping(distribution)
         else:
             results = self.measurement_mapping(amplitudes)
 
-        # TODO treatement when Detectors are defined with MeasurementStrategy.AMPLITUDES
-        # -> Incompatible
         return results
 
     def set_sampling_config(self, shots: int | None = None, method: str | None = None):
@@ -689,11 +670,9 @@ class QuantumLayer(nn.Module):
         if getattr(self, "_detector_transform", None) is None:
             return self.computation_process.simulation_graph.mapped_keys
         if self.measurement_strategy == MeasurementStrategy.AMPLITUDES:
-            return self.computation_process.simulation_graph.mapped_keys
+            return self._raw_output_keys
         return (
-            self._raw_output_keys
-            if getattr(self, "_detector_is_identity", False)
-            else self._detector_keys
+            self._raw_output_keys if self._detector_is_identity else self._detector_keys
         )
 
     @property
@@ -701,8 +680,35 @@ class QuantumLayer(nn.Module):
         return self._output_size
 
     @property
-    def empty_detectors(self) -> bool:
-        return self._empty_detectors
+    def has_custom_detectors(self) -> bool:
+        return self._has_custom_detectors
+
+    def _initialize_detector_transform(self) -> None:
+        self._detector_transform = DetectorTransform(
+            self._raw_output_keys,
+            self._detectors,
+            dtype=self.dtype,
+            device=self.device,
+        )
+        self._detector_keys = self._detector_transform.output_keys
+        self._detector_is_identity = self._detector_transform.is_identity
+
+    @staticmethod
+    def _normalize_output_key(
+        key: Iterable[int] | torch.Tensor | Sequence[int],
+    ) -> tuple[int, ...]:
+        if isinstance(key, torch.Tensor):
+            return tuple(int(v) for v in key.tolist())
+        return tuple(int(v) for v in key)
+
+    def _apply_detector_transform(self, distribution: torch.Tensor) -> torch.Tensor:
+        if self._detector_transform is None:
+            raise RuntimeError(
+                "Detector transform must be initialised before applying detectors."
+            )
+        if self._detector_is_identity:
+            return distribution
+        return self._detector_transform(distribution)
 
     @classmethod
     def simple(

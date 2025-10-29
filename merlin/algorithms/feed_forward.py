@@ -330,9 +330,7 @@ class FeedForwardBlock(torch.nn.Module):
         accumulated_prob,
         intermediary,
         outputs,
-        *,
-        layer: QuantumLayer,
-        depth: int = 0,
+        depth=0,
         x=None,
     ):
         """
@@ -351,7 +349,6 @@ class FeedForwardBlock(torch.nn.Module):
             intermediary (dict): Stores intermediate probabilities.
             outputs (dict): Stores final output probabilities for all branches.
             depth (int): Current recursion depth.
-            layer (QuantumLayer): Quantum layer associated with current amplitudes.
             x (torch.Tensor, optional): Classical input features.
         """
         # Base case: end of tree reached
@@ -406,8 +403,7 @@ class FeedForwardBlock(torch.nn.Module):
                     new_prob,
                     intermediary,
                     outputs,
-                    layer=layer,
-                    depth=depth + 1,
+                    depth + 1,
                     x=x,
                 )
             else:
@@ -492,15 +488,7 @@ class FeedForwardBlock(torch.nn.Module):
 
         # Recursively propagate through all branches
         self.iterate_feedforward(
-            (),
-            amplitudes,
-            keys,
-            1.0,
-            intermediary,
-            outputs,
-            layer=layer,
-            depth=0,
-            x=x,
+            (), amplitudes, keys, 1.0, intermediary, outputs, 0, x=x
         )
         self.output_keys = outputs.keys()
         return torch.stack(list(outputs.values()), dim=1)
