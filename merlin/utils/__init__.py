@@ -30,11 +30,13 @@ This module exposes commonly used utility helpers so they can be imported from
 from .dtypes import resolve_float_complex, to_torch_dtype
 from .grouping import LexGrouping, ModGrouping
 from .torch_codes import FeatureEncoder
+from .combinadics import Combinadics
 
 __all__ = [
     "LexGrouping",
     "ModGrouping",
     "FeatureEncoder",
+    "Combinadics",
     "resolve_float_complex",
     "to_torch_dtype",
 ]
