@@ -346,7 +346,10 @@ class TestComputeEbsSimultaneously:
         probs_batch = result_batch.real**2 + result_batch.imag**2
 
         # Results should be identical (or very close due to numerical precision)
-        assert torch.allclose(output_classical, probs_batch[0], rtol=3e-4, atol=1e-7), (
+        classical_probs = output_classical.to("cpu")
+        batch_probs = probs_batch[0].to("cpu")
+
+        assert torch.allclose(classical_probs, batch_probs, rtol=3e-4, atol=1e-7), (
             "Classical method and batch method give different results"
         )
 
