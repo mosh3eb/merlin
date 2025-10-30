@@ -721,8 +721,10 @@ class FidelityKernel(torch.nn.Module):
             all_circuits = U_forward[upper_idx[0]] @ U_adjoint[upper_idx[1]]
 
         # Distribution for every evaluated circuit
-        _, amplitudes = self._slos_graph.compute(all_circuits, self.input_state)
-        _, probabilities = self._slos_graph.compute_probs_from_amplitudes(amplitudes)
+        _, probabilities = self._slos_graph.compute_probs(
+            all_circuits, self.input_state
+        )
+
         if probabilities.ndim == 1:
             probabilities = probabilities.unsqueeze(0)
         probabilities = probabilities.to(dtype=self.dtype)
