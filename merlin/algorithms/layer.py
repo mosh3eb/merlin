@@ -547,12 +547,7 @@ class QuantumLayer(nn.Module):
         apply_sampling: bool | None = None,
         shots: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
-        """
-        Forward pass through the quantum layer.
-
-        When ``return_amplitudes`` is ``True`` the second element of the returned
-        tuple contains the complex amplitudes **before** detector application.
-        """
+        """Forward pass through the quantum layer."""
         # Prepare parameters
         params = self.prepare_parameters(list(input_parameters))
         # Get quantum output
