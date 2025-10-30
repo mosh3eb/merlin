@@ -409,6 +409,7 @@ class QuantumLayer(nn.Module):
             raise TypeError(f"Unknown measurement_strategy: {measurement_strategy}")
 
         # Create output mapping
+        # TODO (Philippe): no_bunching to be transformed in ComputationSpace, and check how DUAL_RAIL is handled
         self.measurement_mapping = OutputMapper.create_mapping(
             measurement_strategy,
             self.computation_process.computation_space is ComputationSpace.UNBUNCHED,
@@ -751,7 +752,9 @@ class QuantumLayer(nn.Module):
             needs_gradient, apply_sampling or False, shots or self.shots
         )
         distribution = amplitudes.real**2 + amplitudes.imag**2
-        if self.computation_space is ComputationSpace.UNBUNCHED:
+
+        # renormalize distribution and amplitudes for UNBUNCHED and DUAL_RAIL spaces
+        if self.computation_space is (ComputationSpace.UNBUNCHED or ComputationSpace.DUAL_RAIL):
             sum_probs = distribution.sum(dim=1, keepdim=True)
 
             # Only normalize when sum > 0 to avoid division by zero
