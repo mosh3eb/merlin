@@ -516,14 +516,13 @@ class TestQuantumLayer:
             if param.requires_grad:
                 assert param.grad is not None
 
-
     @pytest.mark.parametrize(
-    ("computation_space"),
-    [
-        ML.ComputationSpace.UNBUNCHED,
-        ML.ComputationSpace.DUAL_RAIL,
-        ML.ComputationSpace.FOCK,
-    ],
+        ("computation_space"),
+        [
+            ML.ComputationSpace.UNBUNCHED,
+            ML.ComputationSpace.DUAL_RAIL,
+            ML.ComputationSpace.FOCK,
+        ],
     )
     def test_computation_space_normalized_output(self, computation_space):
         """Test QuantumLayer with simple perceval circuit and no trainable parameters."""
@@ -536,16 +535,16 @@ class TestQuantumLayer:
         for i in range(m):
             circuit.add(i, pcvl.PS(pcvl.P(f"phi{i}")))
         circuit.add(0, pcvl.Unitary(pcvl.Matrix.random_unitary(m)))
-        
+
         layer = ML.QuantumLayer(
             input_size=m,
             n_photons=n,
             circuit=circuit,
             input_parameters=["phi"],  # No input parameters
             measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
-            computation_space=computation_space
+            computation_space=computation_space,
         )
 
         o = layer.forward(torch.rand(batch_size, m))
 
-        pytest.approx(torch.sum(o.abs()**2, dim=1).tolist(), [1.0]*batch_size)
+        assert torch.allclose(torch.sum(o.abs() ** 2, dim=1), torch.ones(batch_size))

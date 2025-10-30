@@ -182,12 +182,8 @@ class QuantumLayer(nn.Module):
         # if no_bunching is provided, check consistency with ComputationSpace
         derived_no_bunching = computation_space_value is ComputationSpace.UNBUNCHED
         if no_bunching is not None and no_bunching != derived_no_bunching:
-            warnings.warn(
-                "Overriding 'no_bunching' to match the requested computation_space. "
-                f"Expected {derived_no_bunching} for computation_space='{computation_space_value.value}', "
-                f"received {no_bunching}.",
-                UserWarning,
-                stacklevel=2,
+            raise ValueError(
+                "Incompatible 'no_bunching' value with selected 'computation_space'. "
             )
 
         self.computation_space = computation_space_value
@@ -409,10 +405,9 @@ class QuantumLayer(nn.Module):
             raise TypeError(f"Unknown measurement_strategy: {measurement_strategy}")
 
         # Create output mapping
-        # TODO (Philippe): no_bunching to be transformed in ComputationSpace, and check how DUAL_RAIL is handled
         self.measurement_mapping = OutputMapper.create_mapping(
             measurement_strategy,
-            self.computation_process.computation_space is ComputationSpace.UNBUNCHED,
+            self.computation_process.computation_space,
             keys,
         )
 
@@ -754,7 +749,10 @@ class QuantumLayer(nn.Module):
         distribution = amplitudes.real**2 + amplitudes.imag**2
 
         # renormalize distribution and amplitudes for UNBUNCHED and DUAL_RAIL spaces
-        if self.computation_space is (ComputationSpace.UNBUNCHED or ComputationSpace.DUAL_RAIL):
+        if (
+            self.computation_space is ComputationSpace.UNBUNCHED
+            or self.computation_space is ComputationSpace.DUAL_RAIL
+        ):
             sum_probs = distribution.sum(dim=1, keepdim=True)
 
             # Only normalize when sum > 0 to avoid division by zero

@@ -15,8 +15,8 @@ import itertools
 import math
 import warnings
 from types import MethodType
-import numpy as np
 
+import numpy as np
 import perceval as pcvl
 import pytest
 import torch
@@ -298,16 +298,18 @@ def test_computation_space_selector(make_layer):
     with pytest.raises(ValueError):
         make_layer(amplitude_encoding=False, computation_space="invalid")
 
-    with pytest.warns(
-        UserWarning,
-        match="Overriding 'no_bunching' to match the requested computation_space",
-    ):
-        layer_override = make_layer(
-            amplitude_encoding=False,
-            computation_space=ComputationSpace.FOCK,
-            no_bunching=True,
-        )
-    assert layer_override.computation_space is ComputationSpace.FOCK
+    with warnings.catch_warnings(record=True) as caught:
+        with pytest.raises(
+            ValueError,
+            match="Incompatible 'no_bunching' value with selected 'computation_space'.",
+        ):
+            make_layer(
+                amplitude_encoding=False,
+                computation_space=ComputationSpace.FOCK,
+                no_bunching=True,
+            )
+    # and a warning should also be raised about no_bunching being deprecated
+    assert caught
 
 
 def test_computation_space_consistency_no_warning(make_layer):
@@ -360,7 +362,6 @@ def test_mapped_keys_no_bunching_space():
         dtype=torch.float32,
         amplitude_encoding=True,
         computation_space=ComputationSpace.UNBUNCHED,
-        no_bunching=True,
     )
 
     mapped_keys = layer.state_keys
@@ -389,7 +390,6 @@ def test_mapped_keys_fock_space():
         dtype=torch.float32,
         amplitude_encoding=True,
         computation_space=ComputationSpace.FOCK,
-        no_bunching=False,
     )
 
     mapped_keys = layer.state_keys
@@ -452,10 +452,6 @@ def test_ebs_batches_group_fock_states(computation_space: ComputationSpace):
         dtype=torch.float32,
         amplitude_encoding=True,
         computation_space=computation_space,
-        no_bunching=(
-            computation_space
-            in {ComputationSpace.UNBUNCHED, ComputationSpace.DUAL_RAIL}
-        ),
     )
 
     expected_states = layer.input_size
@@ -600,6 +596,7 @@ def test_amplitude_encoding_superposition_matches_basis_sum():
     with pytest.raises(ValueError, match="Amplitude input expects"):
         layer(torch.ones(layer.input_size + 1, dtype=torch.complex64))
 
+
 @pytest.mark.parametrize(
     "space",
     [
@@ -612,9 +609,11 @@ def test_ebs_wrt_quantumlayer(space: ComputationSpace) -> None:
     # define circuit
     circuit = pcvl.GenericInterferometer(
         4,
-        lambda i: pcvl.BS() // pcvl.PS(phi=np.pi/4 * i) //
-                 pcvl.BS() // pcvl.PS(phi=np.pi/8 * i),
-        shape=pcvl.InterferometerShape.RECTANGLE
+        lambda i: pcvl.BS()
+        // pcvl.PS(phi=np.pi / 4 * i)
+        // pcvl.BS()
+        // pcvl.PS(phi=np.pi / 8 * i),
+        shape=pcvl.InterferometerShape.RECTANGLE,
     )
     n_photons = 2
 
@@ -636,9 +635,7 @@ def test_ebs_wrt_quantumlayer(space: ComputationSpace) -> None:
     norms = magnitudes.norm(dim=1, keepdim=True).clamp_min(1e-12)
     magnitudes = magnitudes / norms
 
-    phases = torch.rand(batch_size, num_states, dtype=torch.float32) * (
-        2 * math.pi
-    )
+    phases = torch.rand(batch_size, num_states, dtype=torch.float32) * (2 * math.pi)
     # out = magnitute (cos(phases) + j sin(phases))
     amplitude_input = torch.polar(magnitudes, phases)
 
@@ -673,9 +670,9 @@ def test_ebs_wrt_quantumlayer(space: ComputationSpace) -> None:
             single_unitary = single_layer.computation_process.converter.to_tensor(
                 *single_params
             )
-            assert torch.allclose(
-                single_unitary, ebs_unitary, rtol=1e-6, atol=1e-8
-            ), "Expected identical unitaries between EBS and single-state layers."
+            assert torch.allclose(single_unitary, ebs_unitary, rtol=1e-6, atol=1e-8), (
+                "Expected identical unitaries between EBS and single-state layers."
+            )
             assert (
                 single_layer.computation_process.simulation_graph.mapped_keys
                 == ebs_layer.computation_process.simulation_graph.mapped_keys
@@ -686,14 +683,15 @@ def test_ebs_wrt_quantumlayer(space: ComputationSpace) -> None:
                 basis_output = basis_output.squeeze(0)
             basis_output = basis_output.to(ebs_output.dtype)
 
-            
             print(f"\n -- Basis output for state {state}: {basis_output} -- \n")
             expected_output = expected_output + coefficients * basis_output
-    #expected_output = expected_output/expected_output.norm(dim=1, keepdim=True).clamp_min(1e-12)
-    #ebs_output = ebs_output/ebs_output.norm(dim=1, keepdim=True).clamp_min(1e-12)
+    # expected_output = expected_output/expected_output.norm(dim=1, keepdim=True).clamp_min(1e-12)
+    # ebs_output = ebs_output/ebs_output.norm(dim=1, keepdim=True).clamp_min(1e-12)
     print(f"\n Expected output shape: {expected_output.shape} -- \n")
-    print(f"\n EBS output: {ebs_output} with norm {ebs_output.norm(dim = 1)} -- \n")
-    print(f"\n Expected output: {expected_output} with norm {expected_output.norm(dim=1)} -- \n")
-    assert torch.allclose(
-        ebs_output, expected_output, rtol=1e-6, atol=1e-8
-    ), "EBS output deviates from the superposed QuantumLayer results."
+    print(f"\n EBS output: {ebs_output} with norm {ebs_output.norm(dim=1)} -- \n")
+    print(
+        f"\n Expected output: {expected_output} with norm {expected_output.norm(dim=1)} -- \n"
+    )
+    assert torch.allclose(ebs_output, expected_output, rtol=1e-6, atol=1e-8), (
+        "EBS output deviates from the superposed QuantumLayer results."
+    )
