@@ -66,7 +66,7 @@ class DetectorTransform(torch.nn.Module):
             buffer = torch.empty(
                 (0, 0),
                 dtype=self._dtype,
-                **buffer_kwargs,
+                device=buffer_kwargs.get("device", None),
             )
             self.register_buffer("_matrix", buffer, persistent=False)
         else:
@@ -199,7 +199,7 @@ class DetectorTransform(torch.nn.Module):
         matrix = torch.zeros(
             (rows, cols),
             dtype=self._dtype,
-            **device_kwargs,
+            device=device_kwargs.get("device", None),
         )
         for row_idx, entries in enumerate(row_entries):
             for col_idx, prob in entries.items():

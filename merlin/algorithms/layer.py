@@ -840,7 +840,7 @@ class QuantumLayer(nn.Module):
                 self.add_module("post_processing", post_processing)
                 self.circuit = quantum_layer.circuit
                 if hasattr(post_processing, "output_size"):
-                    self._output_size = post_processing.output_size  # type: ignore[attr-defined]
+                    self._output_size: int = post_processing.output_size
                 else:
                     self._output_size = quantum_layer.output_size
 
