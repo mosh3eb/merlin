@@ -794,8 +794,9 @@ class FidelityKernel(torch.nn.Module):
         U_adjoint = U_adjoint.conj().T
 
         kernel_unitary = U @ U_adjoint
-        _, amplitudes = self._slos_graph.compute(kernel_unitary, self.input_state)
-        _, probabilities = self._slos_graph.compute_probs_from_amplitudes(amplitudes)
+        _, probabilities = self._slos_graph.compute_probs(
+            kernel_unitary, self.input_state
+        )
         if probabilities.ndim == 1:
             probabilities = probabilities.unsqueeze(0)
         probabilities = probabilities.to(dtype=self.dtype, device=self.device)
