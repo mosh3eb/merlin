@@ -269,10 +269,6 @@ class PhotonLossTransform(torch.nn.Module):
             return distribution
 
         matrix: torch.Tensor = cast(torch.Tensor, self._matrix)  # type: ignore[attr-defined]
-        if distribution.dtype != matrix.dtype:
-            matrix = matrix.to(distribution.dtype)
-        if distribution.device != matrix.device:
-            matrix = matrix.to(distribution.device)
         return distribution @ matrix
 
     def to(self, *args, **kwargs):
