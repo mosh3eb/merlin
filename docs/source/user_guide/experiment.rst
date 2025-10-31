@@ -95,8 +95,9 @@ Usage example
    circuit.add(2, pcvl.PS(pcvl.P("px")))
    circuit.add((1, 2), pcvl.BS())
 
-   # 2. Wrap it in a Perceval Experiment and configure detectors
+   # 2. Wrap it in a Perceval Experiment, configure noise model and detectors
    experiment = pcvl.Experiment(circuit)
+   experiment.noise = pcvl.NoiseModel(brightness=0.9, transmittance=0.85)
    experiment.detectors[0] = pcvl.Detector.threshold()
    experiment.detectors[1] = pcvl.Detector.pnr()
    experiment.detectors[2] = pcvl.Detector.ppnr(n_wires=2)
@@ -108,9 +109,8 @@ Usage example
        input_state=[1, 1, 1],
        input_parameters=["px"],
    )
-   
-   x = torch.rand(4, 1)  # Generate data 
-   probs = layer(x)  # Detector-aware probability tensor
+   x = torch.rand(4, 1)  # Generate data
+   probs = layer(x)  # NoiseModel-aware & Detector-aware probability tensor
    keys = layer.output_keys  # Classical outcomes produced by the detectors
 
    # 3.2 Feed the experiment into a quantum kernel FeatureMap to build a FidelityKernel

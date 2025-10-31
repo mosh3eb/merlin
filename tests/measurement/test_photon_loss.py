@@ -612,3 +612,79 @@ class TestPhotonLossWithFidelityKernel:
 
         assert pytest.approx(value, rel=1e-6, abs=1e-6) == value_noiseless
         assert kernel_noiseless.has_custom_noise_model
+
+    def test_fidelity_kernel_photon_loss_choice_adjusts_key_space(self):
+        """Noise model selection should change the size of the kernel detection basis."""
+
+        feature_map = ML.FeatureMap.simple(
+            input_size=1,
+            n_modes=3,
+            n_photons=3,
+            trainable=False,
+        )
+        input_state = [1, 1, 1]
+
+        kernel = ML.FidelityKernel(
+            feature_map=feature_map,
+            input_state=input_state,
+        )
+
+        feature_map_noise = ML.FeatureMap.simple(
+            input_size=1,
+            n_modes=3,
+            n_photons=3,
+            trainable=False,
+        )
+        experiment_noise = feature_map_noise.experiment
+        experiment_noise.noise = pcvl.NoiseModel(brightness=0.8, transmittance=1.0)
+
+        kernel_noise = ML.FidelityKernel(
+            feature_map=feature_map_noise,
+            input_state=input_state,
+        )
+
+        keys = kernel._detector_transform.output_keys
+        keys_noise = kernel_noise._detector_transform.output_keys
+
+        assert kernel._detector_transform.output_size == len(keys)
+        assert kernel_noise._detector_transform.output_size == len(keys_noise)
+        assert len(keys) < len(keys_noise)
+        assert all(sum(key) == sum(input_state) for key in keys)
+        assert any(sum(key) < sum(input_state) for key in keys_noise)
+        assert all(sum(key) <= sum(input_state) for key in keys_noise)
+
+    def test_fidelity_kernel_respects_feature_map_experiment(self):
+        """FidelityKernel should inherit noise model and detector configuration provided via FeatureMap."""
+
+        circuit = pcvl.Circuit(2)
+        circuit.add(0, pcvl.PS(pcvl.P("px")))
+        circuit.add((0, 1), pcvl.BS())
+
+        experiment = pcvl.Experiment(circuit)
+        experiment.detectors[0] = pcvl.Detector.threshold()
+        experiment.detectors[1] = pcvl.Detector.pnr()
+        experiment.noise = pcvl.NoiseModel(brightness=0.85, transmittance=1.0)
+
+        feature_map = ML.FeatureMap(
+            input_size=1,
+            experiment=experiment,
+            input_parameters=["px"],
+        )
+
+        kernel = ML.FidelityKernel(
+            feature_map=feature_map,
+            input_state=[1, 1],
+        )
+
+        x_train = torch.tensor([[0.0], [0.5], [1.0]], dtype=kernel.dtype)
+        x_test = torch.tensor([[0.2], [0.8]], dtype=kernel.dtype)
+
+        k_train = kernel(x_train)
+        k_test = kernel(x_test, x_train)
+
+        assert k_train.shape == (3, 3)
+        assert k_test.shape == (2, 3)
+        diag = torch.diag(k_train)
+        assert torch.allclose(diag, torch.ones_like(diag), atol=1e-6)
+        assert torch.all(k_train >= 0)
+        assert torch.all(k_test >= 0)

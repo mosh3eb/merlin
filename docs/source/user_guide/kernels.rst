@@ -232,7 +232,11 @@ FidelityKernel supports training of selected parameters via the NKernelAlignment
 Other Construction Methods
 --------------------------
 
-For more control, you can create kernels from a custom perceval circuit or use the fluent builder. When you need detector-aware behaviour, supply a :class:`perceval.Experiment` to the :class:`~merlin.algorithms.kernels.FeatureMap` so the resulting :class:`~merlin.algorithms.kernels.FidelityKernel` inherits the detector configuration automatically.
+For more control, you can create kernels from a custom perceval circuit or use 
+the fluent builder. When you need detector-aware behaviour, supply a 
+:class:`perceval.Experiment` to the :class:`~merlin.algorithms.kernels.FeatureMap` 
+so the resulting :class:`~merlin.algorithms.kernels.FidelityKernel` inherits the 
+detector configuration and noise model automatically.
 
 .. code-block:: python
 
