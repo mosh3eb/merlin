@@ -156,7 +156,7 @@ class TestPhotonLossWithQuantumLayer:
         # Fail with a Detector present
         with pytest.raises(
             RuntimeError,
-            match="no_bunching must be False if Experiement contains at least one Detector.",
+            match="no_bunching must be False if Experiment contains at least one Detector.",
         ):
             ML.QuantumLayer(
                 input_size=0,

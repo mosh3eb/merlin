@@ -9,8 +9,8 @@ Merlin now exposes quantum-to-classical conversion through two orthogonal concep
 - :class:`~merlin.measurement.strategies.MeasurementStrategy` selects how results are extracted from the quantum simulation or hardware backend.
 - :class:`~merlin.utils.grouping.LexGrouping` and :class:`~merlin.utils.grouping.ModGrouping` provide optional post-processing of outputs (see :doc:`./grouping`).
 
-Detector-aware execution
-========================
+Photon Loss-aware & Detector-aware execution
+============================================
 
 When a :class:`perceval.Experiment` is provided, the :class:`~merlin.algorithms.layer.QuantumLayer`
 derives a detector transform that remaps raw Fock-state probabilities to the classical
