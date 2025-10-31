@@ -56,13 +56,13 @@ MerLin reads automatically. Assign it to the ``experiment.noise`` attribute with
 *brightness* and *transmittance*. The quantum layer combines
 them into a survival probability and inserts a
 :class:`~merlin.measurement.photon_loss.PhotonLossTransform` ahead of any
-detector mapping. As a result, ``state_keys`` include configurations where
+detector mapping. As a result, ``output_keys`` include configurations where
 photons disappear before detection and probability mass still sums to one.
 
 .. code-block:: python
 
    experiment = pcvl.Experiment(circuit)
-   # Model 10% loss from the source (brightness) and 15% propagation loss
+   # Model 10% loss from the source (brightness) and 15% from propagation loss
    experiment.noise = pcvl.NoiseModel(brightness=0.9, transmittance=0.85)
 
    layer = ML.QuantumLayer(
@@ -72,7 +72,7 @@ photons disappear before detection and probability mass still sums to one.
    )
 
    probs = layer()
-   layer.state_keys  # includes both survival and loss outcomes
+   layer.output_keys  # includes both survival and loss outcomes
 
 If only one of the parameters is set, MerLin assumes the other equals 1.0.
 Detectors and photon loss stack cleanly: the loss transform expands the Fock
@@ -138,8 +138,8 @@ Practical notes
   Perceval heralding detectors.
 - If at least one detector is defined, the quantum layer needs to have ``computation_space="fock"`` (default value). Photon filtering and detector post-processing are incompatible.
 - Photon-loss noise models extend the classical basis returned by the layer. The
-  amplitude measurement strategy is therefore unavailable when detectors or a
-  noise model are attached to the experiment.
+  **amplitude measurement strategy is therefore unavailable when detectors or a
+  noise model are attached** to the experiment.
 - Provide either brightness, transmittance, or both. Any missing parameter is
   treated as 1.0 so you can model source-only or circuit-only loss independently.
 - Detector assignments use standard Python indexing or the Perceval

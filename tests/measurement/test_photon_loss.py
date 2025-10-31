@@ -54,7 +54,7 @@ class TestPhotonLossWithQuantumLayer:
         )
 
         output = layer()
-        keys = layer.state_keys
+        keys = layer.output_keys
         expected_keys = {(1, 1), (1, 0), (0, 0), (0, 1), (1, 0), (2, 0), (0, 2)}
         assert set(keys) == expected_keys
         assert torch.allclose(output.sum(dim=1), torch.ones_like(output[:, 0]))
@@ -88,7 +88,7 @@ class TestPhotonLossWithQuantumLayer:
         )
 
         output = layer()
-        keys = layer.state_keys
+        keys = layer.output_keys
         assert set(keys) == {(1, 1), (2, 0), (0, 2)}
         assert output.shape == (1, 3)
         assert torch.allclose(
@@ -131,10 +131,22 @@ class TestPhotonLossWithQuantumLayer:
         )
         prob_output = prob_layer()
         expectation_output = expectation_layer()
-        keys = prob_layer.state_keys
+        keys = prob_layer.output_keys
 
         assert prob_output.shape[-1] == len(keys)
         assert expectation_output.shape[-1] == len(keys[0])
+
+        experiment_no_noise = pcvl.Experiment(circuit)
+
+        amplitude_layer = ML.QuantumLayer(
+            input_size=0,
+            experiment=experiment_no_noise,
+            input_state=[1, 0],
+            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+        )
+
+        keys_amplitudes = amplitude_layer.output_keys
+        assert amplitude_layer().shape[-1] == len(keys_amplitudes)
 
     def test_photon_loss_unbunched(self):
         """No-bunching simulations should run (unless a Detector is specified) and keep binary-valued keys after loss."""
@@ -166,7 +178,7 @@ class TestPhotonLossWithQuantumLayer:
             )
 
         output = layer()
-        keys = [tuple(key) for key in layer.state_keys]
+        keys = [tuple(key) for key in layer.output_keys]
         assert len(keys) == 8  # 2^3 survivals
         assert all(all(value in (0, 1) for value in key) for key in keys)
         assert torch.allclose(
@@ -188,7 +200,7 @@ class TestPhotonLossWithQuantumLayer:
         )
 
         output = layer()
-        keys = layer.state_keys
+        keys = layer.output_keys
         raw_keys = list(layer.computation_process.simulation_graph.mapped_keys)
 
         assert keys == raw_keys
@@ -204,7 +216,7 @@ class TestPhotonLossWithQuantumLayer:
         )
 
         output = layer()
-        keys = layer.state_keys
+        keys = layer.output_keys
         raw_keys = list(layer.computation_process.simulation_graph.mapped_keys)
 
         assert keys == raw_keys
@@ -240,9 +252,9 @@ class TestPhotonLossWithQuantumLayer:
         assert torch.allclose(layer_direct(), layer_experiment(), atol=1e-6)
         assert torch.allclose(layer_direct(), layer_experiment_unbunched(), atol=1e-6)
         assert (
-            layer_direct.state_keys
-            == layer_experiment.state_keys
-            == layer_experiment_unbunched.state_keys
+            layer_direct.output_keys
+            == layer_experiment.output_keys
+            == layer_experiment_unbunched.output_keys
         )
 
     def test_photon_loss_incomplete_noise_model(self):
@@ -276,9 +288,9 @@ class TestPhotonLossWithQuantumLayer:
             no_bunching=False,
         )
 
-        keys = base_layer.state_keys
-        keys_brightness = loss_layer_brightness.state_keys
-        keys_transmittance = loss_layer_transmittance.state_keys
+        keys = base_layer.output_keys
+        keys_brightness = loss_layer_brightness.output_keys
+        keys_transmittance = loss_layer_transmittance.output_keys
 
         assert all(sum(key) == 2 for key in keys)
         assert any(sum(key_b) < sum(keys[0]) for key_b in keys_brightness)
@@ -311,7 +323,7 @@ class TestPhotonLossWithQuantumLayer:
         )
 
         output = layer()
-        keys = [tuple(key) for key in layer.state_keys]
+        keys = [tuple(key) for key in layer.output_keys]
         distribution = dict(zip(keys, output.squeeze(0).tolist(), strict=False))
 
         assert set(distribution) == {(1, 0), (0, 0), (0, 1)}
@@ -328,7 +340,7 @@ class TestPhotonLossWithQuantumLayer:
         )
 
         output_4 = layer_4_photons()
-        keys_4 = layer_4_photons.state_keys
+        keys_4 = layer_4_photons.output_keys
         prob_disapearance = 0.7**4
         assert set(keys_4) == {
             (1, 0),
@@ -367,7 +379,7 @@ class TestPhotonLossWithQuantumLayer:
         loss_output = loss_layer()
 
         assert torch.count_nonzero(base_output) < torch.count_nonzero(loss_output)
-        assert len(loss_layer.state_keys) == loss_layer.output_size
+        assert len(loss_layer.output_keys) == loss_layer.output_size
 
         layer_unbunched = ML.QuantumLayer(
             input_size=0,
@@ -383,7 +395,7 @@ class TestPhotonLossWithQuantumLayer:
         )
 
         assert loss_layer_unbunched.output_size > layer_unbunched.output_size
-        assert len(loss_layer_unbunched.state_keys) == loss_layer_unbunched.output_size
+        assert len(loss_layer_unbunched.output_keys) == loss_layer_unbunched.output_size
 
     def test_detector_autograd_compatibility(self):
         """Photon loss transforms must preserve autograd support."""
@@ -395,6 +407,7 @@ class TestPhotonLossWithQuantumLayer:
         experiment = pcvl.Experiment(circuit)
         experiment.noise = pcvl.NoiseModel(brightness=0.9, transmittance=0.85)
 
+        # Layer with input parameters
         layer = ML.QuantumLayer(
             input_size=1,
             experiment=experiment,
@@ -423,7 +436,32 @@ class TestPhotonLossWithQuantumLayer:
                 param.grad, torch.zeros_like(param.grad), atol=1e-6
             ).all()
 
-        # TODO Add test for trainable parameters as well
+        # Layer with trainable parameters
+        layer = ML.QuantumLayer(
+            input_size=0,
+            experiment=experiment,
+            input_state=[1, 1],
+            trainable_parameters=["phi"],
+            no_bunching=False,
+        )
+
+        # Check that it has trainable parameters
+        trainable_params = [p for p in layer.parameters() if p.requires_grad]
+        assert len(trainable_params) > 0, "Layer should have trainable parameters"
+
+        # Test forward pass (no input needed)
+        output = layer()
+        assert output.shape == (1, len(layer.output_keys))
+        assert torch.all(torch.isfinite(output))
+
+        # Test gradient computation
+        loss = output.sum()
+        loss.backward()
+
+        # Check that trainable parameters have gradients
+        for param in layer.parameters():
+            if param.requires_grad:
+                assert param.grad is not None
 
     def test_simple_experiment_layer_photon_loss_vs_perceval(self):
         """Layer outputs must match manual photon-loss transformation for simple circuits."""
@@ -443,7 +481,7 @@ class TestPhotonLossWithQuantumLayer:
         )
 
         output = loss_layer()
-        keys = loss_layer.state_keys
+        keys = loss_layer.output_keys
 
         # Perceval version
         processor = pcvl.Processor("SLOS", experiment)
@@ -484,7 +522,7 @@ class TestPhotonLossWithQuantumLayer:
         )
 
         output = loss_layer()
-        keys = loss_layer.state_keys
+        keys = loss_layer.output_keys
 
         # Perceval version
         processor = pcvl.Processor("SLOS", experiment)

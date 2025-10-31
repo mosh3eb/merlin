@@ -152,7 +152,7 @@ Photon loss and detectors
 - Without an experiment, the layer defaults to ideal PNR detection on every
   mode, mirroring Perceval’s default behaviour.
 - ``experiment.noise = pcvl.NoiseModel(...)`` adds photon-loss sampling ahead of
-  detector transforms. The resulting ``state_keys`` and ``output_size`` cover
+  detector transforms. The resulting ``output_keys`` and ``output_size`` cover
   every survival/loss configuration implied by the noise model.
 - ``MeasurementStrategy.AMPLITUDES`` requires access to raw complex amplitudes
   and is therefore incompatible with custom detectors **or** photon-loss noise
@@ -170,7 +170,7 @@ Notes
   ``sampling_method``; the default returns exact SLOS probabilities.
 - The layer registers trainable parameters (if any) with PyTorch so they appear
   in ``layer.parameters()``.
-- Inspect ``layer.has_custom_noise_model`` and ``layer.state_keys`` to confirm
+- Inspect ``layer.has_custom_noise_model`` and ``layer.output_keys`` to confirm
   whether photon loss is active and how it alters the classical basis.
 
 -----------
