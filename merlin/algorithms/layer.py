@@ -27,8 +27,8 @@ Main QuantumLayer implementation
 from __future__ import annotations
 
 import warnings
-from typing import Any, cast
 from contextlib import contextmanager
+from typing import Any, cast
 
 import perceval as pcvl
 import torch
