@@ -506,7 +506,7 @@ class QuantumLayer(nn.Module):
                     f"Input feature dimension {feature_dim} insufficient for angle encoding combination {combo}"
                 )
 
-        # Select per-combo features and scale
+            # Select per-combo features and scale
             selected = x_batch[:, indices]
             scales = [scale_map.get(idx, 1.0) for idx in indices]
             scale_tensor = x_batch.new_tensor(scales)
