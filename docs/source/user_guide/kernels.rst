@@ -31,6 +31,7 @@ Practical notes
 ---------------
 
 - In MerLin, a FeatureMap encodes inputs into a photonic circuit; FidelityKernel evaluates fidelities between the resulting states.
+- Attach a :class:`perceval.NoiseModel` to the feature map experiment (``experiment.noise``) to include photon-loss survival probabilities before detector post-processing in the kernel value.
 - ``kernel(X, Z)`` returns an :math:`N \times M` cross-kernel for datasets of sizes :math:`N` and :math:`M`; ``kernel(X)`` returns the :math:`N \times N` Gram matrix.
 - Larger/deeper circuits can increase expressivity but also numerical error; prefer double precision and PSD projection for stability when needed.
 
@@ -269,10 +270,11 @@ For more control, you can create kernels from a custom perceval circuit or use t
         .build_fidelity_kernel()
     )
 
-    # Using a perceval.Experiment with custom detectors
+    # Using a perceval.Experiment with custom detectors & noise model
     experiment = pcvl.Experiment(circuit)
     experiment.detectors[0] = pcvl.Detector.threshold()
     experiment.detectors[1] = pcvl.Detector.pnr()
+    experiment.noise = pcvl.NoiseModel(brightness=0.92, transmittance=0.88)
 
     feature_map_exp = FeatureMap(
         experiment=experiment,
@@ -283,6 +285,10 @@ For more control, you can create kernels from a custom perceval circuit or use t
         feature_map=feature_map_exp,
         input_state=[1, 1, 0, 0],
     )
+
+In this last example the kernel accounts for both the detector responses **and**
+the photon survival probabilities implied by ``experiment.noise`` before
+returning classical fidelities.
 
 
 API Pointers

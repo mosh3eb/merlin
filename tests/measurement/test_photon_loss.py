@@ -541,3 +541,74 @@ class TestPhotonLossWithQuantumLayer:
         )
 
         assert torch.allclose(output, reference, atol=1e-6)
+
+
+class TestPhotonLossWithFidelityKernel:
+    """Test suite covering photon loss integration within FidelityKernel."""
+
+    def test_kernel_reflects_photon_survival(self):
+        """Kernel value must drop according to the survival probability."""
+        circuit = pcvl.Circuit(1)
+        circuit.add(0, pcvl.PS(pcvl.P("x")))
+        experiment = pcvl.Experiment(circuit)
+        experiment.noise = pcvl.NoiseModel(brightness=0.8, transmittance=0.9)
+
+        feature_map = ML.FeatureMap(
+            experiment=experiment,
+            input_size=1,
+            input_parameters="x",
+        )
+        kernel = ML.FidelityKernel(
+            feature_map=feature_map,
+            input_state=[1],
+            no_bunching=False,
+        )
+
+        x = torch.tensor([0.0])
+        value = kernel(x, x)
+        # kernel_matrix = [0.72, 1 - 0.72] where 0.72 = (0.8 * 0.9)
+        # and value = kernel_matrix * kernel_matrix^T
+        expected = (0.72) ** 2 + (1 - (0.72)) ** 2
+        assert pytest.approx(expected, rel=1e-6, abs=1e-6) == value
+        assert kernel.has_custom_noise_model
+
+    def test_kernel_matches_noise_free_case(self):
+        """Removing the noise model restores unit kernel values."""
+        circuit = pcvl.Circuit(1)
+        circuit.add(0, pcvl.PS(pcvl.P("x")))
+
+        feature_map = ML.FeatureMap(
+            circuit=circuit,
+            input_size=1,
+            input_parameters="x",
+        )
+        kernel = ML.FidelityKernel(
+            feature_map=feature_map,
+            input_state=[1],
+            no_bunching=False,
+        )
+
+        x = torch.tensor([0.0])
+        value = kernel(x, x)
+        assert pytest.approx(1.0, rel=1e-6, abs=1e-6) == value
+        assert not kernel.has_custom_noise_model
+
+        experiment = pcvl.Experiment(circuit)
+        experiment.noise = pcvl.NoiseModel(brightness=1.0, transmittance=1.0)
+
+        feature_map_noiseless = ML.FeatureMap(
+            experiment=experiment,
+            input_size=1,
+            input_parameters="x",
+        )
+        kernel_noiseless = ML.FidelityKernel(
+            feature_map=feature_map_noiseless,
+            input_state=[1],
+            no_bunching=False,
+        )
+
+        x = torch.tensor([0.0])
+        value_noiseless = kernel_noiseless(x, x)
+
+        assert pytest.approx(value, rel=1e-6, abs=1e-6) == value_noiseless
+        assert kernel_noiseless.has_custom_noise_model
