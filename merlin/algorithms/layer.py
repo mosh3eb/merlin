@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import warnings
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 
 import perceval as pcvl
 import torch
@@ -38,6 +38,7 @@ from ..builder.circuit_builder import (
     ANGLE_ENCODING_MODE_ERROR,
     CircuitBuilder,
 )
+from ..core.computation_space import ComputationSpace
 from ..core.process import ComputationProcessFactory
 from ..measurement import OutputMapper
 from ..measurement.autodiff import AutoDiffProcess
@@ -62,27 +63,62 @@ class QuantumLayer(nn.Module):
     # ---- Explicit execution-leaf marker (prevents recursion into children like nn.Identity) ----
     merlin_leaf: bool = True
 
-    _deprecated_params: dict[str, str] = {
-        "__init__.ansatz": "Use 'circuit' or 'CircuitBuilder' to define the quantum circuit.",
-        "simple.reservoir_mode": "The 'reservoir_mode' argument is no longer supported in the 'simple' method.",
+    # Map of deprecated kwargs to (message, raise_error)
+    # If raise_error is True the presence of the deprecated parameter will raise a ValueError.
+    # If raise_error is False the presence will emit a DeprecationWarning but continue.
+    _deprecated_params: dict[str, tuple[str, bool]] = {
+        "__init__.ansatz": (
+            "Use 'circuit' or 'CircuitBuilder' to define the quantum circuit.",
+            True,
+        ),
+        "__init__.no_bunching": (
+            "The 'no_bunching' keyword is deprecated; prefer selecting the computation_space instead.",
+            False,
+        ),
+        "simple.reservoir_mode": (
+            "The 'reservoir_mode' argument is no longer supported in the 'simple' method.",
+            True,
+        ),
     }
 
     @classmethod
     def _validate_kwargs(cls, method_name: str, kwargs: dict[str, Any]) -> None:
         if not kwargs:
             return
-        deprecated: list[str] = []
+
+        deprecated_raise: list[str] = []
+        deprecated_warn: list[str] = []
         unknown: list[str] = []
+
         for key in sorted(kwargs):
             full_name = f"{method_name}.{key}"
             if full_name in cls._deprecated_params:
-                deprecated.append(
-                    f"Parameter '{key}' is deprecated. {cls._deprecated_params[full_name]}"
-                )
+                # support old-style str values for backwards compatibility
+                val = cls._deprecated_params[full_name]
+                if isinstance(val, tuple):
+                    message, raise_error = val
+                else:
+                    message, raise_error = (str(val), True)
+
+                if raise_error:
+                    deprecated_raise.append(
+                        f"Parameter '{key}' is deprecated. {message}"
+                    )
+                else:
+                    deprecated_warn.append(
+                        f"Parameter '{key}' is deprecated. {message}"
+                    )
             else:
                 unknown.append(key)
-        if deprecated:
-            raise ValueError(" ".join(deprecated))
+
+        # Emit non-fatal deprecation warnings
+        if deprecated_warn:
+            warnings.warn(" ".join(deprecated_warn), DeprecationWarning, stacklevel=2)
+
+        # Raise for deprecated parameters that are marked fatal
+        if deprecated_raise:
+            raise ValueError(" ".join(deprecated_raise))
+
         if unknown:
             unknown_list = ", ".join(unknown)
             raise ValueError(
@@ -92,7 +128,7 @@ class QuantumLayer(nn.Module):
 
     def __init__(
         self,
-        input_size: int,
+        input_size: int | None = None,
         # Builder-based construction
         builder: CircuitBuilder | None = None,
         # Custom circuit construction
@@ -106,21 +142,60 @@ class QuantumLayer(nn.Module):
         trainable_parameters: list[str] | None = None,
         input_parameters: list[str] | None = None,
         # Common parameters
+        amplitude_encoding: bool = False,
+        computation_space: ComputationSpace | str | None = None,
         measurement_strategy: MeasurementStrategy = MeasurementStrategy.PROBABILITIES,
+        # device and dtype
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-        no_bunching: bool = True,
         **kwargs,
     ):
         super().__init__()
 
         self._validate_kwargs("__init__", kwargs)
+        no_bunching = kwargs.pop("no_bunching", None)
 
         self.device = device
         self.dtype = dtype or torch.float32
         self.input_size = input_size
         self.no_bunching = no_bunching
         self.input_state = input_state
+        self.amplitude_encoding = amplitude_encoding
+
+        # input_size management: input_size can be given only if amplitude_encoding is False
+        # otherwise, it is determined by the computation space and n_photons
+        if self.amplitude_encoding:
+            if input_size is not None:
+                raise ValueError(
+                    "When amplitude_encoding is enabled, do not specify input_size; it "
+                    "is inferred from the computation space."
+                )
+            self.input_size = 0  # temporary value, revisited after setup
+            if n_photons is None:
+                raise ValueError(
+                    "n_photons must be provided when amplitude_encoding=True."
+                )
+            if input_parameters:
+                raise ValueError(
+                    "Amplitude encoding cannot be combined with classical input parameters."
+                )
+        else:
+            # Defer fixing input_size until converter metadata is available so we can infer it automatically.
+            self.input_size = int(input_size) if input_size is not None else None
+
+        # computation_space management - default is UNBUNCHED except if overridden by deprecated no_bunching
+        if computation_space is None:
+            computation_space_value = ComputationSpace.default(no_bunching=no_bunching)
+        else:
+            computation_space_value = ComputationSpace.coerce(computation_space)
+        # if no_bunching is provided, check consistency with ComputationSpace
+        derived_no_bunching = computation_space_value is ComputationSpace.UNBUNCHED
+        if no_bunching is not None and no_bunching != derived_no_bunching:
+            raise ValueError(
+                "Incompatible 'no_bunching' value with selected 'computation_space'. "
+            )
+
+        self.computation_space = computation_space_value
 
         # execution policy: when True, always simulate locally (do not offload)
         self._force_simulation: bool = False
@@ -148,6 +223,7 @@ class QuantumLayer(nn.Module):
                 not experiment.is_unitary
                 or experiment.post_select_fn is not None
                 or experiment.heralds
+                or experiment.in_heralds
             ):
                 raise ValueError(
                     "The provided experiment must be unitary, and must not have post-selection or heralding."
@@ -256,8 +332,11 @@ class QuantumLayer(nn.Module):
         if input_state is not None:
             self.input_state = input_state
         elif n_photons is not None:
-            # Default behavior: place photons in first n_photons modes
-            self.input_state = [1] * n_photons + [0] * (circuit.m - n_photons)
+            # Default behavior: place [1,0,1,0,...] in dual-rail, else first n_photons modes
+            if self.computation_space is ComputationSpace.DUAL_RAIL:
+                self.input_state = [1, 0] * n_photons
+            else:
+                self.input_state = [1] * n_photons + [0] * (circuit.m - n_photons)
         else:
             raise ValueError("Either input_state or n_photons must be provided")
 
@@ -269,8 +348,12 @@ class QuantumLayer(nn.Module):
             n_photons=n_photons,
             device=self.device,
             dtype=self.dtype,
-            no_bunching=self.no_bunching,
+            computation_space=self.computation_space,
         )
+
+        # Pick the effective state space after the factory creates the process so
+        # dual-rail can shrink the logical basis without extra factory plumbing.
+        self.computation_process.configure_computation_space(self.computation_space)
 
         # Validate that the declared input size matches encoder parameters
         spec_mappings = self.computation_process.converter.spec_mappings
@@ -297,21 +380,38 @@ class QuantumLayer(nn.Module):
             if not specs_provided:
                 expected_features = None
 
-        if expected_features is not None:
-            if expected_features != self.input_size:
-                raise ValueError(
-                    f"Input size ({self.input_size}) must equal the number of encoded input features "
-                    f"generated by the circuit ({expected_features})."
-                )
-        elif total_input_params != self.input_size:
-            raise ValueError(
-                f"Input size ({self.input_size}) must equal the number of input parameters "
-                f"generated by the circuit ({total_input_params})."
+        if not self.amplitude_encoding:
+            inferred_size = (
+                expected_features
+                if expected_features is not None
+                else total_input_params
             )
+
+            if self.input_size is None:
+                # When the caller omits input_size, take the size the circuit exposes via its metadata.
+                self.input_size = inferred_size
+            elif inferred_size != self.input_size:
+                if expected_features is not None:
+                    raise ValueError(
+                        f"Input size ({self.input_size}) must equal the number of encoded input features "
+                        f"generated by the circuit ({expected_features})."
+                    )
+                else:
+                    raise ValueError(
+                        f"Input size ({self.input_size}) must equal the number of input parameters "
+                        f"generated by the circuit ({total_input_params})."
+                    )
 
         # Setup parameters and measurement strategy
         self._setup_parameters_from_custom(trainable_parameters)
         self._setup_measurement_strategy_from_custom(measurement_strategy)
+
+        if self.amplitude_encoding:
+            self._init_amplitude_metadata()
+
+        # set input_size for amplitude encoding
+        if self.amplitude_encoding:
+            self.input_size = len(self.state_keys)
 
     def _setup_parameters_from_custom(self, trainable_parameters: list[str] | None):
         """Setup parameters from custom circuit configuration."""
@@ -355,9 +455,10 @@ class QuantumLayer(nn.Module):
         if measurement_strategy == MeasurementStrategy.PROBABILITIES:
             self._output_size = dist_size
         elif measurement_strategy == MeasurementStrategy.MODE_EXPECTATIONS:
-            if type(self.circuit) is pcvl.Circuit:
+            # be defensive: `self.circuit` may be None or an untyped external object
+            if self.circuit is not None and hasattr(self.circuit, "m"):
                 self._output_size = self.circuit.m
-            elif type(self.circuit) is CircuitBuilder:
+            elif isinstance(self.circuit, CircuitBuilder):
                 self._output_size = self.circuit.n_modes
             else:
                 raise TypeError(f"Unknown circuit type: {type(self.circuit)}")
@@ -369,9 +470,17 @@ class QuantumLayer(nn.Module):
         # Create measurement mapping
         self.measurement_mapping = OutputMapper.create_mapping(
             measurement_strategy,
-            self.computation_process.no_bunching,
+            self.computation_process.computation_space,
             keys,
         )
+
+    def _init_amplitude_metadata(self) -> None:
+        logical_keys = getattr(
+            self.computation_process,
+            "logical_keys",
+            list(self.computation_process.simulation_graph.mapped_keys),
+        )
+        self.input_size = len(logical_keys)
 
     def _create_dummy_parameters(self) -> list[torch.Tensor]:
         """Create dummy parameters for initialization."""
@@ -474,6 +583,16 @@ class QuantumLayer(nn.Module):
         # For custom circuits without explicit encoding metadata, apply π scaling
         return x * torch.pi
 
+    def _complex_dtype(self) -> torch.dtype:
+        """Return the complex dtype matching the layer precision."""
+        if self.dtype == torch.float16 and hasattr(torch, "complex32"):
+            return torch.complex32
+        if self.dtype == torch.float32:
+            return torch.complex64
+        if self.dtype == torch.float64:
+            return torch.complex128
+        raise ValueError(f"Unsupported dtype for amplitude encoding: {self.dtype}")
+
     def _apply_angle_encoding(
         self, x: torch.Tensor, spec: dict[str, Any]
     ) -> torch.Tensor:
@@ -518,7 +637,49 @@ class QuantumLayer(nn.Module):
             if encoded_cols
             else x_batch.new_zeros((x_batch.shape[0], 0))
         )
-        return encoded.squeeze(0) if squeeze else encoded
+
+        if squeeze:
+            return encoded.squeeze(0)
+        return encoded
+
+    def _validate_amplitude_input(self, amplitude: torch.Tensor) -> torch.Tensor:
+        if not isinstance(amplitude, torch.Tensor):
+            raise TypeError(
+                "Amplitude-encoded inputs must be provided as torch.Tensor instances"
+            )
+
+        if amplitude.dim() not in (1, 2):
+            raise ValueError(
+                "Amplitude-encoded inputs must be 1D (single state) or 2D (batch of states) tensors"
+            )
+
+        expected_dim = len(self.state_keys)
+        feature_dim = amplitude.shape[-1]
+        if feature_dim != expected_dim:
+            raise ValueError(
+                f"Amplitude input expects {expected_dim} components, received {feature_dim}."
+            )
+            # TODO: suggest/implement zero-padding or sparsity tensor format
+
+        if amplitude.dtype not in (
+            torch.float32,
+            torch.float64,
+            torch.complex64,
+            torch.complex128,
+        ):
+            raise TypeError(
+                "Amplitude-encoded inputs must use float32/float64 or complex64/complex128 dtype"
+            )
+
+        if self.device is not None and amplitude.device != self.device:
+            amplitude = amplitude.to(self.device)
+
+        if amplitude.is_complex():
+            amplitude = amplitude.to(self._complex_dtype())
+        else:
+            amplitude = amplitude.to(self.dtype)
+
+        return amplitude
 
     def set_input_state(self, input_state):
         self.input_state = input_state
@@ -563,21 +724,98 @@ class QuantumLayer(nn.Module):
         *input_parameters: torch.Tensor,
         shots: int | None = None,
         sampling_method: str | None = None,
+        simultaneous_processes: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         """Forward pass through the quantum layer.
+
+        When ``self.amplitude_encoding`` is ``True`` the first positional argument
+        must contain the amplitude-encoded input state (either ``[num_states]`` or
+        ``[batch_size, num_states]``). Remaining positional arguments are treated
+        as classical inputs and processed via the standard encoding pipeline.
 
         Sampling is controlled by:
             - shots (int): number of samples; if 0 or None, return exact amplitudes/probabilities.
             - sampling_method (str): e.g. "multinomial".
         """
-        # Prepare parameters
-        params = self.prepare_parameters(list(input_parameters))
 
-        # Quantum compute
-        if isinstance(self.computation_process.input_state, torch.Tensor):
-            amplitudes = self.computation_process.compute_superposition_state(params)
+        inputs = list(input_parameters)
+        amplitude_input: torch.Tensor | None = None
+        original_input_state = None
+
+        if self.amplitude_encoding:
+            if not inputs:
+                raise ValueError(
+                    "QuantumLayer configured with amplitude_encoding=True expects an amplitude tensor input."
+                )
+            # verify that inputs is of the shape of layer.compute_graph.mapped_keys
+            amplitude_input = self._validate_amplitude_input(inputs.pop(0))
+            original_input_state = getattr(
+                self.computation_process, "input_state", None
+            )
+            # amplitude_input becomes the new input_state
+            self.set_input_state(amplitude_input)
+
+        # classical_inputs = [
+        #    tensor for tensor in inputs if isinstance(tensor, torch.Tensor)
+        # ]
+
+        # Prepare circuit parameters and any remaining classical inputs
+        params = self.prepare_parameters(inputs)
+        # Track batch width across classical inputs so we can route superposed tensors through the batched path.
+        parameter_batch_dim = 0
+        for tensor in params:
+            if isinstance(tensor, torch.Tensor) and tensor.dim() > 1:
+                batch = tensor.shape[0]
+                if parameter_batch_dim and batch != parameter_batch_dim:
+                    raise ValueError(
+                        "Inconsistent batch dimensions across classical input parameters."
+                    )
+                parameter_batch_dim = batch
+        # TODO: input_state should support StateVector
+        raw_inferred_state = getattr(self.computation_process, "input_state", None)
+        # normalize the retrieved input_state to an optional tensor an
+        inferred_state: torch.Tensor | None
+        if isinstance(raw_inferred_state, torch.Tensor):
+            inferred_state = raw_inferred_state
         else:
-            amplitudes = self.computation_process.compute(params)
+            inferred_state = None
+        amplitudes: torch.Tensor
+
+        # TODO: challenge the need for trying/finally here
+        try:
+            if self.amplitude_encoding:
+                # raise error if amplitude encoding finds a non tensor state
+                if inferred_state is None:
+                    raise TypeError(
+                        "Amplitude encoding requires the computation process input_state to be a tensor."
+                    )
+                # we always use the parallel ebs computation path for amplitude encoding to enable batching
+                if simultaneous_processes is not None:
+                    batch_size = simultaneous_processes
+                else:
+                    batch_size = (
+                        inferred_state.dim() == 1 and 1 or inferred_state.shape[0]
+                    )
+                amplitudes = self.computation_process.compute_ebs_simultaneously(
+                    params, simultaneous_processes=batch_size
+                )
+            elif isinstance(inferred_state, torch.Tensor):
+                # otherwise the incremental EBS path allowing batch on input parameters
+                if parameter_batch_dim:
+                    # Classical inputs are batched: reuse the EBS batching kernel to propagate all coefficients at once.
+                    chunk = simultaneous_processes or inferred_state.shape[-1]
+                    amplitudes = self.computation_process.compute_ebs_simultaneously(
+                        params, simultaneous_processes=chunk
+                    )
+                else:
+                    amplitudes = self.computation_process.compute_superposition_state(
+                        params
+                    )
+            else:
+                amplitudes = self.computation_process.compute(params)
+        finally:
+            if amplitude_input is not None and original_input_state is not None:
+                self.set_input_state(original_input_state)
 
         # Determine gradient needs
         needs_gradient = (
@@ -611,6 +849,14 @@ class QuantumLayer(nn.Module):
         # Optional no-bunching renormalization
         if self.no_bunching:
             sum_probs = distribution.sum(dim=1, keepdim=True)
+        distribution = amplitudes.real**2 + amplitudes.imag**2
+
+        # renormalize distribution and amplitudes for UNBUNCHED and DUAL_RAIL spaces
+        if (
+            self.computation_space is ComputationSpace.UNBUNCHED
+            or self.computation_space is ComputationSpace.DUAL_RAIL
+        ):
+            sum_probs = distribution.sum(dim=-1, keepdim=True)
 
             # Only normalize when sum > 0 to avoid division by zero
             valid_entries = sum_probs > 0
@@ -666,7 +912,9 @@ class QuantumLayer(nn.Module):
 
     @property
     def state_keys(self):
-        return self.computation_process.simulation_graph.mapped_keys
+        return getattr(self.computation_process, "logical_keys", None) or list(
+            self.computation_process.simulation_graph.mapped_keys
+        )
 
     @property
     def output_size(self):
@@ -839,15 +1087,27 @@ class QuantumLayer(nn.Module):
                 f"{total_trainable} trainable parameters but {expected_trainable} were expected."
             )
 
-        quantum_layer = cls(
-            input_size=input_size,
-            builder=builder,
-            n_photons=n_photons,
-            measurement_strategy=MeasurementStrategy.PROBABILITIES,
-            no_bunching=no_bunching,
-            device=device,
-            dtype=dtype,
-        )
+        # Translate legacy no_bunching argument into the computation_space enum to
+        # avoid triggering deprecation in QuantumLayer.__init__ when callers use
+        # the `simple` convenience constructor. If no_bunching was not provided
+        # (None), let QuantumLayer decide the default.
+        quantum_layer_kwargs = {
+            "input_size": input_size,
+            "builder": builder,
+            "n_photons": n_photons,
+            "measurement_strategy": MeasurementStrategy.PROBABILITIES,
+            "device": device,
+            "dtype": dtype,
+        }
+
+        if no_bunching is not None:
+            quantum_layer_kwargs["computation_space"] = ComputationSpace.default(
+                no_bunching=bool(no_bunching)
+            )
+
+        # mypy: quantum_layer_kwargs is constructed dynamically; cast to satisfy
+        # the type checker that keys match the constructor signature.
+        quantum_layer = cls(**cast(dict[str, Any], quantum_layer_kwargs))
 
         class SimpleSequential(nn.Module):
             """Simple Sequential Module that contains the quantum layer as well as the post processing"""
@@ -901,8 +1161,9 @@ class QuantumLayer(nn.Module):
     def __str__(self) -> str:
         """String representation of the quantum layer."""
         n_modes = None
-        if hasattr(self, "circuit") and getattr(self.circuit, "m", None) is not None:
-            n_modes = self.circuit.m
+        circuit = getattr(self, "circuit", None)
+        if circuit is not None and getattr(circuit, "m", None) is not None:
+            n_modes = circuit.m
 
         modes_fragment = f", modes={n_modes}" if n_modes is not None else ""
         base_str = (
