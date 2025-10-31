@@ -152,6 +152,94 @@ class QuantumLayer(nn.Module):
         dtype: torch.dtype | None = None,
         **kwargs,
     ):
+        """Initialize a QuantumLayer from a builder, a Perceval circuit, or an experiment.
+
+        This constructor wires the selected photonic circuit (or experiment) into a
+        trainable PyTorch module and configures the computation space, input state,
+        encoding, and measurement strategy. Exactly one of ``builder``, ``circuit``,
+        or ``experiment`` must be provided.
+
+        Parameters
+        ----------
+        input_size : int | None, optional
+            Size of the classical input vector when angle encoding is used
+            (``amplitude_encoding=False``). If omitted, it is inferred from the
+            circuit metadata (input parameter prefixes and/or encoding specs).
+            Must be omitted when ``amplitude_encoding=True``.
+        builder : CircuitBuilder | None, optional
+            High-level circuit builder that defines trainable structure, input
+            encoders and their prefixes. Mutually exclusive with ``circuit`` and
+            ``experiment``.
+        circuit : pcvl.Circuit | None, optional
+            A fully defined Perceval circuit. Mutually exclusive with ``builder``
+            and ``experiment``.
+        experiment : pcvl.Experiment | None, optional
+            A Perceval experiment. Must be unitary and without post-selection or
+            heralding. Mutually exclusive with ``builder`` and ``circuit``.
+        input_state : list[int] | pcvl.BasicState | pcvl.StateVector | None, optional
+            Logical input state of the circuit. Accepted forms:
+            - list of occupations (length = number of modes),
+            - ``pcvl.BasicState`` without annotations (plain FockState only),
+            - ``pcvl.StateVector`` (converted to a tensor according to
+              ``computation_space``).
+            If omitted, ``n_photons`` must be provided to derive a default state
+            (dual-rail: ``[1,0,1,0,...]``, otherwise first ``n_photons`` modes).
+        n_photons : int | None, optional
+            Number of photons used to infer a default input state and to size the
+            computation space when amplitude encoding is enabled.
+        trainable_parameters : list[str] | None, optional
+            For custom circuits/experiments, the list of Perceval parameter
+            prefixes to expose as trainable PyTorch parameters. When a
+            ``builder`` is provided, these are taken from the builder and this
+            argument must be omitted.
+        input_parameters : list[str] | None, optional
+            Perceval parameter prefixes used for classical (angle) encoding. For
+            amplitude encoding, this must be empty/None.
+        amplitude_encoding : bool, default: False
+            When True, the forward call expects an amplitude vector (or batch) on
+            the first positional argument and propagates it through the quantum
+            layer; ``input_size`` must not be set in this mode and
+            ``n_photons`` must be provided.
+        computation_space : ComputationSpace | str | None, optional
+            Logical computation subspace to use: one of ``{"fock", "unbunched",
+            "dual_rail"}``. If omitted, defaults to ``UNBUNCHED`` unless
+            overridden by the deprecated ``no_bunching`` kwarg.
+        measurement_strategy : MeasurementStrategy, default: PROBABILITIES
+            Output mapping strategy. Supported values include ``PROBABILITIES``,
+            ``MODE_EXPECTATIONS`` and ``AMPLITUDES``.
+        device : torch.device | None, optional
+            Target device for internal tensors (e.g., ``torch.device("cuda")``).
+        dtype : torch.dtype | None, optional
+            Precision for internal tensors (e.g., ``torch.float32``). For complex
+            amplitudes, the matching complex dtype is chosen automatically.
+        **kwargs
+            Additional (legacy) keyword arguments.
+
+        Raises
+        ------
+        ValueError
+            If an unexpected keyword argument is provided; if both or none of
+            ``builder``, ``circuit``, ``experiment`` are provided; if
+            ``amplitude_encoding=True`` and ``input_size`` is set; if
+            ``amplitude_encoding=True`` and ``n_photons`` is not provided; if
+            classical ``input_parameters`` are combined with
+            ``amplitude_encoding=True``; if ``no_bunching`` conflicts with the
+            selected ``computation_space``; if an ``experiment`` is not unitary or
+            uses post-selection/heralding; if neither ``input_state`` nor
+            ``n_photons`` is provided when required; or if an annotated
+            ``BasicState`` is passed (annotations are not supported).
+        TypeError
+            If an unknown measurement strategy is selected during setup.
+
+        Warns
+        -----
+        DeprecationWarning
+            When deprecated keywords (e.g. ``no_bunching``) are supplied.
+        UserWarning
+            When ``experiment.min_photons_filter`` or ``experiment.detectors`` are
+            present (currently ignored).
+
+        """
         super().__init__()
 
         self._validate_kwargs("__init__", kwargs)
