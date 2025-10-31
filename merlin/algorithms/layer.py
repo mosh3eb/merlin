@@ -27,6 +27,7 @@ Main QuantumLayer implementation
 from __future__ import annotations
 
 import warnings
+from contextlib import contextmanager
 from typing import Any
 
 import perceval as pcvl
@@ -40,9 +41,7 @@ from ..builder.circuit_builder import (
 from ..core.process import ComputationProcessFactory
 from ..measurement import OutputMapper
 from ..measurement.autodiff import AutoDiffProcess
-from ..measurement.strategies import (
-    MeasurementStrategy,
-)
+from ..measurement.strategies import MeasurementStrategy
 from ..utils.grouping import ModGrouping
 
 
@@ -51,7 +50,17 @@ class QuantumLayer(nn.Module):
     Enhanced Quantum Neural Network Layer with factory-based architecture.
 
     This layer can be created either from a :class:`CircuitBuilder` instance or a pre-compiled :class:`pcvl.Circuit`.
+
+    Merlin integration (optimal design):
+      - `merlin_leaf = True` marks this module as an indivisible **execution leaf**.
+      - `force_simulation` (bool) defaults to False. When True, the layer MUST run locally.
+      - `supports_offload()` reports whether remote offload is possible (via `export_config()`).
+      - `should_offload(processor, shots)` encapsulates the current offload policy:
+            return supports_offload() and not force_simulation
     """
+
+    # ---- Explicit execution-leaf marker (prevents recursion into children like nn.Identity) ----
+    merlin_leaf: bool = True
 
     _deprecated_params: dict[str, str] = {
         "__init__.ansatz": "Use 'circuit' or 'CircuitBuilder' to define the quantum circuit.",
@@ -115,7 +124,18 @@ class QuantumLayer(nn.Module):
         self.no_bunching = no_bunching
         self.input_state = input_state
 
-        # ensure exclusivity of circuit/builder/experiment
+        # sampling params (also exported)
+        self.shots = shots
+        self.sampling_method = sampling_method
+
+        # execution policy: when True, always simulate locally (do not offload)
+        self._force_simulation: bool = False
+
+        # optional experiment handle for export
+        self.experiment: pcvl.Experiment | None = None
+        self.noise_model: Any | None = None  # type: ignore[assignment]
+
+        # exclusivity of circuit/builder/experiment
         if sum(x is not None for x in (circuit, builder, experiment)) != 1:
             raise ValueError(
                 "Provide exactly one of 'circuit', 'builder', or 'experiment'."
@@ -172,9 +192,16 @@ class QuantumLayer(nn.Module):
         elif circuit is not None:
             resolved_circuit = circuit
         elif experiment is not None:
+            self.experiment = experiment
+            self.noise_model = getattr(experiment, "noise", None)
             resolved_circuit = experiment.unitary_circuit()
 
         self.circuit = resolved_circuit
+
+        # persist prefixes for export/introspection
+        self.trainable_parameters: list[str] = list(trainable_parameters)
+        self.input_parameters: list[str] = list(input_parameters)
+
         self._init_from_custom_circuit(
             resolved_circuit,
             input_state,
@@ -184,10 +211,46 @@ class QuantumLayer(nn.Module):
             measurement_strategy,
         )
 
-        # Setup sampling
+        # autodiff/sampling backend
         self.autodiff_process = AutoDiffProcess(sampling_method)
-        self.shots = shots
-        self.sampling_method = sampling_method
+
+        # export snapshot cache
+        self._current_params: dict[str, Any] = {}
+
+    # -------------------- Execution policy & helpers --------------------
+
+    @property
+    def force_local(self) -> bool:
+        """When True, this layer must run locally (Merlin will not offload it)."""
+        return self._force_simulation
+
+    @force_local.setter
+    def force_local(self, value: bool) -> None:
+        self._force_simulation = bool(value)
+
+    def set_force_simulation(self, value: bool) -> None:
+        self.force_local = value
+
+    @contextmanager
+    def as_simulation(self):
+        """Temporarily force local simulation within the context."""
+        prev = self.force_local
+        self.force_local = True
+        try:
+            yield self
+        finally:
+            self.force_local = prev
+
+    # Offload capability & policy (queried by MerlinProcessor)
+    def supports_offload(self) -> bool:
+        """Return True if this layer is technically offloadable."""
+        return hasattr(self, "export_config") and callable(self.export_config)
+
+    def should_offload(self, _processor=None, _shots=None) -> bool:
+        """Return True if this layer should be offloaded under current policy."""
+        return self.supports_offload() and not self.force_local
+
+    # ---------------- core init paths ----------------
 
     def _init_from_custom_circuit(
         self,
@@ -218,7 +281,7 @@ class QuantumLayer(nn.Module):
             no_bunching=self.no_bunching,
         )
 
-        # Validate that the declared input size matches the builder-provided parameters
+        # Validate that the declared input size matches encoder parameters
         spec_mappings = self.computation_process.converter.spec_mappings
         total_input_params = 0
         if input_parameters is not None:
@@ -255,10 +318,8 @@ class QuantumLayer(nn.Module):
                 f"generated by the circuit ({total_input_params})."
             )
 
-        # Setup parameters
+        # Setup parameters and measurement strategy
         self._setup_parameters_from_custom(trainable_parameters)
-
-        # Setup measurement strategy
         self._setup_measurement_strategy_from_custom(measurement_strategy)
 
     def _setup_parameters_from_custom(self, trainable_parameters: list[str] | None):
@@ -299,7 +360,7 @@ class QuantumLayer(nn.Module):
             )
         dist_size = distribution.shape[-1]
 
-        # Determine output size
+        # Determine output size (upstream model)
         if measurement_strategy == MeasurementStrategy.PROBABILITIES:
             self._output_size = dist_size
         elif measurement_strategy == MeasurementStrategy.MODE_EXPECTATIONS:
@@ -314,7 +375,7 @@ class QuantumLayer(nn.Module):
         else:
             raise TypeError(f"Unknown measurement_strategy: {measurement_strategy}")
 
-        # Create output mapping
+        # Create measurement mapping
         self.measurement_mapping = OutputMapper.create_mapping(
             measurement_strategy,
             self.computation_process.no_bunching,
@@ -383,6 +444,7 @@ class QuantumLayer(nn.Module):
         self, prefixes: list[str], tensor: torch.Tensor
     ) -> list[torch.Tensor] | None:
         """Split a single logical input tensor into per-prefix chunks when possible."""
+
         counts: list[int] = []
         for prefix in prefixes:
             count = self._feature_count_for_prefix(prefix)
@@ -399,10 +461,9 @@ class QuantumLayer(nn.Module):
         offset = 0
         for count in counts:
             end = offset + count
-            if tensor.dim() == 1:
-                slices.append(tensor[offset:end])
-            else:
-                slices.append(tensor[..., offset:end])
+            slices.append(
+                tensor[..., offset:end] if tensor.dim() > 1 else tensor[offset:end]
+            )
             offset = end
         return slices
 
@@ -465,10 +526,7 @@ class QuantumLayer(nn.Module):
             if encoded_cols
             else x_batch.new_zeros((x_batch.shape[0], 0))
         )
-
-        if squeeze:
-            return encoded.squeeze(0)
-        return encoded
+        return encoded.squeeze(0) if squeeze else encoded
 
     def set_input_state(self, input_state):
         self.input_state = input_state
@@ -498,9 +556,11 @@ class QuantumLayer(nn.Module):
 
         # Custom mode or multiple parameters
         for idx, x in enumerate(input_parameters):
-            prefix = None
-            if prefixes:
-                prefix = prefixes[idx] if idx < len(prefixes) else prefixes[-1]
+            prefix = (
+                prefixes[idx]
+                if prefixes and idx < len(prefixes)
+                else (prefixes[-1] if prefixes else None)
+            )
             encoded = self._prepare_input_encoding(x, prefix)
             params.append(encoded)
 
@@ -538,6 +598,7 @@ class QuantumLayer(nn.Module):
             distribution = amplitudes.real**2 + amplitudes.imag**2
         else:
             raise TypeError(f"Unexpected amplitudes type: {type(amplitudes)}")
+
         if self.no_bunching:
             sum_probs = distribution.sum(dim=1, keepdim=True)
 
@@ -558,15 +619,15 @@ class QuantumLayer(nn.Module):
                     ),
                     amplitudes,
                 )
+
         if apply_sampling and shots > 0:
-            counts = self.autodiff_process.sampling_noise.pcvl_sampler(
+            results = self.autodiff_process.sampling_noise.pcvl_sampler(
                 distribution, shots
             )
-            results = counts
         else:
             results = amplitudes
 
-        # Apply measurements mapping
+        # Apply measurement mapping (returns tensor of shape [B, output_size])
         return self.measurement_mapping(results)
 
     def set_sampling_config(self, shots: int | None = None, method: str | None = None):
@@ -576,10 +637,10 @@ class QuantumLayer(nn.Module):
                 raise ValueError(f"shots must be a non-negative integer, got {shots}")
             self.shots = shots
         if method is not None:
-            valid_methods = ["multinomial", "binomial", "gaussian"]
-            if method not in valid_methods:
+            valid = ["multinomial", "binomial", "gaussian"]
+            if method not in valid:
                 raise ValueError(
-                    f"Invalid sampling method: {method}. Valid options are: {valid_methods}"
+                    f"Invalid sampling method: {method}. Valid options are: {valid}"
                 )
             self.sampling_method = method
 
@@ -606,6 +667,68 @@ class QuantumLayer(nn.Module):
     @property
     def output_size(self):
         return self._output_size
+
+    # =====================  EXPORT API FOR REMOTE PROCESSORS  =====================
+
+    def _update_current_params(self) -> None:
+        self._current_params.clear()
+        for name, param in self.named_parameters():
+            if param.requires_grad:
+                self._current_params[name] = param.detach().cpu().numpy()
+
+    def export_config(self) -> dict:
+        """
+        Export a standalone configuration for remote execution.
+        """
+        self._update_current_params()
+
+        if self.experiment is not None:
+            exported_circuit = self.experiment.unitary_circuit()
+        else:
+            exported_circuit = (
+                self.circuit.copy() if hasattr(self.circuit, "copy") else self.circuit
+            )
+
+        spec_mappings = getattr(self.computation_process.converter, "spec_mappings", {})
+        torch_params: dict[str, torch.Tensor] = {
+            n: p for n, p in self.named_parameters() if p.requires_grad
+        }
+
+        for p in exported_circuit.get_parameters():
+            pname: str = getattr(p, "name", "")
+            for tp_prefix in self.trainable_parameters:
+                names_for_prefix = spec_mappings.get(tp_prefix, [])
+                if pname in names_for_prefix:
+                    idx = names_for_prefix.index(pname)
+                    tparam = torch_params.get(tp_prefix, None)
+                    if tparam is None:
+                        break
+                    value = float(tparam.detach().cpu().view(-1)[idx].item())
+                    p.set_value(value)
+                    break
+
+        config = {
+            "circuit": exported_circuit,
+            "experiment": self.experiment,
+            "input_size": self.input_size,
+            "output_size": self.output_size,
+            "input_state": getattr(self, "input_state", None),
+            "n_modes": exported_circuit.m,
+            "n_photons": sum(getattr(self, "input_state", []) or [])
+            if hasattr(self, "input_state")
+            else None,
+            "trainable_parameters": list(self.trainable_parameters),
+            "input_parameters": list(self.input_parameters),
+            "no_bunching": bool(self.no_bunching),
+            "shots": int(self.shots),
+            "noise_model": self.noise_model,
+        }
+        return config
+
+    def get_experiment(self) -> pcvl.Experiment | None:
+        return self.experiment
+
+    # ============================================================================
 
     @classmethod
     def simple(
