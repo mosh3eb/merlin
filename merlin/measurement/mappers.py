@@ -211,19 +211,6 @@ class Amplitudes(nn.Module):
         original_shape = x.shape
         if x.ndim == 1:
             x = x.unsqueeze(0)
-
-        # remove normalization check in runtime
-        # n_batch, n_amplitudes = x.shape
-        #
-        # if not torch.allclose(
-        #    torch.sum(x.abs() ** 2, dim=1),
-        #    torch.ones(n_batch, device=x.device),
-        #    atol=1e-6,
-        # ):
-        #    raise ValueError(
-        #        "Input amplitudes are not normalized. The sum of squared amplitudes must be 1."
-        #    )
-
         if len(original_shape) == 1:
             x = x.squeeze(0)
         return x
