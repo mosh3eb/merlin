@@ -656,8 +656,6 @@ def test_ebs_wrt_quantumlayer(
     ebs_params = ebs_layer.prepare_parameters([])
     ebs_unitary = ebs_layer.computation_process.converter.to_tensor(*ebs_params)
 
-    print(f"\n -- EBS output: {ebs_output} -- \n")
-    print(f"\n -- Expected output: {expected_output} -- \n")
     for idx, state in enumerate(ebs_layer.state_keys):
         coefficients = amplitude_input[:, idx].to(ebs_output.dtype).unsqueeze(-1)
         if coefficients.abs().max() > 1e-8:
@@ -689,9 +687,6 @@ def test_ebs_wrt_quantumlayer(
                 basis_output = basis_output.squeeze(0)
             basis_output = basis_output.to(ebs_output.dtype)
 
-            print(
-                f"\n -- Basis output for state {state}: {basis_output} with norm {basis_output.norm(p=2)} -- \n"
-            )
             expected_output = expected_output + coefficients * basis_output
 
     # normalize expected_output
@@ -699,11 +694,6 @@ def test_ebs_wrt_quantumlayer(
         p=2, dim=1, keepdim=True
     ).clamp_min(1e-12)
 
-    print(f"\n Expected output shape: {expected_output.shape} -- \n")
-    print(f"\n EBS output: {ebs_output} with norm {ebs_output.norm(p=2, dim=1)} -- \n")
-    print(
-        f"\n Expected output: {expected_output} with norm {expected_output.norm(p=2, dim=1)} -- \n"
-    )
     assert torch.allclose(ebs_output, expected_output, rtol=1e-6, atol=1e-8), (
         "EBS output deviates from the superposed QuantumLayer results."
     )
