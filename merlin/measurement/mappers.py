@@ -208,5 +208,5 @@ class Amplitudes(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return the fock state vector amplitudes."""
-        amplitudes = nn.Identity(x)
-        return amplitudes
+        identity = nn.Identity()
+        return identity(x)
