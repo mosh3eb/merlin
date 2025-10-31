@@ -93,7 +93,7 @@ class TestUserGuideExamples:
 
         y_remote = proc.forward(q, X, nsample=5000)
 
-        q.force_simulation = True
+        q.force_local = True
         y_local = proc.forward(q, X, nsample=5000)
 
         assert y_remote.shape == y_local.shape == (4, comb(6, 2))

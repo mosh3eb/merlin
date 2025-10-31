@@ -220,26 +220,26 @@ class QuantumLayer(nn.Module):
     # -------------------- Execution policy & helpers --------------------
 
     @property
-    def force_simulation(self) -> bool:
+    def force_local(self) -> bool:
         """When True, this layer must run locally (Merlin will not offload it)."""
         return self._force_simulation
 
-    @force_simulation.setter
-    def force_simulation(self, value: bool) -> None:
+    @force_local.setter
+    def force_local(self, value: bool) -> None:
         self._force_simulation = bool(value)
 
     def set_force_simulation(self, value: bool) -> None:
-        self.force_simulation = value
+        self.force_local = value
 
     @contextmanager
     def as_simulation(self):
         """Temporarily force local simulation within the context."""
-        prev = self.force_simulation
-        self.force_simulation = True
+        prev = self.force_local
+        self.force_local = True
         try:
             yield self
         finally:
-            self.force_simulation = prev
+            self.force_local = prev
 
     # Offload capability & policy (queried by MerlinProcessor)
     def supports_offload(self) -> bool:
@@ -248,7 +248,7 @@ class QuantumLayer(nn.Module):
 
     def should_offload(self, _processor=None, _shots=None) -> bool:
         """Return True if this layer should be offloaded under current policy."""
-        return self.supports_offload() and not self.force_simulation
+        return self.supports_offload() and not self.force_local
 
     # ---------------- core init paths ----------------
 

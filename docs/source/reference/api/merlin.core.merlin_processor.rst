@@ -177,7 +177,7 @@ Offload Policy & Local Overrides
 
 * By default, modules that provide ``export_config()`` are treated as
   **quantum leaves** and offloaded.
-* Set ``layer.force_simulation = True`` to force **local** execution
+* Set ``layer.force_local = True`` to force **local** execution
   (useful for debugging and A/B comparisons).
 * Many Merlin tests also use a context helper ``with layer.as_simulation():``
   to temporarily force local-mode (if your layer provides it).
@@ -332,7 +332,7 @@ Local vs remote A/B (force simulation)
     y_remote = proc.forward(q, X, nsample=5000)
 
     # Local path (force simulation)
-    q.force_simulation = True
+    q.force_local = True
     y_local = proc.forward(q, X, nsample=5000)
 
     # Compare distributions (allowing some sampling noise)
@@ -373,7 +373,7 @@ Troubleshooting
 
 * **No job IDs appear**:
   * Your backend may be very fast, or your layer ran locally (e.g.,
-    ``force_simulation=True``).
+    ``force_local=True``).
 * **Perceval requires ``max_shots_per_call``**:
   * Merlin passes a safe default when you leave it ``None``. If your org policy
     requires explicit bounds, set it at construction.

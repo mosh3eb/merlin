@@ -593,7 +593,7 @@ class MerlinProcessor:
             yield from self._iter_layers_in_order(child)
 
     def _is_quantum_layer(self, module: Any) -> bool:
-        if getattr(module, "force_simulation", False):
+        if getattr(module, "force_local", False):
             return False
         return hasattr(module, "export_config") and callable(module.export_config)
 

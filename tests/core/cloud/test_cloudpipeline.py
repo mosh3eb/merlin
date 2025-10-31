@@ -34,7 +34,7 @@ class TestPolicyAndPipeline:
 
     def test_force_simulation_executes_locally(self, remote_processor, monkeypatch):
         layer = make_layer(5, 2, 2, no_bunching=True)
-        layer.force_simulation = True
+        layer.force_local = True
         x = torch.rand(3, 2)
         dist = layer(x).shape[1]
 
@@ -58,7 +58,7 @@ class TestPolicyAndPipeline:
     def test_mixed_sequential_one_offload_one_local(self, remote_processor):
         q1 = make_layer(5, 2, 2, no_bunching=True).eval()
         q2 = make_layer(6, 2, 3, no_bunching=True).eval()
-        q2.force_simulation = True  # force local
+        q2.force_local = True  # force local
 
         dist1 = q1(torch.rand(2, 2)).shape[1]
         dist2 = q2(torch.rand(2, 3)).shape[1]
