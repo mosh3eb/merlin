@@ -391,7 +391,7 @@ class QuantumLayer(nn.Module):
             computation_space=self.computation_space,
         )
 
-        # Setup DetectorTransform
+        # Setup PhotonLossTransform & DetectorTransform
         self.n_photons = self.computation_process.n_photons
         raw_keys = cast(
             list[tuple[int, ...]], self.computation_process.simulation_graph.mapped_keys
