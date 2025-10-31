@@ -235,9 +235,15 @@ class ComputationProcess(AbstractComputationProcess):
             )
             changed_unitary = False
             prev_state = fock_state
-        input_state = prepared_state.to(amplitudes.dtype)
 
+        input_state = prepared_state.to(amplitudes.dtype)
+        amplitudes = amplitudes / amplitudes.norm(p=2, dim=-1, keepdim=True).clamp_min(
+            1e-12
+        )
+
+        # The actual sum of amplitudes weighted by input coefficients (for each batch element) is done here
         final_amplitudes = input_state @ amplitudes
+
         # Keep output tensors aligned with the currently configured logical subspace.
         final_amplitudes = self._filter_tensor(final_amplitudes)
         keys_out = (
@@ -245,8 +251,10 @@ class ComputationProcess(AbstractComputationProcess):
             if self.logical_indices is not None
             else list(self.simulation_graph.mapped_keys)
         )
+
         if return_keys:
             return keys_out, final_amplitudes
+
         return final_amplitudes
 
     def compute_ebs_simultaneously(
@@ -302,8 +310,6 @@ class ComputationProcess(AbstractComputationProcess):
         # we don't want anymore the logical basis but normalization and typing cannot hurt even if it is a small overhead
         prepared_state = self._prepare_superposition_tensor()
 
-        print("prepared_state.shape:", prepared_state.shape)
-
         unitary = self.converter.to_tensor(*parameters)
 
         # Find non-zero input states - for efficient processing of only not zero amplitude states
@@ -343,9 +349,6 @@ class ComputationProcess(AbstractComputationProcess):
 
         # Apply input state coefficients
         input_state = prepared_state.to(amplitudes.dtype)
-
-        print("input_state.shape:", input_state.shape)
-        print("amplitudes.shape:", amplitudes.shape)
 
         amplitudes = amplitudes / amplitudes.norm(p=2, dim=-1, keepdim=True).clamp_min(
             1e-12

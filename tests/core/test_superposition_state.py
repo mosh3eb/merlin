@@ -14,13 +14,11 @@ import math
 from types import MethodType
 
 import perceval as pcvl
-import pytest
 import torch
 
 from merlin.algorithms.layer import QuantumLayer
+from merlin.core import ComputationSpace
 from merlin.measurement.strategies import MeasurementStrategy
-
-pytestmark = pytest.mark.skip(reason="superposition handling is deprecated")
 
 
 def classical_method(layer, input_state):
@@ -32,9 +30,11 @@ def classical_method(layer, input_state):
         layer.computation_process.input_state = key
         _ = layer()
 
-        output_classical += (
-            value * layer.computation_process.simulation_graph.prev_amplitudes
-        )
+        # retrieve amplitudes from the computation graph
+        amplitudes = layer.computation_process.simulation_graph.prev_amplitudes
+        amplitudes /= torch.norm(amplitudes, p=2, dim=-1, keepdim=True).clamp_min(1e-12)
+
+        output_classical += value * amplitudes
 
     output_classical /= torch.norm(output_classical, p=2, dim=-1, keepdim=True)
 
@@ -67,7 +67,6 @@ class TestOutputSuperposedState:
         input_state = input_state / sum_values
 
         layer = QuantumLayer(
-            input_size=0,
             circuit=circuit,
             n_photons=n_photons,
             measurement_strategy=MeasurementStrategy.PROBABILITIES,
@@ -75,7 +74,7 @@ class TestOutputSuperposedState:
             trainable_parameters=["phi"],
             input_parameters=[],
             dtype=torch.float64,
-            no_bunching=True,
+            computation_space=ComputationSpace.UNBUNCHED,
         )
 
         input_state_superposed = {
@@ -109,7 +108,6 @@ class TestOutputSuperposedState:
         input_state = input_state / torch.sqrt(sum_values)
 
         layer = QuantumLayer(
-            input_size=0,
             circuit=circuit,
             n_photons=n_photons,
             measurement_strategy=MeasurementStrategy.PROBABILITIES,
@@ -117,7 +115,7 @@ class TestOutputSuperposedState:
             trainable_parameters=["phi"],
             input_parameters=[],
             dtype=torch.float64,
-            no_bunching=True,
+            computation_space=ComputationSpace.UNBUNCHED,
         )
 
         input_state_superposed = {
@@ -157,7 +155,7 @@ class TestOutputSuperposedState:
             trainable_parameters=["phi"],
             input_parameters=[],
             dtype=torch.float64,
-            no_bunching=True,
+            computation_space=ComputationSpace.UNBUNCHED,
         )
 
         process = layer.computation_process
@@ -181,8 +179,8 @@ class TestOutputSuperposedState:
 
         layer()
 
-        assert call_tracker["ebs"] == 1
-        assert call_tracker["super"] == 0
+        assert call_tracker["ebs"] == 0
+        assert call_tracker["super"] == 1
 
     def test_forward_infers_single_state_without_batch(self):
         circuit = pcvl.components.GenericInterferometer(
@@ -206,7 +204,7 @@ class TestOutputSuperposedState:
             trainable_parameters=["phi"],
             input_parameters=[],
             dtype=torch.float64,
-            no_bunching=True,
+            computation_space=ComputationSpace.UNBUNCHED,
         )
 
         process = layer.computation_process

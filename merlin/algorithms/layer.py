@@ -697,7 +697,8 @@ class QuantumLayer(nn.Module):
 
         # TODO: challenge the need for trying/finally here
         try:
-            if isinstance(inferred_state, torch.Tensor):
+            if self.amplitude_encoding:
+                # we always use the parallel ebs computation path for amplitude encoding to enable batching
                 if simultaneous_processes is not None:
                     batch_size = simultaneous_processes
                 else:
@@ -706,6 +707,11 @@ class QuantumLayer(nn.Module):
                     )
                 amplitudes = self.computation_process.compute_ebs_simultaneously(
                     params, simultaneous_processes=batch_size
+                )
+            elif isinstance(inferred_state, torch.Tensor):
+                # otherwise the incremental EBS path allowing batch on input parameters
+                amplitudes = self.computation_process.compute_superposition_state(
+                    params
                 )
             else:
                 amplitudes = self.computation_process.compute(params)
