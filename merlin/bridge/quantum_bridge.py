@@ -24,7 +24,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Literal
 
 import perceval as pcvl
@@ -127,11 +127,12 @@ class QuantumBridge(nn.Module):
         self._transition_shape = (self._output_size, self.expected_state_dim)
         transition = self._build_transition_matrix()
         self.register_buffer("_transition", transition)
+        self._transition = transition
 
     # ------------------------------------------------------------------
     # Basis construction
     # ------------------------------------------------------------------
-    def _generate_qloq_basis(self):
+    def _generate_qloq_basis(self) -> Iterator[tuple[int, ...]]:
         """Yield QLOQ occupancies in computational-basis order."""
         for idx in range(self.expected_state_dim):
             bits = format(idx, f"0{self.n_qubits}b")
