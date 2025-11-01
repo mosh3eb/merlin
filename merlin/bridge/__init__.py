@@ -22,6 +22,6 @@
 
 """QuantumBridge components."""
 
-from .quantum_bridge import QuantumBridge, pop_bridge_metadata, to_fock_state
+from .quantum_bridge import ComputationSpace, QuantumBridge, to_fock_state
 
-__all__ = ["QuantumBridge", "pop_bridge_metadata", "to_fock_state"]
+__all__ = ["ComputationSpace", "QuantumBridge", "to_fock_state"]

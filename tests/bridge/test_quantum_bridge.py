@@ -5,17 +5,21 @@ import pytest
 import torch
 
 from merlin import OutputMappingStrategy, QuantumLayer
-from merlin.bridge.quantum_bridge import QuantumBridge, to_fock_state
+from merlin.bridge.quantum_bridge import (
+    ComputationSpace,
+    QuantumBridge,
+    to_fock_state,
+)
 
 
-def make_identity_layer(m: int, n_photons: int) -> QuantumLayer:
+def make_identity_layer(m: int, n_photons: int, *, no_bunching: bool = True) -> QuantumLayer:
     c = pcvl.Circuit(m)  # identity unitary
     layer = QuantumLayer(
         input_size=0,
         circuit=c,
         n_photons=n_photons,
         output_mapping_strategy=OutputMappingStrategy.NONE,
-        no_bunching=True,
+        no_bunching=no_bunching,
         device=torch.device("cpu"),
         dtype=torch.float32,
     )
@@ -190,6 +194,125 @@ def test_wires_order_big_endian_changes_mapping():
     assert idx_big != idx_little
 
 
+def test_transition_matrix_dual_rail_identity():
+    groups = [1, 1]
+    bridge = QuantumBridge(
+        qubit_groups=groups,
+        n_modes=sum(2**g for g in groups),
+        n_photons=len(groups),
+        computation_space=ComputationSpace.DUAL_RAIL,
+        normalize=False,
+    )
+    matrix = bridge.transition_matrix()
+    dense = matrix.to_dense()
+    torch.testing.assert_close(
+        dense,
+        torch.eye(2 ** sum(groups), dtype=dense.dtype),
+    )
+
+
+def test_transition_matrix_unbunched_subset():
+    groups = [1, 1]
+    bridge = QuantumBridge(
+        qubit_groups=groups,
+        n_modes=sum(2**g for g in groups),
+        n_photons=len(groups),
+        computation_space=ComputationSpace.UNBUNCHED,
+        normalize=False,
+    )
+    matrix = bridge.transition_matrix().to_dense()
+    assert matrix.shape == (6, 4)  # C(4, 2) x 2^2
+    col_sums = matrix.real.sum(dim=0)
+    torch.testing.assert_close(col_sums, torch.ones_like(col_sums))
+    row_sums = matrix.abs().sum(dim=1)
+    assert torch.all(row_sums <= 1.0 + 1e-6)
+
+
+def test_transition_matrix_fock_subset():
+    groups = [1, 1]
+    bridge = QuantumBridge(
+        qubit_groups=groups,
+        n_modes=sum(2**g for g in groups),
+        n_photons=len(groups),
+        computation_space=ComputationSpace.FOCK,
+        normalize=False,
+    )
+    matrix = bridge.transition_matrix().to_dense()
+    assert matrix.shape == (10, 4)  # C(4 + 2 - 1, 2) x 2^2
+    col_sums = matrix.real.sum(dim=0)
+    torch.testing.assert_close(col_sums, torch.ones_like(col_sums))
+    row_sums = matrix.abs().sum(dim=1)
+    assert torch.all(row_sums <= 1.0 + 1e-6)
+
+
+def test_bridge_properties_exposed():
+    groups = [2, 1]
+    m = sum(2**g for g in groups)
+    bridge = QuantumBridge(
+        qubit_groups=groups,
+        n_modes=m,
+        n_photons=len(groups),
+        computation_space=ComputationSpace.UNBUNCHED,
+    )
+    assert bridge.n_modes == m
+    assert bridge.n_photons == len(groups)
+    expected_size = math.comb(m, len(groups))
+    assert len(bridge.output_basis) == expected_size
+
+
+def test_bridge_fock_space_matches_layer_keys():
+    groups = [1, 1]
+    m = sum(2**g for g in groups)
+    layer = make_identity_layer(m, n_photons=len(groups), no_bunching=False)
+    bridge = QuantumBridge(
+        qubit_groups=groups,
+        n_modes=m,
+        n_photons=len(groups),
+        computation_space=ComputationSpace.FOCK,
+    )
+
+    psi = torch.zeros(4, dtype=torch.complex64)
+    psi[2] = 1.0 + 0.0j  # |10>
+
+    payload = bridge(psi)
+    out = layer(payload)
+
+    expected_bs = to_fock_state("10"[::-1], groups)
+    idx = find_key_index(layer, expected_bs)
+
+    assert torch.isclose(out[0, idx], torch.tensor(1.0, dtype=out.dtype), atol=1e-6)
+    assert torch.isclose(out[0].sum(), torch.tensor(1.0, dtype=out.dtype), atol=1e-6)
+
+
+def test_large_qloq_encoding_basis_state():
+    groups = [4, 4]  # 8 qubits grouped into two 4-qubit photons
+    m = sum(2**g for g in groups)  # 32 modes
+    layer = make_identity_layer(m, n_photons=len(groups))
+
+    bridge = QuantumBridge(
+        qubit_groups=groups,
+        n_modes=m,
+        n_photons=len(groups),
+        wires_order="little",
+        normalize=True,
+    )
+
+    basis_index = 42  # Arbitrary computational basis element
+    bits = format(basis_index, f"0{sum(groups)}b")
+
+    psi = torch.zeros(2 ** sum(groups), dtype=torch.complex64)
+    psi[basis_index] = 1.0 + 0.0j
+
+    payload = bridge(psi)
+    out = layer(payload)
+
+    expected_bs = to_fock_state(bits[::-1], groups)
+    idx = find_key_index(layer, expected_bs)
+
+    assert torch.isclose(out[0, idx], torch.tensor(1.0, dtype=out.dtype), atol=1e-6)
+    assert torch.isclose(out[0].sum(), torch.tensor(1.0, dtype=out.dtype), atol=1e-6)
+
+
 def test_error_when_qubit_groups_do_not_match_state_length():
     # Provide a 2-qubit state but groups sum to 1
     layer = make_identity_layer(m=2, n_photons=1)
@@ -209,8 +332,54 @@ def test_error_when_merlin_layer_mismatch_modes():
 
     bridge = QuantumBridge(qubit_groups=[1, 1], n_modes=4, n_photons=2)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError):
         psi = torch.zeros(4, dtype=torch.complex64)
         psi[0] = 1.0 + 0.0j
         payload = bridge(psi)
         _ = bad_layer(payload)
+
+
+def test_quantum_bridge_sequential_backward_with_pennylane():
+    qml = pytest.importorskip("pennylane")
+
+    groups = [1]
+    m = sum(2**g for g in groups)
+    layer = make_identity_layer(m, n_photons=len(groups))
+
+    dev = qml.device("default.qubit", wires=sum(groups), shots=None)
+
+    @qml.qnode(dev, interface="torch", diff_method="backprop")
+    def pl_state(theta):
+        qml.RY(theta, wires=0)
+        return qml.state()
+
+    class PennyLaneModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.theta = torch.nn.Parameter(torch.tensor(0.5, dtype=torch.float32))
+
+        def forward(self, *_args):
+            return pl_state(self.theta)
+
+    state_module = PennyLaneModule()
+    bridge = QuantumBridge(
+        qubit_groups=groups,
+        n_modes=m,
+        n_photons=len(groups),
+        wires_order="little",
+        normalize=True,
+    )
+
+    model = torch.nn.Sequential(state_module, bridge, layer)
+
+    output = model(torch.zeros(1, dtype=torch.float32))
+    idx_1 = find_key_index(layer, to_fock_state("1", groups))
+    loss = output[0, idx_1]
+
+    loss.backward()
+
+    assert state_module.theta.grad is not None
+    assert not torch.allclose(
+        state_module.theta.grad,
+        torch.zeros_like(state_module.theta.grad),
+    )

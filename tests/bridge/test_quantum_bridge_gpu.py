@@ -3,7 +3,7 @@ import pytest
 import torch
 
 from merlin import OutputMappingStrategy, QuantumLayer
-from merlin.bridge.quantum_bridge import QuantumBridge
+from merlin.bridge.quantum_bridge import ComputationSpace, QuantumBridge
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available(), reason="CUDA GPU not available"
@@ -36,6 +36,7 @@ def cpu_gpu_bridge_outputs(groups, statevec_fn, batch: int = 1):
         wires_order="little",
         normalize=True,
         device=torch.device("cpu"),
+        computation_space=ComputationSpace.UNBUNCHED,
     )
 
     # GPU layer + bridge
@@ -48,6 +49,7 @@ def cpu_gpu_bridge_outputs(groups, statevec_fn, batch: int = 1):
         wires_order="little",
         normalize=True,
         device=device_gpu,
+        computation_space=ComputationSpace.UNBUNCHED,
     )
 
     psi_cpu = statevec_fn(torch.device("cpu"), batch)

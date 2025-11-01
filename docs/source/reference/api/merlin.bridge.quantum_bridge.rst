@@ -10,15 +10,16 @@ merlin.bridge.quantum_bridge module
 Overview
 --------
 
-The **QuantumBridge** provides a seamless interface between PennyLane's qubit-based quantum circuits 
-and Merlin's photonic quantum processors. It automatically handles the encoding of qubit states into 
-photonic Fock states using a one-photon-per-group encoding scheme, enabling hybrid quantum machine 
-learning workflows that combine qubit and photonic paradigms.
+The **QuantumBridge** provides a passive interface between PyTorch-compatible qubit statevector
+simulators (PennyLane, Qiskit, custom modules, …) and Merlin's photonic quantum processors. It
+encodes computational-basis amplitudes into photonic spaces according to a one-photon-per-group
+scheme, enabling hybrid quantum machine learning workflows that combine qubit and photonic paradigms.
 
 Key Features
 ------------
 
-* **Automatic State Conversion**: Converts PennyLane qubit statevectors to photonic Fock state superpositions
+* **Automatic State Conversion**: Applies a predetermined transition matrix that maps qubit
+  statevectors to photonic amplitudes ordered according to the selected computation space
 * **Flexible Qubit Grouping**: Supports arbitrary partitioning of qubits into groups for photonic encoding
 * **Differentiable Pipeline**: Maintains gradient flow from Merlin back to PennyLane for end-to-end training
 * **Batch Processing**: Handles batched inputs efficiently
@@ -48,7 +49,7 @@ Each group of gᵢ qubits is encoded as one photon distributed across 2^gᵢ mod
 Parameters
 ~~~~~~~~~~
 
-.. py:class:: QuantumBridge(*, qubit_groups, n_modes, n_photons, device=None, dtype=torch.float32, wires_order='little', normalize=True)
+.. py:class:: QuantumBridge(*, qubit_groups, n_modes, n_photons, computation_space='unbunched', device=None, dtype=torch.float32, wires_order='little', normalize=True)
 
    :param list[int] qubit_groups: List specifying the size of each qubit group. 
                                    For example, [2, 2] splits 4 qubits into two groups of 2.
@@ -57,6 +58,7 @@ Parameters
    
    :param int n_photons: Number of photons in the photonic layer (must equal len(qubit_groups)).
    
+   :param str computation_space: Target computation space (``"fock"``, ``"unbunched"``, or ``"dual_rail"``).
    :param torch.device device: Target device for computation (default: None, infers from input).
    
    :param torch.dtype dtype: Data type for real-valued tensors (default: torch.float32).
@@ -91,7 +93,7 @@ through the photonic layer:
    import torch
    import perceval as pcvl
    from merlin import QuantumLayer, OutputMappingStrategy
-   from merlin.bridge.quantum_bridge import QuantumBridge
+   from merlin.bridge.quantum_bridge import ComputationSpace, QuantumBridge
 
    # Create a simple identity circuit (m=4 modes, 2 photons)
    circuit = pcvl.Circuit(4)
@@ -109,6 +111,7 @@ through the photonic layer:
        n_modes=4,
        n_photons=2,
        wires_order='little',
+       computation_space=ComputationSpace.UNBUNCHED,
        normalize=True,
    )
 
@@ -127,8 +130,8 @@ through the photonic layer:
    print(f"Output shape: {output.shape}")
    print(f"Output probabilities: {output}")
 
-The bridge returns a complex amplitude tensor; when chained with the same
-``QuantumLayer`` instance, the layer detects it automatically.
+The bridge returns a complex amplitude tensor in the exact ordering expected by the
+``QuantumLayer``.
 
 
 Hybrid Classification Task
@@ -143,7 +146,7 @@ A complete example showing hybrid qubit-photonic classification:
    import pennylane as qml
    import perceval as pcvl
    from merlin import QuantumLayer, OutputMappingStrategy
-   from merlin.bridge.quantum_bridge import QuantumBridge
+   from merlin.bridge.quantum_bridge import ComputationSpace, QuantumBridge
 
    class HybridQuantumClassifier(nn.Module):
        def __init__(self, n_qubits=3, n_classes=2):
@@ -180,6 +183,7 @@ A complete example showing hybrid qubit-photonic classification:
                qubit_groups=[n_qubits],
                n_modes=m,
                n_photons=1,
+               computation_space=ComputationSpace.UNBUNCHED,
                normalize=True,
            )
            
