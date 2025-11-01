@@ -972,14 +972,12 @@ class QuantumLayer(nn.Module):
         )
 
         # Convert amplitudes to probabilities if needed
-        if isinstance(amplitudes, torch.Tensor):
-            distribution = amplitudes.real**2 + amplitudes.imag**2
-        elif isinstance(amplitudes, tuple):
+        if isinstance(amplitudes, tuple):
             amplitudes = amplitudes[1]
-            distribution = amplitudes.real**2 + amplitudes.imag**2
-        else:
+        elif not isinstance(amplitudes, torch.Tensor):
             raise TypeError(f"Unexpected amplitudes type: {type(amplitudes)}")
 
+        # TODO: (Philippe) check why do we calculate distribution here, since it will be redone in measurement
         distribution = amplitudes.real**2 + amplitudes.imag**2
 
         # renormalize distribution and amplitudes for UNBUNCHED and DUAL_RAIL spaces
