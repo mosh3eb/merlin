@@ -168,6 +168,22 @@ class TestQuantumLayer:
         assert output.shape[0] == 1
         assert output.shape[1] == 3
 
+    def test_default_input_state_even_distribution(self):
+        """Omitted input_state should evenly distribute photons across modes."""
+        circuit = pcvl.Circuit(5)
+
+        layer = ML.QuantumLayer(
+            input_size=0,
+            circuit=circuit,
+            n_photons=2,
+            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+        )
+
+        expected_state = ML.StateGenerator.generate_state(
+            circuit.m, 2, ML.StatePattern.SPACED
+        )
+        assert layer.input_state == expected_state
+
     def test_gradient_computation(self):
         """Test that gradients flow through the layer."""
 

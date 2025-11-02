@@ -41,6 +41,7 @@ from ..builder.circuit_builder import (
     CircuitBuilder,
 )
 from ..core.computation_space import ComputationSpace
+from ..core.generators import StateGenerator, StatePattern
 from ..core.process import ComputationProcessFactory
 from ..measurement import OutputMapper
 from ..measurement.autodiff import AutoDiffProcess
@@ -185,8 +186,9 @@ class QuantumLayer(nn.Module):
             - ``pcvl.BasicState`` without annotations (plain FockState only),
             - ``pcvl.StateVector`` (converted to a tensor according to
               ``computation_space``).
-            If omitted, ``n_photons`` must be provided to derive a default state
-            (dual-rail: ``[1,0,1,0,...]``, otherwise first ``n_photons`` modes).
+            If omitted, ``n_photons`` must be provided to derive a default state.
+            The dual-rail space defaults to ``[1,0,1,0,...]`` while other spaces
+            evenly distribute the photons across the available modes.
         n_photons : int | None, optional
             Number of photons used to infer a default input state and to size the
             computation space when amplitude encoding is enabled.
@@ -472,9 +474,13 @@ class QuantumLayer(nn.Module):
         if input_state is not None:
             self.input_state = input_state
         elif n_photons is not None:
-            # Default behavior: place [1,0,1,0,...] in dual-rail, else first n_photons modes
+            # Default behavior: place [1,0,1,0,...] in dual-rail, else distribute photons across modes
             if self.computation_space is ComputationSpace.DUAL_RAIL:
                 self.input_state = [1, 0] * n_photons
+            elif not self.amplitude_encoding:
+                self.input_state = StateGenerator.generate_state(
+                    circuit.m, n_photons, StatePattern.SPACED
+                )
             else:
                 self.input_state = [1] * n_photons + [0] * (circuit.m - n_photons)
         else:
