@@ -75,6 +75,9 @@ issues = "https://github.com/merlinquantum/merlin/issues"
 package-dir = {"" = "src"}
 packages = [
     "merlin",
+    "merlin.algorithms",
+    "merlin.bridge",
+    "merlin.builder",
     "merlin.core",
     "merlin.datasets",
     "merlin.measurement",
