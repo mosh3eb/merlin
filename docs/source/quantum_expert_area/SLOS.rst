@@ -30,7 +30,7 @@ Key Features of SLOS
    SLOS computes the output probabilities iteratively, incrementally increasing the number of photons and calculating the probabilities of Fock states at each step. This avoids the exponential cost of computing permanents for each output state independently.
 
 2. **Complexity Improvement**
-   - **Previous state-of-the-art**: Permanent-based methods (e.g., Ryser, Glynn) have a time complexity of :math:`O(n 2^n)` for computing the permanent of an :math:`n \times n` matrix.
+   - **Previous state-of-the-art**: Permanent-based methods (e.g., Ryser, 1963; Glynn, 2010) and the previous state-of-the-art method (Shchesnovich, 2019) have a time complexity of :math:`O(n 2^n)` for computing the permanent of an :math:`n \times n` matrix.
    - **SLOS**: Achieves a time complexity of :math:`O(n \binom{n+m-1}{m-1})`, where :math:`n` is the number of photons and :math:`m` is the number of modes. This is **linear in the number of output states** and provides an exponential speedup over permanent-based methods for many practical cases.
 
 3. **Memory Trade-off**
@@ -47,6 +47,8 @@ Practical Performance
 - **Benchmarking**: SLOS outperforms permanent-based methods (e.g., Glynn’s algorithm) for small to moderate :math:`n` and :math:`m`. For example, simulating a 10-photon, 10-mode circuit takes hours with SLOS but days with permanent-based methods.
 - **Memory Limits**: Strong simulation becomes impractical for very large :math:`n` and :math:`m` due to memory constraints (e.g., 24 photons in 24 modes require ~1.5 Petabytes of memory).
 
+For detailed memory and time performance evaluations, refer to :doc:`../performance/performance`.
+
 Use Cases
 =========
 
@@ -62,6 +64,9 @@ SLOS is a powerful tool for strong simulation of linear optical circuits, offeri
 References
 ==========
 - Heurtel, N., Mansfield, S., Senellart, J., & Valiron, B. (2023). *Strong Simulation of Linear Optical Processes*. `arXiv:2206.10549 <https://arxiv.org/abs/2206.10549>`_.
-- Perceval documentation: `Perceval <https://perceval.quandela.net/>`_.
-- Clifford, P., & Clifford, R. (2017). *The Classical Complexity of Boson Sampling*. `arXiv:1707.01994 <https://arxiv.org/abs/1707.01994>`_.
+- Heurtel, N., Fyrillas, A., de Gliniasty, G., Bihan, R.L., et al. (2023). *Perceval: a software platform for discrete variable photonic quantum computing*. `arXiv:2204.00602 <https://arxiv.org/abs/2204.00602>`_.
+- Shchesnovich, V. (2019). *On the classical complexity of sampling from quantum interference of indistinguishable bosons*. `arXiv:1904.02013 <https://arxiv.org/abs/1904.02013>`_.
+- Clifford, P., & Clifford, R. (2017). *The Classical Complexity of Boson Sampling*. `arXiv:1706.01260 <https://arxiv.org/abs/1706.01260>`_.
+- Glynn, D.G. (2010). *The permanent of a square matrix*. European Journal of Combinatorics, 31, 1887-1891.
+- Ryser, H.J. (1963). *Combinatorial Mathematics*. American Mathematical Society.
 
