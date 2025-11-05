@@ -145,18 +145,18 @@ The **QuantumLayer** combines all these concepts into a PyTorch-compatible inter
     import merlin as ML
     import numpy as np
 
-    builder = ML.CircuitBuilder(n_modes=6) # instatiate the CircuitBuilder
-    builder.add_angle_encoding(name="px", scale=np.pi) # will encode n_modes features by default
+    builder = ML.CircuitBuilder(n_modes=6)
+    builder.add_angle_encoding(name="px", scale=np.pi)
     builder.add_entangling_layer(trainable=True)
 
     quantum_layer = ML.QuantumLayer(
-        input_size=6,                                   # Classical feature dimension
+        input_size=4,                                   # Classical feature dimension
         builder=builder,                                # CircuitBuilder instance
         n_photons=2,                                    # Number of photons in the register
         input_state=[1, 0, 1, 0, 1, 0],                 # Initial photon pattern
         input_parameters=["px"],                        # Prefix for angle-encoded features
-        computation_space = ML.ComputationSpace.FOCK,   # Choose Fock space handling
-        measurement_strategy=ML.MeasurementStrategy.PROBABILITIES, # Measurement strategy to use
+        computation_space=ML.ComputationSpace.FOCK,     # Choose Fock space handling
+        measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
     )
 
     # Optional: down-sample the Fock distribution to 3 features using a Linear Layer
@@ -195,17 +195,17 @@ Here's how all these concepts work together in practice:
 
             # Quantum processing layer
             builder = ML.CircuitBuilder(n_modes=6)
-            builder.add_angle_encoding(name = "px", scale=np.pi)
+            builder.add_angle_encoding(name="px", scale=np.pi)
             builder.add_entangling_layer(trainable=True)
             builder.add_superpositions(trainable=True)
 
             quantum_core = ML.QuantumLayer(
-                input_size=6,
+                input_size=4,
                 builder=builder,
                 n_photons=2,
-                input_state=ML.StatePattern.PERIODIC,
+                input_state=[1, 0, 1, 0, 1, 0],
                 input_parameters=["px"],
-                computation_space="auto",
+                computation_space=ML.ComputationSpace.FOCK,
                 measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
             )
             self.quantum = nn.Sequential(
@@ -248,7 +248,7 @@ When choosing configurations, consider these general principles:
 
 **Computational Constraints**:
 
-- Limited resources → fewer photons, prefer simulation mode ``auto``
+- Limited resources → fewer photons, prefer ``ComputationSpace.UNBUNCHED`` when your circuit avoids photon bunching
 - More resources available → increase photon count or depth for richer expressivity
 
 **Experiment Systematically**: The quantum advantage often comes from the right combination of circuit design, encoding, measurement strategy, and optional grouping for your specific problem.
