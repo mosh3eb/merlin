@@ -10,6 +10,6 @@ User Guide
    :maxdepth: 3
    :caption: Table of Contents
 
-   first_quantum_layers
+   quantum_layers
    remote_processing
    other_algorithms

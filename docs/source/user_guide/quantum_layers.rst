@@ -1,10 +1,10 @@
 :github_url: https://github.com/merlinquantum/merlin
 
-.. _first_quantum_layers:
+.. _quantum_layers:
 
-====================
-First Quantum Layers
-====================
+==============
+Quantum Layers
+==============
 
 How to Build a QuantumLayer
 ===========================
@@ -19,7 +19,7 @@ Merlin's :class:`~merlin.algorithms.QuantumLayer` wraps a photonic circuit so it
 Using CircuitBuilder
 --------------------
 
-:class:`~merlin.builder.CircuitBuilder` is the most appropiate approach if you understand the basics of photonic QML without specifically knowing how to use `Perceval <https://perceval.quandela.net>`_. It has an intuitive API which allows you to build a photonic circuit that you can then send to a QuantumLayer.
+:class:`~merlin.builder.CircuitBuilder` is the most appropriate approach if you understand the basics of photonic QML without specifically knowing how to use `Perceval <https://perceval.quandela.net>`_. It has an intuitive API which allows you to build a photonic circuit that you can then send to a QuantumLayer.
 
 1. Build the circuit.
 
@@ -128,6 +128,9 @@ There are several ways to build a circuit with Perceval. One of them is to use a
     )
     circuit.add(0, wr)
 
+    # Display the circuit
+    pcvl.pdisplay(circuit)
+
 2. Include your circuit in a perceval.Experiment (optional).
 
 This step is optional, as a QuantumLayer can be initialized without an experiment. However, doing it allows you to integrate a noise model and detectors into the QuantumLayer. For more information on those, see :doc:`../quantum_expert_area/index`.
@@ -176,7 +179,7 @@ Select a :class:`~merlin.measurement.MeasurementStrategy` to control the classic
 
 There are three measurement strategies:
 
-- **MeasurementStrategy.PROBABILITIES** returns a probability vector with one entry per Fock state in :pyattr:`QuantumLayer.output_keys`. This is the default strategy.
+- **MeasurementStrategy.PROBABILITIES** returns a probability vector with one entry per possible output Fock state. This is the **default** strategy.
 
 .. code-block:: python
     
