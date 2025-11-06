@@ -143,6 +143,27 @@ To reduce the dimensionality of the Fock distribution after measurement, compose
 
 For detailed comparisons and selection guidelines, see :doc:`../user_guide/measurement_strategy` and :doc:`../user_guide/grouping`.
 
+Grouping strategies
+-------------------
+
+Two simple, built-in grouping strategies are provided to reduce the high-dimensional
+Fock outputs to a smaller set of classical features:
+
+- ``LexGrouping``: assigns consecutive output indices to the same bucket (lexicographic
+    ordering). This preserves locality in the Fock index ordering and is a good default
+    when nearby basis states are expected to encode related features.
+- ``ModGrouping``: maps output indices to buckets using a modulo operation, effectively
+    interleaving states across groups. This is useful when you want to mix information
+    from distant basis states or avoid clustering correlated states into the same bucket.
+
+Example::
+
+        # Collapse the Fock output into 3 features by grouping consecutive indices
+        grouped_layer = ML.LexGrouping(quantum_layer.output_size, 3)
+
+        # Alternatively, interleave states into 3 groups
+        interleaved = ML.ModGrouping(quantum_layer.output_size, 3)
+
 5. High-Level Interface: QuantumLayer
 =====================================
 
@@ -218,6 +239,10 @@ Here's how all these concepts work together in practice:
             )
             self.quantum = nn.Sequential(
                 quantum_core,
+                # Lexicographic grouping: collapse the high-dimensional Fock output into `6` buckets
+                # by assigning consecutive output indices to the same group. This preserves local
+                # structure in the Fock ordering and is useful when nearby basis states encode
+                # similar features.
                 ML.LexGrouping(quantum_core.output_size, 6),
             )
 
