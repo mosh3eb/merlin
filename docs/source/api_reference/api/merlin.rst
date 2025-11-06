@@ -18,7 +18,7 @@ Subpackages
    merlin.datasets
    merlin.measurement
    merlin.pcvl_pytorch
-   merlin.sampling
+   merlin.utils
 
 Submodules
 ----------
