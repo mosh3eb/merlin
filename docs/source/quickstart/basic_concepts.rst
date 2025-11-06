@@ -54,7 +54,8 @@ First, we present the overview of the building of a QuantumLayer, brick by brick
 .. image:: ../_static/img/diagrams.png
    :alt: Flow from data preprocessing to quantum layer and measurement
 
-   Overview of the Merlin hybrid workflow.
+
+Overview of the Merlin hybrid workflow.
 
 2. Backend : Mathematical Models
 ========================================
