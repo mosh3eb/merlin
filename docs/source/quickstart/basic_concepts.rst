@@ -50,6 +50,7 @@ Here, we could write
 For a deeper understanding of photonic quantum computing fundamentals, see :doc:`../quantum_expert_area/architectures`.
 
 First, we present the overview of the building of a QuantumLayer, brick by brick using the `CircuitBuilder`.  
+
 .. figure:: ../_static/img/diagrams.png
    :alt: Flow from data preprocessing to quantum layer and measurement
 
