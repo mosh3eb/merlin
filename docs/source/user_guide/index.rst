@@ -10,7 +10,8 @@ User Guide
    :maxdepth: 2
    :caption: Table of Contents
 
-   circuit_types
+   layer
+   angle_amplitude_encoding
    experiment
    layer
    hybrid_models
