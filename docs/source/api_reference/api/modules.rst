@@ -5,4 +5,3 @@ API Reference
    :maxdepth: 4
 
    merlin
-   merlin.bridge
