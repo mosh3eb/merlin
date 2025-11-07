@@ -610,15 +610,17 @@ class PoolingFeedForward(torch.nn.Module):
             0,
             circuit=pcvl.Circuit(n_modes),
             n_photons=n_photons,
-            computation_space=(no_bunching and ComputationSpace.UNBUNCHED)
-            or ComputationSpace.FOCK,
+            computation_space=ComputationSpace.UNBUNCHED
+            if no_bunching
+            else ComputationSpace.FOCK,
         ).computation_process.simulation_graph.mapped_keys
         keys_out = QuantumLayer(
             0,
             circuit=pcvl.Circuit(n_output_modes),
             n_photons=n_photons,
-            computation_space=(no_bunching and ComputationSpace.UNBUNCHED)
-            or ComputationSpace.FOCK,
+            computation_space=ComputationSpace.UNBUNCHED
+            if no_bunching
+            else ComputationSpace.FOCK,
         ).computation_process.simulation_graph.mapped_keys
 
         # If no pooling structure is provided, construct a balanced one
