@@ -1,5 +1,6 @@
 .. _quantum_layer:
 
+=======================
 QuantumLayer Essentials
 =======================
 

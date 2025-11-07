@@ -2,9 +2,9 @@
 
 .. _reproduced_papers:
 
-==========
+=================
 Reproduced Papers
-==========
+=================
 
 .. toctree::
    :maxdepth: 1
