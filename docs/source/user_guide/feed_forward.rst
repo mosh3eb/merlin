@@ -5,8 +5,9 @@ Feed-forward (FF)
 
 This page shows **minimal, working** recipes for building feed-forward pipelines with
 :class:`merlin.algorithms.feed_forward.FeedForwardBlock` and
-:class:`merlin.algorithms.feed_forward.PoolingFeedForward`, along with a short sketch
-for customizing branches.
+:class:`merlin.algorithms.feed_forward.PoolingFeedForward`.
+
+Experimental warning: FeedForwardBlock is exprimental and its usage with arguments `state_injection` = False and `depth` > 1 is not recommended.
 
 -----------------------------
 A. Minimal feed-forward block
@@ -27,7 +28,7 @@ state shapes simple and make the example easy to reuse.
        input_size=4,     # <= small classical input per sample
        n=2,              # number of photons
        m=4,              # number of modes
-       depth=2,          # two FF steps
+       depth=1,          # two FF steps
        conditional_modes=[0],  # single conditional mode
        state_injection=False,
    )
@@ -45,7 +46,7 @@ state shapes simple and make the example easy to reuse.
 
    # Output key list (ordering is stable across calls without structural changes)
    keys = ffb.output_keys
-   print(f"{len(keys)} output keys:", keys[:6], "...")
+   print(f"{len(keys)} output keys:", keys)
 
 
 ---------------------------------------
@@ -60,7 +61,7 @@ A tiny optimization loop you can drop into notebooks or tests.
    from merlin.algorithms.feed_forward import FeedForwardBlock
 
    ffb = FeedForwardBlock(
-       input_size=4, n=2, m=4, depth=2, conditional_modes=[0], state_injection=False
+       input_size=4, n=2, m=4, depth=1, conditional_modes=[0], state_injection=False
    )
    opt = torch.optim.Adam(ffb.parameters(), lr=1e-3)
 
@@ -125,68 +126,14 @@ tests we use helpers that instantiate such layers; adapt to your layer utilities
    assert isinstance(res, torch.Tensor) and res.requires_grad
 
 
----------------------------------------------
-D. Sketch: customizing a branch (conceptual)
----------------------------------------------
-
-You can customize per-branch quantum processing by replacing auto-built layers
-at a given step ``k``. The outline below shows how you would:
-
-1) Inspect how many branches exist at ``k`` and what classical input each branch
-   receives; then
-2) Build your branch-specific layers; finally
-3) Register them into the FF block.
-
-Use your preferred builder to construct circuits/layers (e.g., a circuit builder
-utility) and ensure each custom layer’s input shape matches the branch allocation.
-
-.. code-block:: python
-
-   import torch
-   from merlin.algorithms.feed_forward import FeedForwardBlock
-
-   # Start from the minimal recipe
-   ffb = FeedForwardBlock(
-       input_size=4, n=2, m=4, depth=2, conditional_modes=[0], state_injection=False
-   )
-
-   # 1) Discover branches at step k=1
-   k = 1
-   n_branches = ffb.size_ff_layer(k)
-   per_branch_inputs = ffb.input_size_ff_layer(k)  # list[int] of length n_branches
-
-   # 2) (Sketch) Build your layers for each branch.
-   #    Replace this with your own layer factory/builder for amplitudes over (m - k) modes.
-   #    Example signature: make_layer(n_modes, n_photons, input_size) -> QuantumLayer
-   def make_layer(n_modes, n_photons, input_size):
-       # ... build your circuit/layer here ...
-       raise NotImplementedError
-
-   custom_layers_k = [
-       make_layer(n_modes=ffb.m - k, n_photons=ffb.n_photons, input_size=inp)
-       for inp in per_branch_inputs
-   ]
-
-   # 3) Register: assign in the same order as branches are enumerated internally
-   ffb.define_ff_layer(k=k, layers=custom_layers_k)
-
-   # From here, forward() uses your custom layers on step k
-   _ = ffb(torch.rand(1, ffb.input_size))
-
-
 --------------------------
 Shape & parameter checklist
 --------------------------
 
-- **Minimal FF** (Section A/B): ``input_size=4, n=2, m=4, depth=2, conditional_modes=[0], state_injection=False``.
+- **Minimal FF** (Section A/B): ``input_size=4, n=2, m=4, depth=1, conditional_modes=[0], state_injection=False``.
   This setting keeps amplitude tensors 2-D in practice and avoids shape pitfalls.
 
 - **Pooling** (Section C):
   - Stand-alone: feed a tensor with width ``len(match_indices)+len(exclude_indices)``.
   - End-to-end: place :class:`PoolingFeedForward` between a producer and a consumer
     of amplitudes defined on matching mode spaces.
-
-- **Custom branches** (Section D): for a step ``k``, use ``n_modes = m - k`` and
-  the per-branch input sizes returned by ``input_size_ff_layer(k)``. Keep the photon
-  number consistent with the block configuration.
-
