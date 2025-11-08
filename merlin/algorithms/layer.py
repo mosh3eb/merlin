@@ -187,6 +187,7 @@ class QuantumLayer(nn.Module):
             - ``pcvl.BasicState`` without annotations (plain FockState only),
             - ``pcvl.StateVector`` (converted to a tensor according to
               ``computation_space``).
+            If QuantumLayer is built from an experiment, the experiment's input state
             If omitted, ``n_photons`` must be provided to derive a default state.
             The dual-rail space defaults to ``[1,0,1,0,...]`` while other spaces
             evenly distribute the photons across the available modes.
@@ -304,6 +305,16 @@ class QuantumLayer(nn.Module):
             )
 
         self.computation_space = computation_space_value
+
+        if experiment is not None and experiment.input_state is not None:
+            if input_state is not None and experiment.input_state != input_state:
+                warnings.warn(
+                    "Both 'experiment.input_state' and 'input_state' are provided. "
+                    "'experiment.input_state' will be used.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            input_state = experiment.input_state
 
         if isinstance(input_state, pcvl.BasicState):
             if not isinstance(input_state, xqlbr.FockState):

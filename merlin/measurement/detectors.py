@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import itertools
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from typing import cast
 
 import perceval as pcvl
@@ -91,6 +91,7 @@ class DetectorTransform(torch.nn.Module):
                 self._remaining_offsets,
                 self._remaining_combinadics,
                 self._remaining_dim,
+                self._remaining_dims,
             ) = self._build_partial_metadata()
             self._remaining_keys_cache: list[tuple[int, ...]] | None = None
             self._detector_keys = []
@@ -133,6 +134,7 @@ class DetectorTransform(torch.nn.Module):
         dict[int, int],
         dict[int, Combinadics],
         int,
+        dict[int, int],
     ]:
         """
         Prepare bookkeeping for partial measurement mode.
@@ -147,10 +149,19 @@ class DetectorTransform(torch.nn.Module):
         if not unmeasured_modes:
             offsets = {0: 0}
             combinadics_map: dict[int, Combinadics] = {}
-            return measured_modes, unmeasured_modes, offsets, combinadics_map, 1
+            dims_map = {0: 1}
+            return (
+                measured_modes,
+                unmeasured_modes,
+                offsets,
+                combinadics_map,
+                1,
+                dims_map,
+            )
 
         offsets: dict[int, int] = {}
         combinadics_map: dict[int, Combinadics] = {}
+        dims_map: dict[int, int] = {}
         remaining_dim = 0
         counts_present: set[int] = set()
         for sim_key in self._simulation_keys:
@@ -163,15 +174,26 @@ class DetectorTransform(torch.nn.Module):
                 continue
             offsets[remaining_n] = remaining_dim
             combinadics_map[remaining_n] = combinator
+            dims_map[remaining_n] = size
             remaining_dim += size
 
         if remaining_dim == 0:
             offsets[0] = 0
+            dims_map[0] = 1
             remaining_dim = 1
 
-        return measured_modes, unmeasured_modes, offsets, combinadics_map, remaining_dim
+        return (
+            measured_modes,
+            unmeasured_modes,
+            offsets,
+            combinadics_map,
+            remaining_dim,
+            dims_map,
+        )
 
-    def _remaining_index(self, remaining_key: tuple[int, ...]) -> tuple[int, int]:
+    def _remaining_position(
+        self, remaining_key: tuple[int, ...]
+    ) -> tuple[int, int, int, int]:
         remaining_n = sum(remaining_key)
         offset = self._remaining_offsets.get(remaining_n)
         if offset is None:
@@ -180,7 +202,7 @@ class DetectorTransform(torch.nn.Module):
             )
 
         if not self._unmeasured_modes:
-            return offset, remaining_n
+            return offset, remaining_n, 0, 1
 
         combinator = self._remaining_combinadics.get(remaining_n)
         if combinator is None:
@@ -188,7 +210,21 @@ class DetectorTransform(torch.nn.Module):
                 f"No combinator configured for remaining photon count {remaining_n}."
             )
         local_index = combinator.fock_to_index(remaining_key)
-        return offset + local_index, remaining_n
+        local_dim = self._remaining_dims.get(remaining_n)
+        if local_dim is None:
+            raise KeyError(
+                f"No local dimension configured for remaining photon count {remaining_n}."
+            )
+        return offset + local_index, remaining_n, local_index, local_dim
+
+    def _full_measurement_key(
+        self, per_mode_counts: tuple[int, ...]
+    ) -> tuple[int | None, ...]:
+        full_key: list[int | None] = [None] * self._n_modes
+        for idx, mode in enumerate(self._measured_modes):
+            value = per_mode_counts[idx] if idx < len(per_mode_counts) else None
+            full_key[mode] = value
+        return tuple(full_key)
 
     def _detector_response(
         self, mode: int, photon_count: int
@@ -354,7 +390,7 @@ class DetectorTransform(torch.nn.Module):
 
     def _forward_partial(
         self, amplitudes: torch.Tensor
-    ) -> dict[tuple[int, ...], tuple[torch.Tensor, torch.Tensor]]:
+    ) -> list[dict[tuple[int, ...], list[tuple[torch.Tensor, torch.Tensor]]]]:
         """
         Apply partial detector measurement to a complex amplitude tensor.
         """
@@ -374,14 +410,35 @@ class DetectorTransform(torch.nn.Module):
         batch_shape = amplitudes.shape[:-1]
         flattened = amplitudes.reshape(-1, amplitudes.shape[-1])
         batch_size = flattened.shape[0]
-        remaining_dim = self._remaining_dim
-
-        amplitude_buckets: dict[tuple[int, ...], tuple[torch.Tensor, int]] = {}
+        branch_amplitudes: dict[
+            tuple[
+                tuple[int, ...],
+                int,
+                tuple[int, ...],
+                tuple[int | None, ...],
+            ],
+            torch.Tensor,
+        ] = {}
+        branch_probabilities: dict[
+            tuple[
+                tuple[int, ...],
+                int,
+                tuple[int, ...],
+                tuple[int | None, ...],
+            ],
+            torch.Tensor,
+        ] = {}
 
         for state_index, sim_key in enumerate(self._simulation_keys):
             amplitude_column = flattened[:, state_index]
+            actual_counts = tuple(sim_key[mode] for mode in self._measured_modes)
             remaining_key = tuple(sim_key[idx] for idx in self._unmeasured_modes)
-            remaining_col, remaining_n = self._remaining_index(remaining_key)
+            (
+                _,
+                remaining_n,
+                local_index,
+                local_dim,
+            ) = self._remaining_position(remaining_key)
 
             per_mode = [
                 self._detector_response(mode, sim_key[mode])
@@ -390,52 +447,92 @@ class DetectorTransform(torch.nn.Module):
 
             for outcomes in itertools.product(*per_mode):
                 measurement_values: list[int] = []
+                per_mode_measured: list[int] = []
                 probability = 1.0
                 for partial_state, partial_prob in outcomes:
                     measurement_values.extend(partial_state)
+                    per_mode_measured.append(
+                        int(partial_state[0]) if partial_state else 0
+                    )
                     probability *= partial_prob
 
                 if probability == 0.0:
                     continue
 
                 measurement_key = tuple(measurement_values)
-                bucket_info = amplitude_buckets.get(measurement_key)
-                bucket = None
-                if bucket_info is not None:
-                    bucket, stored_n = bucket_info
-                    if stored_n != remaining_n:
-                        raise RuntimeError(
-                            "Inconsistent remaining photon counts for measurement outcome "
-                            f"{measurement_key}: {stored_n} vs {remaining_n}."
-                        )
+                full_key = self._full_measurement_key(tuple(per_mode_measured))
+                branch_key = (measurement_key, remaining_n, actual_counts, full_key)
+                bucket = branch_amplitudes.get(branch_key)
+                probability_bucket = branch_probabilities.get(branch_key)
                 if bucket is None:
                     bucket = torch.zeros(
-                        (batch_size, remaining_dim),
+                        (batch_size, local_dim),
                         dtype=flattened.dtype,
                         device=flattened.device,
                     )
-                    amplitude_buckets[measurement_key] = (bucket, remaining_n)
+                    branch_amplitudes[branch_key] = bucket
+                    probability_bucket = torch.zeros(
+                        batch_size,
+                        dtype=flattened.real.dtype,
+                        device=flattened.device,
+                    )
+                    branch_probabilities[branch_key] = probability_bucket
+                else:
+                    assert probability_bucket is not None
 
-                weight = math.sqrt(probability)
-                bucket[:, remaining_col] += amplitude_column * weight
+                probability_bucket += amplitude_column.abs().pow(2) * probability
+
+                if local_dim > 0:
+                    weight = math.sqrt(probability)
+                    bucket[:, local_index] += amplitude_column * weight
 
         formatted: dict[
-            tuple[int, ...], tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+            tuple[tuple[int | None, ...], int],
+            list[tuple[torch.Tensor, torch.Tensor]],
         ] = {}
-        for key, (tensor, remaining_n) in amplitude_buckets.items():
-            amplitudes_shape = batch_shape + (remaining_dim,)
+        for branch_key, tensor in branch_amplitudes.items():
+            _, remaining_n, _, full_key = branch_key
+            combined_key = (full_key, remaining_n)
+            local_dim = tensor.shape[-1]
+            amplitudes_shape = batch_shape + (local_dim,)
             amplitudes_view = tensor.reshape(amplitudes_shape)
-            probabilities = tensor.abs().pow(2).sum(dim=-1)
+            probabilities = branch_probabilities[branch_key]
             if batch_shape:
                 probabilities = probabilities.reshape(batch_shape)
             else:
                 probabilities = probabilities.reshape(())
-            n_tensor = torch.tensor(
-                remaining_n, dtype=torch.long, device=probabilities.device
-            )
-            formatted[key] = (probabilities, n_tensor, amplitudes_view)
 
-        return formatted
+            if local_dim > 0:
+                normalization = probabilities.sqrt()
+                if amplitudes_view.ndim == normalization.ndim + 1:
+                    normalization = normalization.unsqueeze(-1)
+                normalization = normalization.to(amplitudes_view.dtype)
+                zero_mask = normalization == 0
+                safe_norm = torch.where(
+                    zero_mask,
+                    torch.ones_like(normalization),
+                    normalization,
+                )
+                amplitudes_view = torch.where(
+                    zero_mask,
+                    amplitudes_view,
+                    amplitudes_view / safe_norm,
+                )
+
+            formatted.setdefault(combined_key, []).append((
+                probabilities,
+                amplitudes_view,
+            ))
+
+        max_remaining = (
+            max((key[1] for key in formatted.keys()), default=0) if formatted else 0
+        )
+        organized: list[
+            dict[tuple[int, ...], list[tuple[torch.Tensor, torch.Tensor]]]
+        ] = [{} for _ in range(max_remaining + 1)]
+        for (measurement_key, remaining_n), entries in formatted.items():
+            organized[remaining_n][measurement_key] = entries
+        return organized
 
     # ------------------------------------------------------------------
     # Public API
@@ -475,7 +572,7 @@ class DetectorTransform(torch.nn.Module):
         self, tensor: torch.Tensor
     ) -> (
         torch.Tensor
-        | dict[tuple[int, ...], tuple[torch.Tensor, torch.Tensor, torch.Tensor]]
+        | list[dict[tuple[int, ...], list[tuple[torch.Tensor, torch.Tensor]]]]
     ):
         """
         Apply the detector transform.
@@ -487,8 +584,11 @@ class DetectorTransform(torch.nn.Module):
 
         Returns:
             - Complete mode: real probability tensor expressed in the detector basis.
-            - Partial mode: dictionary mapping measurement outcomes to tuples of
-              (probability, remaining photon counts, remaining-mode amplitudes).
+            - Partial mode: list indexed by remaining photon count. Each entry is a
+              dictionary whose keys are full-length mode tuples (unmeasured modes set
+              to ``None``) and whose values are lists of
+              (probability, normalized remaining-mode amplitudes) pairs – one per
+              perfect measurement branch.
         """
         if self._partial_measurement:
             return self._forward_partial(tensor)
@@ -572,95 +672,6 @@ class DetectorTransform(torch.nn.Module):
     def partial_measurement(self) -> bool:
         """Return True when the transform runs in partial measurement mode."""
         return self._partial_measurement
-
-    def partial_amplitudes(
-        self,
-        amplitudes: torch.Tensor,
-        *,
-        observed_modes: Sequence[int],
-        other_modes: Sequence[int],
-        other_key_to_index: Mapping[tuple[int, ...], int],
-    ) -> dict[tuple[int, ...], torch.Tensor]:
-        """
-        Aggregate amplitudes by classical detector outcomes while preserving the remaining modes.
-
-        Args:
-            amplitudes: Complex amplitude tensor whose last dimension follows ``simulation_keys``.
-            observed_modes: Mode indices equipped with custom detectors whose outcomes should be
-                enumerated explicitly.
-            other_modes: Complementary mode indices that remain in the quantum state after
-                conditioning on the detector outcomes.
-            other_key_to_index: Mapping from tuples describing ``other_modes`` occupations to their
-                position inside the returned amplitude tensors.
-
-        Returns:
-            dict mapping each detector outcome (tuple[int, ...]) to an amplitude tensor whose last
-            dimension enumerates ``other_modes`` occupations (in the order defined by
-            ``other_key_to_index``).
-        """
-        if amplitudes.shape[-1] != len(self._simulation_keys):
-            raise ValueError(
-                "Amplitude tensor does not match the detector transform basis. "
-                f"Expected last dimension {len(self._simulation_keys)}, "
-                f"received {amplitudes.shape[-1]}."
-            )
-
-        obs_modes = tuple(int(m) for m in observed_modes)
-        if not obs_modes:
-            raise ValueError("observed_modes must contain at least one mode index.")
-
-        other_modes_tuple = tuple(int(m) for m in other_modes)
-        if set(obs_modes) & set(other_modes_tuple):
-            raise ValueError("observed_modes and other_modes must be disjoint.")
-        if len(obs_modes) + len(other_modes_tuple) != self._n_modes:
-            raise ValueError(
-                "observed_modes and other_modes must partition the simulation modes."
-            )
-        if not other_key_to_index:
-            raise ValueError("other_key_to_index cannot be empty.")
-
-        batch_shape = amplitudes.shape[:-1]
-        flattened = amplitudes.reshape(-1, amplitudes.shape[-1])
-        batch_size = flattened.shape[0]
-        value_width = len(other_key_to_index)
-
-        results: dict[tuple[int, ...], torch.Tensor] = {}
-
-        for state_index, sim_key in enumerate(self._simulation_keys):
-            other_key = tuple(sim_key[mode] for mode in other_modes_tuple)
-            other_col = other_key_to_index.get(other_key)
-            if other_col is None:
-                raise KeyError(
-                    f"State {sim_key} produced an unregistered other-mode key {other_key}."
-                )
-
-            responses = [
-                self._detector_response(mode, sim_key[mode]) for mode in obs_modes
-            ]
-
-            amplitude_column = flattened[:, state_index]
-
-            for per_mode in itertools.product(*responses):
-                measurement_values: list[int] = []
-                for partial_state, _ in per_mode:
-                    measurement_values.extend(partial_state)
-                measurement_key = tuple(measurement_values)
-
-                bucket = results.get(measurement_key)
-                if bucket is None:
-                    bucket = torch.zeros(
-                        (batch_size, value_width),
-                        dtype=flattened.dtype,
-                        device=flattened.device,
-                    )
-                    results[measurement_key] = bucket
-
-                bucket[:, other_col] = bucket[:, other_col] + amplitude_column
-
-        return {
-            key: tensor.reshape(*batch_shape, value_width)
-            for key, tensor in results.items()
-        }
 
 
 def resolve_detectors(
