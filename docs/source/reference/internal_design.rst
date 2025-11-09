@@ -6,7 +6,7 @@ Internal Design Overview
 
 This page documents two of MerLin’s infrastructure components that often come up
 in advanced workflows: the **partial** :class:`~merlin.measurement.detectors.DetectorTransform`
-and the new experimental :class:`~merlin.algorithms.feed_forward.FeedForwardBlock2`.
+and the new experimental :class:`~merlin.algorithms.feed_forward.FeedForwardBlock`.
 
 Partial DetectorTransform
 =========================
@@ -50,10 +50,10 @@ This partial interface is the backbone of feed-forward simulation where only a
 subset of modes is observed at each stage and the remaining modes must be
 propagated through additional circuits.
 
-FeedForwardBlock2
+FeedForwardBlock
 =================
 
-``FeedForwardBlock2`` is a new experimental block that consumes a full Perceval
+``FeedForwardBlock`` is a new experimental block that consumes a full Perceval
 experiment containing detectors and one or more
 :class:`perceval.components.feed_forward_configurator.FFCircuitProvider`
 instances. The block parses the experiment into a sequence of *stages*:
@@ -63,25 +63,54 @@ instances. The block parses the experiment into a sequence of *stages*:
 3. The matching feed-forward configurator that decides which circuit to insert
    based on the detector outcome.
 
-The parser records these stages as ``FFStage`` instances. For each stage the
-block builds a runtime bundle consisting of:
+The parser records these stages as ``FFStage`` instances. Each stage stores
+
+* the collapsed unitary operating on the currently *active* optical modes,
+* the tuple of global mode indices that remain active at the beginning of the stage,
+* the subset of those modes that are measured, and
+* the detector objects and ``FFCircuitProvider`` attached to the stage.
+
+After a detector stage finishes, the measured modes are removed from the active
+set so that every subsequent circuit is expressed solely in terms of the
+remaining modes. This remapping guarantees that the :class:`QuantumLayer`
+constructed for the stage matches the reduced dimensionality, while the
+original mode identifiers are still available for bookkeeping.
+
+For each ``FFStage`` the block builds a runtime bundle consisting of:
 
 * A ``QuantumLayer`` configured in amplitude-encoding mode (for the pre-measurement unitary).
 * A partial ``DetectorTransform`` tied to the stage’s measured modes.
 * A dictionary of conditional ``QuantumLayer`` objects – one per feed-forward branch.
 
-During the forward pass, ``FeedForwardBlock2`` iterates over the stages. Each
+During the forward pass, ``FeedForwardBlock`` iterates over the stages. Each
 stage takes the incoming branch amplitudes, applies the unitary, runs the
 partial detector transform, and spawns new branches for the next stage based on
 the measured outcomes. Branch bookkeeping keeps track of:
 
 * The amplitudes of the remaining (unmeasured) modes.
 * The probability weight associated with that branch.
-* The sequence of measurement results that led to the branch (exposed through
-  the dictionary keys returned by ``forward``).
+* The sequence of measurement results that led to the branch. These are exposed
+  via dictionary keys in the *original* experiment mode ordering thanks to the
+  stage-level remapping described above.
 
-In the current implementation only the first stage executes; subsequent stages
-are parsed and described via ``FeedForwardBlock2.describe()``, but the branch
-propagation code is being implemented incrementally. This documentation reflects
-the internal layout so that contributors can understand how partial detector
-transforms and feed-forward runtimes fit together when extending the block.
+At the end of the execution the block can expose different classical views over
+the surviving quantum modes. Much like :class:`~merlin.algorithms.layer.QuantumLayer`,
+the ``measurement_strategy`` parameter controls whether each dictionary entry
+contains the raw amplitudes of the post-measurement state,
+the full probability distribution, or the per-mode expectation values.
+When ``measurement_strategy=AMPLITUDES`` the block now returns a list of tuples
+``(measurement_key, branch_probability, remaining_photons, amplitudes)`` so that
+callers can reason about the resulting mixed state rather than a single tensor
+per measurement outcome. Probabilities and amplitudes remain differentiable so
+the mixed-state representation can be fed directly into PyTorch losses.
+When the block returns tensors (``PROBABILITIES`` or ``MODE_EXPECTATIONS``) the
+property :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_keys`
+lists the measurement tuple associated with each column in the output tensor.
+The auxiliary :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_state_sizes`
+records the unpadded Fock-space size for every measurement key so callers can
+trim trailing zeros when needed.
+
+This design allows every stage to be simulated with amplitude access, while
+still exposing convenient classical views. The mixed-state format (list of
+tuples) is particularly useful for downstream probabilistic reasoning or for
+feeding the remaining amplitudes into additional differentiable modules.

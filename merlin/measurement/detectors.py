@@ -673,6 +673,33 @@ class DetectorTransform(torch.nn.Module):
         """Return True when the transform runs in partial measurement mode."""
         return self._partial_measurement
 
+    def remaining_basis(self, remaining_n: int | None = None) -> list[tuple[int, ...]]:
+        """
+        Return the ordered Fock-state basis for the unmeasured modes.
+
+        Args:
+            remaining_n: Optional photon count used to select a specific block.
+                When omitted, the method returns the concatenation of every
+                remaining-mode basis enumerated during detector initialisation.
+
+        Returns:
+            List of tuples describing the photon distribution over the unmeasured modes.
+        """
+        if not self._partial_measurement:
+            raise RuntimeError(
+                "remaining_basis() is only available when partial_measurement=True."
+            )
+
+        if remaining_n is None:
+            if self._remaining_keys_cache is None:
+                _ = self.output_keys  # triggers cache population
+            return list(self._remaining_keys_cache or [])
+
+        combinator = self._remaining_combinadics.get(remaining_n)
+        if combinator is None:
+            return []
+        return list(combinator.enumerate_states())
+
 
 def resolve_detectors(
     experiment: pcvl.Experiment, n_modes: int
