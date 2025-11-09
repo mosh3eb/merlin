@@ -4,13 +4,19 @@
 #
 # Tests for FeedForwardBlock API.
 
+from __future__ import annotations
+
 import math
 from collections import defaultdict
 
+import numpy as np
 import perceval as pcvl
+import pytest
 import torch
+from perceval import BasicState, Circuit, Matrix, Unitary
 from perceval.algorithm import Sampler
 from perceval.components import PERM
+from perceval.utils import NoiseModel
 
 from merlin.algorithms.feed_forward import FeedForwardBlock
 from merlin.algorithms.layer import QuantumLayer
@@ -42,7 +48,7 @@ def _as_keyed_tensors(block: FeedForwardBlock, tensor: torch.Tensor):
             entry = entry.squeeze(0)
         try:
             size = block.output_state_sizes[key]
-            if entry.shape[-1] > size:
+            if entry.ndim > 1 and entry.shape[-1] > size:
                 entry = entry[..., :size]
         except (AttributeError, KeyError, RuntimeError):
             pass
@@ -110,12 +116,14 @@ def test_feedforward_block2_balanced_split():
     distribution_map = _as_keyed_tensors(block, outputs)
 
     total_prob = 0.0
-    measurement_probs = {}
-    for key, distribution in distribution_map.items():
-        prob = distribution.sum()
-        total_prob += prob.item()
-        measured_value = next(v for v in key if v is not None)
-        measurement_probs[measured_value] = prob.item()
+    measurement_probs = defaultdict(float)
+    for key, probability in distribution_map.items():
+        if probability.ndim:
+            prob_value = probability.squeeze().item()
+        else:
+            prob_value = probability.item()
+        total_prob += prob_value
+        measurement_probs[key[0]] += prob_value
 
     assert math.isclose(total_prob, 1.0, rel_tol=1e-5)
     assert len(measurement_probs) == 3
@@ -132,6 +140,32 @@ def test_feedforward_block2_parses_multiple_stages():
     assert "Stage 1" in desc and "Stage 2" in desc
 
 
+def test_feedforward_block_uses_experiment_input_state():
+    exp_with_state = _build_balanced_feedforward_experiment()
+    exp_with_state.with_input(BasicState([2, 0, 0]))
+    block_from_experiment = FeedForwardBlock(exp_with_state)
+
+    exp_reference = _build_balanced_feedforward_experiment()
+    block_reference = FeedForwardBlock(exp_reference, input_state=[2, 0, 0])
+
+    x = torch.zeros((1, 0))
+    assert torch.allclose(block_from_experiment(x), block_reference(x))
+
+
+def test_feedforward_block_warns_on_conflicting_input_state():
+    exp = _build_balanced_feedforward_experiment()
+    exp.with_input(BasicState([2, 0, 0]))
+    with pytest.warns(UserWarning):
+        FeedForwardBlock(exp, input_state=[1, 1, 0])
+
+
+def test_feedforward_block_rejects_noisy_experiment():
+    exp = _build_balanced_feedforward_experiment()
+    exp.noise = NoiseModel(brightness=0.9)
+    with pytest.raises(NotImplementedError):
+        FeedForwardBlock(exp, input_state=[2, 0, 0])
+
+
 def test_feedforward_block2_matches_perceval_two_stage():
     exp = _build_two_stage_experiment()
     input_state = [1, 1, 0, 0]
@@ -140,35 +174,10 @@ def test_feedforward_block2_matches_perceval_two_stage():
     x = torch.zeros((1, 0))
     block_outputs = block(x)
     distribution_map = _as_keyed_tensors(block, block_outputs)
-    sample_key = block.output_keys[0]
-    total_photons = sum(input_state)
-    unmeasured_indices = [idx for idx, value in enumerate(sample_key) if value is None]
-    final_runtime = block._stage_runtimes[-1]
-    block_probs: defaultdict[tuple[int, ...], float] = defaultdict(float)
-    for key, tensor in distribution_map.items():
-        measured_sum = sum(v for v in key if v is not None)
-        remaining_n = total_photons - measured_sum
-        stage_key = tuple(key[idx] for idx in final_runtime.active_modes)
-        reduced_key = tuple(
-            0 if stage_key[idx] is None else int(stage_key[idx])
-            for idx in final_runtime.measured_modes
-        )
-        layer = block._select_conditional_layer(
-            final_runtime,
-            reduced_key,
-            remaining_n,
-        )
-        if layer is None:
-            basis = _basis_states(len(unmeasured_indices), remaining_n)
-        else:
-            basis = layer.computation_process.simulation_graph.mapped_keys
-        probabilities = tensor.reshape(-1).tolist()
-        for state, prob in zip(basis, probabilities, strict=False):
-            full_key = list(key)
-            for mode_idx, value in zip(unmeasured_indices, state, strict=False):
-                full_key[mode_idx] = value
-            if prob > 1e-10:
-                block_probs[tuple(full_key)] += prob
+    block_probs = {
+        key: float(value.item() if value.ndim == 0 else value.squeeze().item())
+        for key, value in distribution_map.items()
+    }
 
     exp.with_input(pcvl.BasicState(input_state))
     processor = pcvl.Processor("SLOS", exp)
@@ -199,20 +208,30 @@ def test_feedforward_block2_amplitude_strategy_matches_probabilities():
     amp_outputs = block_amp(x)
     assert isinstance(amp_outputs, list)
 
-    amp_prob_dict: dict[tuple[int, ...], torch.Tensor] = {}
-    for measurement_key, branch_prob, _remaining_n, amp_tensor in amp_outputs:
+    full_probabilities = {
+        key: float(value.item() if value.ndim == 0 else value.squeeze().item())
+        for key, value in prob_map.items()
+    }
+    reconstructed: defaultdict[tuple[int, ...], float] = defaultdict(float)
+    for measurement_key, branch_prob, remaining_n, amp_tensor in amp_outputs:
         assert torch.is_complex(amp_tensor)
         prob = branch_prob
         while prob.ndim < amp_tensor.ndim:
             prob = prob.unsqueeze(-1)
         distribution = amp_tensor.abs().pow(2) * prob
-        amp_prob_dict[measurement_key] = distribution
+        unmeasured = [idx for idx, value in enumerate(measurement_key) if value is None]
+        basis = _basis_states(len(unmeasured), remaining_n)
+        states = basis if basis else ((),)
+        flat_distribution = distribution.reshape(-1).tolist()
+        for state, prob_value in zip(states, flat_distribution, strict=False):
+            full_key = list(measurement_key)
+            for mode_idx, value in zip(unmeasured, state, strict=False):
+                full_key[mode_idx] = value
+            reconstructed[tuple(full_key)] += prob_value
 
-    for key, prob_tensor in prob_map.items():
-        reconstructed = amp_prob_dict[key]
-        assert torch.allclose(reconstructed, prob_tensor, atol=1e-6, rtol=1e-6), (
-            f"Mismatch for key {key}"
-        )
+    assert set(full_probabilities.keys()) == set(reconstructed.keys())
+    for key, value in full_probabilities.items():
+        assert math.isclose(value, reconstructed[key], rel_tol=1e-6, abs_tol=1e-6)
 
 
 def test_feedforward_block2_mode_expectations():
@@ -229,23 +248,18 @@ def test_feedforward_block2_mode_expectations():
     prob_outputs = block_prob(x)
     expect_outputs = block_expect(x)
     prob_map = _as_keyed_tensors(block_prob, prob_outputs)
-    expect_map = _as_keyed_tensors(block_expect, expect_outputs)
-    total_photons = sum(input_state)
-    sample_key = block_prob.output_keys[0]
-    unmeasured_indices = [idx for idx, value in enumerate(sample_key) if value is None]
-    for key, expectation in expect_map.items():
-        measured_sum = sum(v for v in key if v is not None)
-        remaining_n = total_photons - measured_sum
-        basis = _basis_states(len(unmeasured_indices), remaining_n)
-        distribution = prob_map[key].to(expectation.dtype)
-        if basis:
-            basis_tensor = torch.tensor(
-                basis, dtype=expectation.dtype, device=expectation.device
-            )
-            manual = (distribution.unsqueeze(-1) * basis_tensor).sum(dim=-2)
-        else:
-            manual = torch.zeros_like(expectation)
-        assert torch.allclose(manual, expectation, atol=1e-6, rtol=1e-6)
+    prob_scalars = {
+        key: float(value.item() if value.ndim == 0 else value.squeeze().item())
+        for key, value in prob_map.items()
+    }
+    expectation = expect_outputs.squeeze(0)
+    manual = torch.zeros_like(expectation)
+    for state, probability in prob_scalars.items():
+        state_tensor = torch.tensor(
+            state, dtype=expectation.dtype, device=expectation.device
+        )
+        manual += probability * state_tensor
+    assert torch.allclose(manual, expectation, atol=1e-6, rtol=1e-6)
 
 
 def test_feedforward_block2_accepts_tensor_input_state():
@@ -309,3 +323,84 @@ def test_feedforward_block2_input_and_trainable_parameters_backward():
         parameter.grad is not None and torch.any(parameter.grad != 0)
         for parameter in block.parameters()
     )
+
+
+def _fourier_unitary(dim: int) -> Unitary:
+    omega = np.exp(2j * np.pi / dim)
+    matrix = np.empty((dim, dim), dtype=np.complex128)
+    scale = 1 / math.sqrt(dim)
+    for row in range(dim):
+        for col in range(dim):
+            matrix[row, col] = omega ** (row * col) * scale
+    return Unitary(Matrix(matrix))
+
+
+def _build_feedforward_experiment(detector) -> tuple[pcvl.Experiment, list[int]]:
+    m = 4
+    input_state = [1, 1, 0, 0]
+
+    exp = pcvl.Experiment()
+    root = Circuit(m)
+    root.add(0, _fourier_unitary(m))
+    root.add((0, 1), pcvl.BS())
+    exp.add(0, root)
+
+    exp.add(0, detector)
+
+    default_branch = Circuit(m - 1)
+    default_branch.add(0, _fourier_unitary(m - 1))
+
+    adaptive_branch = Circuit(m - 1)
+    adaptive_branch.add(0, PERM([2, 1, 0]))
+    adaptive_branch.add(0, _fourier_unitary(m - 1))
+
+    provider = pcvl.FFCircuitProvider(1, 0, default_branch)
+    provider.add_configuration([1], adaptive_branch)
+    exp.add(0, provider)
+
+    exp.with_input(BasicState(input_state))
+
+    return exp
+
+
+def _perceval_probabilities(exp: pcvl.Experiment) -> dict[tuple[int, ...], float]:
+    processor = pcvl.Processor("SLOS", exp)
+    sampler = Sampler(processor)
+    results = sampler.probs()["results"]
+    return {
+        tuple(int(value) for value in state): float(prob)
+        for state, prob in results.items()
+    }
+
+
+def _prune_probabilities(
+    distribution: dict[tuple[int, ...], float], *, atol: float = 1e-12
+) -> dict[tuple[int, ...], float]:
+    """Remove numerically empty entries from a probability map."""
+    return {key: value for key, value in distribution.items() if abs(value) > atol}
+
+
+def _block_probabilities(
+    block: FeedForwardBlock, outputs: torch.Tensor
+) -> dict[tuple[int, ...], float]:
+    if outputs.shape[0] != 1:
+        raise AssertionError("Test expects a single batch item.")
+    batch = outputs.squeeze(0)
+    return {block.output_keys[idx]: float(batch[idx]) for idx in range(batch.shape[0])}
+
+
+def test_feedforward_block_matches_perceval_distribution():
+    experiment = _build_feedforward_experiment(pcvl.Detector.pnr())
+    block = FeedForwardBlock(experiment)
+
+    classical_inputs = torch.zeros((1, 0))
+    outputs = block(classical_inputs)
+    block_probs = _prune_probabilities(_block_probabilities(block, outputs))
+
+    perceval_probs = _prune_probabilities(_perceval_probabilities(experiment))
+
+    assert set(block_probs.keys()) == set(perceval_probs.keys())
+    for key, prob in block_probs.items():
+        assert math.isclose(prob, perceval_probs[key], rel_tol=1e-5, abs_tol=1e-5), (
+            f"Mismatch for key {key}: Merlin={prob}, Perceval={perceval_probs[key]}"
+        )

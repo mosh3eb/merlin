@@ -1,4 +1,5 @@
 import math
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -6,6 +7,7 @@ import perceval as pcvl
 import torch
 from perceval.components.feed_forward_configurator import FFCircuitProvider
 from perceval.components.linear_circuit import ACircuit
+from perceval.utils import NoiseModel
 
 from ..core.computation_space import ComputationSpace
 from ..measurement.detectors import DetectorTransform
@@ -85,14 +87,19 @@ class FeedForwardBlock(torch.nn.Module):
     computation_space:
         Currently restricted to :attr:`~merlin.core.computation_space.ComputationSpace.FOCK`.
     measurement_strategy:
-        Controls how classical outputs are produced. When set to
-        :attr:`~merlin.measurement.strategies.MeasurementStrategy.AMPLITUDES`
-        the block returns a list of tuples
-        ``(measurement_key, branch_probability, remaining_photons, amplitudes)``
-        describing the mixed state left by each measurement branch. For
-        :attr:`~merlin.measurement.strategies.MeasurementStrategy.PROBABILITIES`
-        and :attr:`~merlin.measurement.strategies.MeasurementStrategy.MODE_EXPECTATIONS`
-        the return value is a dictionary keyed by the global measurement result.
+        Controls how classical outputs are produced:
+
+        - ``MeasurementStrategy.PROBABILITIES`` (default) returns a tensor of
+          shape ``(batch_size, num_output_keys)`` whose columns already match
+          the fully specified Fock states stored in :pyattr:`output_keys`.
+        - ``MeasurementStrategy.MODE_EXPECTATIONS`` returns a tensor of shape
+          ``(batch_size, num_modes)`` describing the per-mode photon
+          expectations for every measurement branch. The same :pyattr:`output_keys`
+          list labels the branches while :pyattr:`output_state_sizes` reports
+          the number of modes (identical for every key).
+        - ``MeasurementStrategy.AMPLITUDES`` yields a list of tuples
+          ``(measurement_key, branch_probability, remaining_photons, amplitudes)``
+          so callers can reason about the mixed state left by each branch.
     """
 
     def __init__(
@@ -103,7 +110,7 @@ class FeedForwardBlock(torch.nn.Module):
         | pcvl.BasicState
         | pcvl.StateVector
         | torch.Tensor
-        | None,
+        | None = None,
         trainable_parameters: list[str] | None = None,
         input_parameters: list[str] | None = None,
         computation_space: ComputationSpace = ComputationSpace.FOCK,
@@ -127,17 +134,21 @@ class FeedForwardBlock(torch.nn.Module):
                 "FeedForwardBlock could not identify any feed-forward stage in the provided experiment."
             )
 
+        self._ensure_noise_free(experiment)
         self.total_modes = experiment.circuit_size
         self._complex_dtype = (
             torch.complex128
             if self.dtype in (torch.float64, torch.double)
             else torch.complex64
         )
+        resolved_input_state = self._resolve_input_state_from_experiment(
+            experiment, input_state
+        )
         (
             self._base_input_state,
             self.n_photons,
             self._initial_amplitudes,
-        ) = self._prepare_initial_state(input_state, experiment)
+        ) = self._prepare_initial_state(resolved_input_state, experiment)
         self._stage_runtimes: list[StageRuntime] = []
         self._output_keys: list[tuple[int, ...]] | None = None
         self._output_state_sizes: dict[tuple[int, ...], int] | None = None
@@ -145,6 +156,7 @@ class FeedForwardBlock(torch.nn.Module):
             tuple[tuple[tuple[int, ...], ...], MeasurementStrategy], torch.nn.Module
         ] = {}
         self._layer_registry_counter = 0
+        self._basis_cache: dict[tuple[int, int], tuple[tuple[int, ...], ...]] = {}
         for idx, stage in enumerate(self.stages):
             runtime = self._build_stage_runtime(
                 stage,
@@ -166,6 +178,51 @@ class FeedForwardBlock(torch.nn.Module):
         name = f"{prefix}_{self._layer_registry_counter}"
         self._layer_registry_counter += 1
         self.add_module(name, layer)
+
+    def _resolve_input_state_from_experiment(
+        self,
+        experiment: pcvl.Experiment,
+        provided_state: list[int]
+        | pcvl.BasicState
+        | pcvl.StateVector
+        | torch.Tensor
+        | None,
+    ):
+        experiment_state = getattr(experiment, "input_state", None)
+        if experiment_state is None:
+            return provided_state
+        if provided_state is not None and not self._states_match(
+            experiment_state, provided_state
+        ):
+            warnings.warn(
+                "Both 'experiment.input_state' and 'input_state' are provided. "
+                "'experiment.input_state' will be used.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return experiment_state
+
+    @staticmethod
+    def _states_match(left, right) -> bool:
+        if isinstance(left, torch.Tensor) and isinstance(right, torch.Tensor):
+            return torch.equal(left, right)
+        try:
+            result = left == right
+            if isinstance(result, torch.Tensor):
+                return bool(result.item())
+            return bool(result)
+        except Exception:
+            return False
+
+    def _ensure_noise_free(self, experiment: pcvl.Experiment) -> None:
+        noise = getattr(experiment, "noise", None)
+        if noise is None:
+            return
+        if isinstance(noise, NoiseModel) and noise == NoiseModel():
+            return
+        raise NotImplementedError(
+            "FeedForwardBlock does not support experiments with a NoiseModel yet."
+        )
 
     def _prepare_initial_state(
         self,
@@ -514,19 +571,19 @@ class FeedForwardBlock(torch.nn.Module):
         Returns
         -------
         torch.Tensor | list
-            For ``PROBABILITIES`` or ``MODE_EXPECTATIONS`` the method returns a
-            tensor of shape ``(batch_size, num_measurement_keys, feature_dim)``.
-            The helper :pyattr:`output_keys` lists the measurement tuple for each
-            column (second dimension) while
-            :pyattr:`output_state_sizes` exposes the unpadded Fock dimension per
-            key.
-
-            When ``measurement_strategy`` equals ``AMPLITUDES`` the method returns
-            a list of tuples ``(measurement_key, branch_probability,
-            remaining_photons, amplitudes)`` describing every branch of the
-            resulting mixed state. ``branch_probability`` contains the
-            probability mass of the branch and ``amplitudes`` stores the
-            normalized amplitude tensor for the remaining modes.
+            ``PROBABILITIES`` returns a tensor of shape
+            ``(batch_size, len(output_keys))``. Each column already corresponds
+            to the fully specified Fock state listed in :pyattr:`output_keys`,
+            so no additional remapping is required.
+            ``MODE_EXPECTATIONS`` produces a tensor of shape
+            ``(batch_size, total_modes)`` storing the per-mode occupation
+            expectations for every measurement branch; the helper
+            :pyattr:`output_state_sizes` equals ``total_modes`` for each key.
+            ``AMPLITUDES`` yields a list of tuples
+            ``(measurement_key, branch_probability, remaining_photons, amplitudes)``
+            describing every branch of the resulting mixed state, where
+            ``amplitudes`` contains the normalized amplitude tensor for the
+            remaining modes.
         """
         if not self._stage_runtimes:
             raise RuntimeError("FeedForwardBlock has no stage runtimes to execute.")
@@ -559,7 +616,10 @@ class FeedForwardBlock(torch.nn.Module):
         Return the number of remaining Fock states represented by each entry in ``output_keys``.
 
         Only available when ``measurement_strategy`` is ``PROBABILITIES`` or
-        ``MODE_EXPECTATIONS``.
+        ``MODE_EXPECTATIONS``. For ``PROBABILITIES`` the value is always ``1``
+        because each key now denotes a fully specified Fock state, while for
+        ``MODE_EXPECTATIONS`` it equals the total number of modes contributing
+        to the expectation vector.
         """
         if self._output_state_sizes is None:
             raise RuntimeError(
@@ -902,9 +962,16 @@ class FeedForwardBlock(torch.nn.Module):
     def _branches_to_classical(
         self, branches: dict[tuple[int, ...], list[BranchState]]
     ) -> torch.Tensor:
-        keys: list[tuple[int, ...]] = []
-        tensors: list[torch.Tensor] = []
-        state_sizes: dict[tuple[int, ...], int] = {}
+        entries: list[
+            tuple[
+                tuple[int, ...],
+                torch.Tensor | None,
+                torch.Tensor | None,
+                torch.Tensor | None,
+                tuple[tuple[int, ...], ...],
+                int,
+            ]
+        ] = []
         for key, branch_list in branches.items():
             if not branch_list:
                 continue
@@ -913,10 +980,50 @@ class FeedForwardBlock(torch.nn.Module):
                 amplitude_total,
                 weight_total,
                 basis_keys,
-                _,
+                remaining_n,
             ) = self._aggregate_branch_list(branch_list)
-            if weight_total is None or probability_total is None:
+            if probability_total is None:
                 continue
+            if (
+                weight_total is None
+                and self.measurement_strategy != MeasurementStrategy.PROBABILITIES
+            ):
+                continue
+            entries.append((
+                key,
+                probability_total,
+                amplitude_total,
+                weight_total,
+                basis_keys,
+                remaining_n,
+            ))
+
+        if not entries:
+            self._output_keys = []
+            self._output_state_sizes = {}
+            if self.measurement_strategy == MeasurementStrategy.MODE_EXPECTATIONS:
+                return torch.zeros(
+                    (0, self.total_modes), dtype=self.dtype, device=self.device
+                )
+            return torch.zeros(0, device=self.device)
+
+        strategy = self.measurement_strategy
+        if strategy == MeasurementStrategy.PROBABILITIES:
+            return self._build_probability_tensor(entries)
+        if strategy == MeasurementStrategy.MODE_EXPECTATIONS:
+            return self._build_mode_expectations(entries)
+
+        keys: list[tuple[int, ...]] = []
+        tensors: list[torch.Tensor] = []
+        state_sizes: dict[tuple[int, ...], int] = {}
+        for (
+            key,
+            probability_total,
+            amplitude_total,
+            weight_total,
+            basis_keys,
+            _remaining_n,
+        ) in entries:
             classical = self._finalize_branch_output(
                 probability_total,
                 amplitude_total,
@@ -927,11 +1034,6 @@ class FeedForwardBlock(torch.nn.Module):
             tensors.append(classical)
             size = classical.shape[-1] if classical.ndim else 1
             state_sizes[key] = size
-
-        if not tensors:
-            self._output_keys = []
-            self._output_state_sizes = {}
-            return torch.zeros(0, device=self.device)
 
         sample = tensors[0]
         if sample.ndim == 1:
@@ -955,6 +1057,166 @@ class FeedForwardBlock(torch.nn.Module):
         self._output_keys = keys
         self._output_state_sizes = state_sizes
         return stacked
+
+    def _build_probability_tensor(
+        self,
+        entries: list[
+            tuple[
+                tuple[int, ...],
+                torch.Tensor | None,
+                torch.Tensor | None,
+                torch.Tensor | None,
+                tuple[tuple[int, ...], ...],
+                int,
+            ]
+        ],
+    ) -> torch.Tensor:
+        formatted: list[
+            tuple[tuple[int, ...], torch.Tensor, tuple[tuple[int, ...], ...], int]
+        ] = []
+        for key, probability, _, _, basis_keys, remaining_n in entries:
+            if probability is None:
+                continue
+            formatted.append((key, probability, basis_keys, remaining_n))
+        stacked, flat_keys = self._flatten_probability_entries(formatted)
+        self._output_keys = list(flat_keys)
+        self._output_state_sizes = dict.fromkeys(flat_keys, 1)
+        return stacked
+
+    def _build_mode_expectations(
+        self,
+        entries: list[
+            tuple[
+                tuple[int, ...],
+                torch.Tensor | None,
+                torch.Tensor | None,
+                torch.Tensor | None,
+                tuple[tuple[int, ...], ...],
+                int,
+            ]
+        ],
+    ) -> torch.Tensor:
+        formatted: list[
+            tuple[tuple[int, ...], torch.Tensor, tuple[tuple[int, ...], ...], int]
+        ] = []
+        for key, probability, _, _, basis_keys, remaining_n in entries:
+            if probability is None:
+                continue
+            formatted.append((key, probability, basis_keys, remaining_n))
+        probability_tensor, flat_keys = self._flatten_probability_entries(formatted)
+        if probability_tensor.numel() == 0:
+            self._output_keys = list(flat_keys)
+            self._output_state_sizes = dict.fromkeys(flat_keys, self.total_modes)
+            return torch.zeros(
+                (0, self.total_modes),
+                dtype=probability_tensor.dtype
+                if probability_tensor.ndim
+                else self.dtype,
+                device=probability_tensor.device
+                if probability_tensor.ndim
+                else self.device,
+            )
+
+        basis_tuple = tuple(flat_keys)
+        mapper = self._get_output_mapper(basis_tuple)
+        expectations = mapper(probability_tensor)
+        self._output_keys = list(flat_keys)
+        self._output_state_sizes = dict.fromkeys(flat_keys, self.total_modes)
+        return expectations
+
+    def _flatten_probability_entries(
+        self,
+        entries: list[
+            tuple[
+                tuple[int, ...],
+                torch.Tensor,
+                tuple[tuple[int, ...], ...],
+                int,
+            ]
+        ],
+    ) -> tuple[torch.Tensor, list[tuple[int, ...]]]:
+        flat_keys: list[tuple[int, ...]] = []
+        flat_tensors: list[torch.Tensor] = []
+        for measurement_key, probability, basis_keys, remaining_n in entries:
+            unmeasured_indices = [
+                idx for idx, value in enumerate(measurement_key) if value is None
+            ]
+            if basis_keys:
+                state_list = basis_keys
+            elif unmeasured_indices:
+                state_list = self._basis_states_for(
+                    len(unmeasured_indices), remaining_n
+                )
+            else:
+                state_list = ((),)
+            expected_dim = len(state_list)
+            expanded = probability
+            if expanded.ndim == 0:
+                expanded = expanded.unsqueeze(0).unsqueeze(-1)
+            elif expanded.ndim == 1:
+                expanded = expanded.unsqueeze(0)
+            if expanded.shape[-1] < max(1, expected_dim):
+                raise RuntimeError(
+                    "Probability tensor does not cover all remaining basis states."
+                )
+            if expected_dim == 0:
+                expected_dim = 1
+                state_list = ((),)
+            if expanded.shape[-1] > expected_dim:
+                expanded = expanded[..., :expected_dim]
+            for idx, state in enumerate(state_list):
+                if len(state) != len(unmeasured_indices):
+                    raise ValueError(
+                        "Basis state dimension mismatch for measurement outcome."
+                    )
+                full_key = list(measurement_key)
+                for mode_idx, value in zip(unmeasured_indices, state, strict=False):
+                    full_key[mode_idx] = value
+                if any(entry is None for entry in full_key):
+                    raise ValueError(
+                        "Incomplete measurement key encountered while expanding probabilities."
+                    )
+                finalized = expanded[..., idx]
+                flat_keys.append(tuple(full_key))
+                flat_tensors.append(finalized)
+
+        if not flat_tensors:
+            empty = torch.zeros(0, device=self.device)
+            return empty, []
+
+        aligned: list[torch.Tensor] = []
+        reference_shape: torch.Size | None = None
+        for tensor in flat_tensors:
+            if tensor.ndim == 0:
+                tensor = tensor.unsqueeze(0)
+            if reference_shape is None:
+                reference_shape = tensor.shape
+            elif tensor.shape != reference_shape:
+                raise RuntimeError(
+                    "Inconsistent probability tensor shapes across measurement keys."
+                )
+            aligned.append(tensor)
+
+        stacked = torch.stack(aligned, dim=1)
+        return stacked, flat_keys
+
+    def _basis_states_for(
+        self, n_modes: int, n_photons: int
+    ) -> tuple[tuple[int, ...], ...]:
+        cache_key = (n_modes, n_photons)
+        basis = self._basis_cache.get(cache_key)
+        if basis is None:
+            layer = QuantumLayer(
+                input_size=0,
+                circuit=pcvl.Circuit(n_modes),
+                n_photons=n_photons,
+                computation_space=self.computation_space,
+                device=self.device,
+                dtype=self.dtype,
+            )
+            basis = tuple(layer.computation_process.simulation_graph.mapped_keys)
+            self._basis_cache[cache_key] = basis
+        return basis
 
     def _branches_to_mixed_states(
         self, branches: dict[tuple[int, ...], list[BranchState]]

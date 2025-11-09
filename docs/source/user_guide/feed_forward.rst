@@ -43,21 +43,23 @@ propagated in amplitude-encoding mode.
 :meth:`~merlin.algorithms.feed_forward.FeedForwardBlock.forward`:
 
 * ``PROBABILITIES`` (default): returns a tensor of shape
-  ``(batch_size, num_measurement_keys, num_fock_states)`` containing the
-  probability distribution for each measurement outcome.
+  ``(batch_size, len(output_keys))``. Each column already corresponds to the
+  fully specified Fock state listed in
+  :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_keys`.
 * ``MODE_EXPECTATIONS``: returns a tensor of shape
-  ``(batch_size, num_measurement_keys, num_modes)`` with per-mode expectations.
-* ``AMPLITUDES``: list of tuples ``(measurement_key, branch_probability,
-  remaining_photons, amplitudes)`` describing the mixed state produced after
-  every partial measurement.
+  ``(batch_size, num_modes)`` containing the per-mode photon expectations for
+  every branch. The key list is shared with the probability view while
+  :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_state_sizes`
+  stores ``num_modes`` for each entry.
+* ``AMPLITUDES``: list of tuples
+  ``(measurement_key, branch_probability, remaining_photons, amplitudes)``
+  describing the mixed state produced after every partial measurement.
 
 For tensor outputs the attribute
 :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_keys` lists the
-measurement tuple corresponding to each index along the second dimension of the
-tensor.
-The companion :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_state_sizes`
-dictionary records how many Fock states were retained for each measurement key
-before internal zero-padding is applied.
+measurement tuple corresponding to each column. ``PROBABILITIES`` therefore
+directly aligns with the dictionary keys, whereas ``MODE_EXPECTATIONS`` uses
+the same ordering while exposing a dense expectation vector per entry.
 
 If you rely on the legacy API (explicit layer trees, ``state_injection``, …) you
 can import :class:`~merlin.algorithms.feed_forward_legacy.FeedForwardBlockLegacy`

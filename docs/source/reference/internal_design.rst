@@ -95,20 +95,19 @@ the measured outcomes. Branch bookkeeping keeps track of:
 
 At the end of the execution the block can expose different classical views over
 the surviving quantum modes. Much like :class:`~merlin.algorithms.layer.QuantumLayer`,
-the ``measurement_strategy`` parameter controls whether each dictionary entry
-contains the raw amplitudes of the post-measurement state,
-the full probability distribution, or the per-mode expectation values.
-When ``measurement_strategy=AMPLITUDES`` the block now returns a list of tuples
-``(measurement_key, branch_probability, remaining_photons, amplitudes)`` so that
-callers can reason about the resulting mixed state rather than a single tensor
-per measurement outcome. Probabilities and amplitudes remain differentiable so
-the mixed-state representation can be fed directly into PyTorch losses.
-When the block returns tensors (``PROBABILITIES`` or ``MODE_EXPECTATIONS``) the
-property :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_keys`
-lists the measurement tuple associated with each column in the output tensor.
-The auxiliary :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_state_sizes`
-records the unpadded Fock-space size for every measurement key so callers can
-trim trailing zeros when needed.
+the ``measurement_strategy`` parameter switches between raw amplitudes, dense
+probabilities, or per-mode expectations. ``measurement_strategy=AMPLITUDES``
+returns a list of tuples ``(measurement_key, branch_probability,
+remaining_photons, amplitudes)`` so callers can reason about the remaining
+mixed state. ``PROBABILITIES`` collapses every branch into a tensor of shape
+``(batch_size, len(output_keys))`` where the columns already align with the
+fully specified Fock states recorded in
+:pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_keys`.
+``MODE_EXPECTATIONS`` produces a ``(batch_size, num_modes)`` tensor describing
+the photon expectations per mode; the helper
+:pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_state_sizes`
+equals ``num_modes`` for every key so consumers can reason about downstream
+reshaping without additional bookkeeping.
 
 This design allows every stage to be simulated with amplitude access, while
 still exposing convenient classical views. The mixed-state format (list of
