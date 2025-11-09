@@ -924,7 +924,10 @@ class FeedForwardBlock(torch.nn.Module):
         runtime: StageRuntime,
         stage_key: tuple[int | None, ...],
     ) -> tuple[int | None, ...]:
-        merged = [None] * self.total_modes if base_key is None else list(base_key)
+        if base_key is None:
+            merged: list[int | None] = [None] * self.total_modes
+        else:
+            merged = list(base_key)
         for local_idx, value in enumerate(stage_key):
             if local_idx >= len(runtime.active_modes):
                 continue
@@ -1000,10 +1003,7 @@ class FeedForwardBlock(torch.nn.Module):
 
     def _branches_to_outputs(
         self, branches: dict[tuple[int, ...], list[BranchState]]
-    ) -> (
-        dict[tuple[int, ...], torch.Tensor]
-        | list[tuple[tuple[int, ...], torch.Tensor, int, torch.Tensor]]
-    ):
+    ) -> torch.Tensor | list[tuple[tuple[int, ...], torch.Tensor, int, torch.Tensor]]:
         if self.measurement_strategy == MeasurementStrategy.AMPLITUDES:
             return self._branches_to_mixed_states(branches)
         return self._branches_to_classical(branches)

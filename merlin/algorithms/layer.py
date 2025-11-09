@@ -441,13 +441,16 @@ class QuantumLayer(nn.Module):
                 UserWarning,
                 stacklevel=2,
             )
-        # Noise models are incompatible with amplitude readout because amplitudes are computed assuming noiseless evolution
-        if (
-            self.has_custom_noise_model
-            and measurement_strategy == MeasurementStrategy.AMPLITUDES
-        ):
+        # Noise models or detectors are incompatible with amplitude readout because amplitudes assume noiseless, detector-free evolution.
+        amplitude_readout = measurement_strategy == MeasurementStrategy.AMPLITUDES
+        if amplitude_readout and self.has_custom_noise_model:
             raise RuntimeError(
-                "measurement_strategy=MeasurementStrategy.AMPLITUDES cannot be used when Experiment contains at least one Detector or when it contains a defined NoiseModel."
+                "measurement_strategy=MeasurementStrategy.AMPLITUDES cannot be used when the experiment defines a NoiseModel."
+            )
+        if amplitude_readout and self._has_custom_detectors:
+            raise RuntimeError(
+                "measurement_strategy=MeasurementStrategy.AMPLITUDES does not support experiments with detectors. "
+                "Compute amplitudes without detectors and apply a Partial DetectorTransform manually if needed."
             )
 
         # persist prefixes for export/introspection
@@ -1083,8 +1086,6 @@ class QuantumLayer(nn.Module):
                 raise RuntimeError(
                     "Sampling cannot be applied when measurement_strategy=MeasurementStrategy.AMPLITUDES."
                 )
-            if self._has_custom_detectors:
-                return {"measure": amplitudes}
             results = amplitudes
 
         # Apply measurement mapping (returns tensor of shape [B, output_size])
