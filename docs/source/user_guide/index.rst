@@ -11,9 +11,10 @@ User Guide
    :caption: Table of Contents
 
    layer
-   angle_amplitude_encoding
    measurement_strategy
+   angle_amplitude_encoding
    computation_space
+   grouping
    quantum_bridge
    kernels
    feed_forward
