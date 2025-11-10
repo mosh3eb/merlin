@@ -32,18 +32,23 @@ from .algorithms.feed_forward import FeedForwardBlock, PoolingFeedForward
 from .algorithms.kernels import FeatureMap, FidelityKernel
 from .algorithms.layer import QuantumLayer
 from .algorithms.loss import NKernelAlignment
+from .bridge.quantum_bridge import QuantumBridge
 from .builder.circuit_builder import CircuitBuilder
 
 # Essential enums
 # Advanced components (for power users)
 from .core.computation_space import ComputationSpace
 from .core.generators import CircuitGenerator, CircuitType, StateGenerator, StatePattern
+from .core.merlin_processor import MerlinProcessor
 from .core.photonicbackend import PhotonicBackend
+from .core.process import ComputationProcess
 from .measurement import (
     Amplitudes,
+    DetectorTransform,
     ModeExpectations,
     OutputMapper,
     Probabilities,
+    resolve_detectors,
 )
 from .measurement.autodiff import AutoDiffProcess
 from .measurement.process import SamplingProcess
@@ -62,22 +67,19 @@ __description__ = "Photonic Quantum Machine Learning Framework"
 __all__ = [
     # Core classes (most common usage)
     "QuantumLayer",
-    "PhotonicBackend",
+    "QuantumBridge",
     # Configuration enums
-    "CircuitType",
-    "StatePattern",
     "ComputationSpace",
     "MeasurementStrategy",
     "Combinadics",
     # Advanced components
-    "CircuitGenerator",
-    "StateGenerator",
-    "FeatureEncoder",
-    "SamplingProcess",
-    "AutoDiffProcess",
+    "ComputationProcess",
     "OutputMapper",
     "Probabilities",
+    "DetectorTransform",
+    "resolve_detectors",
     "ModeExpectations",
+    "MerlinProcessor",
     "Amplitudes",
     "LexGrouping",
     "ModGrouping",
@@ -87,6 +89,14 @@ __all__ = [
     "FeatureMap",
     "FidelityKernel",
     "FeedForwardBlock",
-    "PoolingFeedForward",
     "CircuitBuilder",
+    "PoolingFeedForward",
+    "CircuitGenerator",
+    "CircuitType",
+    "StateGenerator",
+    "StatePattern",
+    "PhotonicBackend",
+    "AutoDiffProcess",
+    "SamplingProcess",
+    "FeatureEncoder",
 ]
