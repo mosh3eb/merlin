@@ -1,138 +1,124 @@
 .. _feedforward_block:
-==========================
-Feed-forward (FF)
-==========================
 
-This page shows **minimal, working** recipes for building feed-forward pipelines with
-:class:`merlin.algorithms.feed_forward.FeedForwardBlock` and
-:class:`merlin.algorithms.feed_forward.PoolingFeedForward`.
+Feedforward Circuits
+====================
 
-Experimental warning: FeedForwardBlock is exprimental and its usage with arguments `state_injection` = False and `depth` > 1 is not recommended.
+Feedforward is a key capability in photonic quantum circuits, where a *partial
+measurement* determines the configuration of the downstream circuit.
+This mechanism is comparable to *dynamic circuits* in the gate-based model of
+quantum computing (see `IBM Dynamic Circuits <https://research.ibm.com/blog/dynamic-circuits>`_).
 
------------------------------
-A. Minimal feed-forward block
------------------------------
+The main difference is in the physical implementation:
 
-The snippet below constructs a small FF tree that maps classical features to a
-distribution over output Fock keys. The parameter choices keep the internal
-state shapes simple and make the example easy to reuse.
+- **Gate-based circuits:** gates are applied consecutively, and adapting the circuit
+  requires performing a measurement and determining follow-up gates *within the
+  coherence time of the qubits* (typically ms–s).
+- **Photonic circuits:** feedforward involves measuring some modes while the remaining
+  modes travel through a *delay line*. The delay must be short enough to avoid photon
+  loss, while still allowing the photonic chip to be reconfigured. Measurement and
+  reconfiguration must therefore happen on *sub-microsecond timescales*.
 
-
-.. code-block:: python
-
-   import torch
-   from merlin.algorithms.feed_forward import FeedForwardBlock
-
-   # Minimal, stable configuration
-   ffb = FeedForwardBlock(
-       input_size=4,     # <= small classical input per sample
-       n=2,              # number of photons
-       m=4,              # number of modes
-       depth=1,          # two FF steps
-       conditional_modes=[0],  # single conditional mode
-       state_injection=False,
-   )
-
-   # Introspection helpers
-   n_outputs = ffb.get_output_size()           # positive integer
-   n_k1      = ffb.size_ff_layer(1)            # number of branches at k=1
-   sizes_k1  = ffb.input_size_ff_layer(1)      # allocated classical inputs per branch
-
-   # Forward pass: returns probabilities that sum to ~1 per row
-   x = torch.rand(4, ffb.input_size)           # batch of 4
-   y = ffb(x)
-   assert y.shape == (4, n_outputs)
-   assert torch.allclose(y.sum(dim=1), torch.ones(4), atol=1e-3)
-
-   # Output key list (ordering is stable across calls without structural changes)
-   keys = ffb.output_keys
-   print(f"{len(keys)} output keys:", keys)
-
-
----------------------------------------
-B. Quick training loop (gradient check)
----------------------------------------
-
-A tiny optimization loop you can drop into notebooks or tests.
-
-.. code-block:: python
-
-   import torch
-   from merlin.algorithms.feed_forward import FeedForwardBlock
-
-   ffb = FeedForwardBlock(
-       input_size=4, n=2, m=4, depth=1, conditional_modes=[0], state_injection=False
-   )
-   opt = torch.optim.Adam(ffb.parameters(), lr=1e-3)
-
-   x = torch.rand(1, 4, requires_grad=True)
-   y = ffb(x)                      # probabilities
-   loss = (y ** 2).sum()           # dummy objective
-   loss.backward()
-   opt.step()
-   opt.zero_grad()
-
-   # Gradients should flow to inputs and parameters
-   assert x.grad is not None and not torch.isnan(x.grad).any()
-
-
--------------------------------
-C. Pooling feed-forward (PFF)
--------------------------------
-
-:class:`PoolingFeedForward` takes amplitudes over a larger mode space and
-re-indexes them into a smaller mode space, keeping compatible output keys.
-
-Below we show two ways to drive it:
-
-1) **Stand-alone** pooling with synthetic amplitudes (no dependency on a quantum layer).
-This is the simplest way to understand shapes and verify behavior.
-
-.. code-block:: python
-
-   import torch
-   from merlin.algorithms.feed_forward import PoolingFeedForward
-
-   # Pool 16 modes (2 photons) down to 8 modes
-   pff = PoolingFeedForward(n_modes=16, n_photons=2, n_output_modes=8)
-
-   # Synthetic amplitudes over the input key set (match_indices + exclude_indices)
-   n_in = len(pff.match_indices) + len(pff.exclude_indices)
-   batch_size = 4
-   amplitudes = torch.rand(batch_size, n_in)
-
-   pooled = pff(amplitudes)  # shape: (batch_size, len(pff.keys_out))
-   print(pooled.shape, "->", len(pff.keys_out), "output keys")
-
-2) **End-to-end** pooling between quantum layers. If you already have layers that
-produce/consume amplitudes, you can place the pooling module in between them. In
-tests we use helpers that instantiate such layers; adapt to your layer utilities.
-
-.. code-block:: python
-
-   import torch
-   from merlin.algorithms.feed_forward import PoolingFeedForward, define_layer_no_input
-
-   # A simple pre → pool → post chain
-   pff = PoolingFeedForward(n_modes=16, n_photons=2, n_output_modes=8)
-   pre  = define_layer_no_input(16, 2)  # produces amplitudes on (16, 2)
-   post = define_layer_no_input(8,  2)  # consumes amplitudes on (8,  2)
-
-   amps = pre()          # forward on the pre-layer
-   amps = pff(amps)      # pool down to 8 modes
-   post.set_input_state(amps)
-   res = post()          # continue computation (e.g., another amplitude map)
-
-   assert isinstance(res, torch.Tensor) and res.requires_grad
-
-
---------------------------
-Shape & parameter checklist
+FeedForwardBlock in MerLin
 --------------------------
 
-- **Minimal FF** (Section A/B): ``input_size=4, n=2, m=4, depth=1, conditional_modes=[0], state_injection=False``.
-  This setting keeps amplitude tensors 2-D in practice and avoids shape pitfalls.
+Modern MerLin versions model feedforward circuits via the
+:class:`~merlin.algorithms.feed_forward.FeedForwardBlock` class.  Instead of
+describing the block procedurally, you simply provide a complete
+:class:`perceval.Experiment` containing:
 
-- **Pooling** (Section C):
-  - Stand-alone: feed a tensor with width ``len(match_indices)+len(exclude_indices)``.
-  - End-to-end: place :class:`PoolingFeedForward` between a producer and a consumer of amplitudes defined on matching mode spaces.
+1. The unitary layers between measurements.
+2. Explicit detector declarations (PNR, threshold, ...).
+3. One or more :class:`perceval.components.feed_forward_configurator.FFCircuitProvider`
+   instances that describe how the circuit is reconfigured after the detectors fire.
+
+``FeedForwardBlock`` parses the experiment, creates the appropriate
+:class:`~merlin.algorithms.layer.QuantumLayer` objects for every stage, and runs
+them sequentially.  Classical inputs (``input_parameters``) are only consumed by
+the first stage; once the first measurement happens the remaining branches are
+propagated in amplitude-encoding mode.
+
+.. note::
+
+   The current implementation expects noise-free experiments (``NoiseModel()``
+   or ``None``). Adding detectors and feed-forward configurators to a noisy
+   experiment is rejected during construction.
+
+**Measurement strategy**
+
+``measurement_strategy`` controls the classical view exposed by
+:meth:`~merlin.algorithms.feed_forward.FeedForwardBlock.forward`:
+
+* ``PROBABILITIES`` (default): returns a tensor of shape
+  ``(batch_size, len(output_keys))``. Each column already corresponds to the
+  fully specified Fock state listed in
+  :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_keys`.
+* ``MODE_EXPECTATIONS``: returns a tensor of shape
+  ``(batch_size, num_modes)`` containing the per-mode photon expectations
+  aggregated across **all** measurement keys. The
+  :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_keys` list is
+  retained for metadata while
+  :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_state_sizes`
+  stores ``num_modes`` for each entry.
+* ``AMPLITUDES``: list of tuples
+  ``(measurement_key, branch_probability, remaining_photons, amplitudes)``
+  describing the mixed state produced after every partial measurement.
+
+For tensor outputs the attribute
+:pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_keys` lists the
+measurement tuple corresponding to each column. ``PROBABILITIES`` therefore
+directly aligns with the dictionary keys, whereas ``MODE_EXPECTATIONS``
+retains the key ordering purely as metadata because the returned tensor is
+already aggregated across all outcomes.
+
+API Reference
+-------------
+
+.. autoclass:: merlin.algorithms.feed_forward.FeedForwardBlock
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Example
+-------
+
+.. code-block:: python
+
+   import torch
+   import perceval as pcvl
+   from merlin.algorithms import FeedForwardBlock
+   from merlin.measurement.strategies import MeasurementStrategy
+
+   # Build an experiment with one detector stage and two branches
+   exp = pcvl.Experiment()
+   exp.add(0, pcvl.Circuit(3) // pcvl.BS())
+   exp.add(0, pcvl.Detector.pnr())
+
+   reflective = pcvl.Circuit(2) // pcvl.PERM([1, 0])
+   transmissive = pcvl.Circuit(2) // pcvl.BS()
+   provider = pcvl.FFCircuitProvider(1, 0, reflective)
+   provider.add_configuration([1], transmissive)
+   exp.add(0, provider)
+
+   block = FeedForwardBlock(
+       exp,
+       input_state=[2, 0, 0],
+       trainable_parameters=["theta"],   # optional Perceval prefixes
+       input_parameters=["phi"],         # classical inputs for the first unitary
+       measurement_strategy=MeasurementStrategy.PROBABILITIES,
+   )
+
+   x = torch.zeros((1, 1))               # only the first stage consumes features
+   outputs = block(x)                    # tensor (batch, num_keys, dim)
+   for idx, key in enumerate(block.output_keys):
+       distribution = outputs[:, idx]    # probabilities for this measurement
+
+When the experiment does not expose classical inputs you may call ``block()``
+without passing a tensor (an empty feature tensor is injected automatically).
+
+
+Further Reading
+---------------
+
+- :ref:`internal_design`
+- :ref:`circuit_specific_optimizations`
+- :ref:`output_mappings`

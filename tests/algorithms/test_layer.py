@@ -26,9 +26,11 @@ Tests for the main QuantumLayer class.
 
 import math
 
+import numpy as np
 import perceval as pcvl
 import pytest
 import torch
+from perceval import FFCircuitProvider
 
 import merlin as ML
 
@@ -80,6 +82,57 @@ class TestQuantumLayer:
                 input_size=0,
                 experiment=experiment,
                 input_state=[1],
+            )
+
+    def test_experiment_sequence_collapses_to_single_unitary(self):
+        """Experiments composed of multiple unitary components should collapse to a single circuit."""
+
+        experiment = pcvl.Experiment()
+        experiment.add(0, pcvl.BS())
+        experiment.add(0, pcvl.PS(pcvl.P("phi1")))
+        experiment.add(0, pcvl.BS())
+        experiment.add(0, pcvl.PS(pcvl.P("phi2")))
+
+        layer = ML.QuantumLayer(
+            input_size=0,
+            experiment=experiment,
+            input_state=[1, 0],
+            trainable_parameters=["phi"],
+            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+        )
+
+        expected = pcvl.Circuit(2)
+        expected.add(0, pcvl.BS())
+        expected.add(0, pcvl.PS(pcvl.P("phi1")))
+        expected.add(0, pcvl.BS())
+        expected.add(0, pcvl.PS(pcvl.P("phi2")))
+
+        for pname, val in {"phi1": 0.1, "phi2": 0.2}.items():
+            layer.circuit.param(pname).set_value(val)
+            expected.param(pname).set_value(val)
+
+        combined = np.array(layer.circuit.compute_unitary(), dtype=np.complex128)
+        target = np.array(expected.compute_unitary(), dtype=np.complex128)
+        assert np.allclose(combined, target, atol=1e-6)
+
+    def test_experiment_with_feedforward_not_supported(self):
+        """Experiments containing feed-forward components should be rejected."""
+
+        experiment = pcvl.Experiment()
+        experiment.add(0, pcvl.BS())
+        experiment.add(0, pcvl.Detector.pnr())
+        ff = FFCircuitProvider(1, 0, pcvl.Circuit(1))
+        experiment.add(0, ff)
+
+        with pytest.raises(
+            ValueError,
+            match="Feed-forward components are not supported inside a QuantumLayer experiment",
+        ):
+            ML.QuantumLayer(
+                input_size=0,
+                experiment=experiment,
+                input_state=[1, 0],
+                measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
             )
 
     def test_builder_based_layer_creation(self):
@@ -257,11 +310,14 @@ class TestQuantumLayer:
         # ---------- TRAIN: sampling request is overridden (no sampling during training) ----------
         layer.train()
         # Request sampling, but autodiff backend should turn it off for differentiability
-        y_train = layer(x, shots=100, sampling_method="multinomial")
-        loss = y_train.sum()
-        loss.backward()  # should succeed with gradients flowing (no sampling taken)
-        # At least one trainable parameter should have a gradient
-        assert any(p.grad is not None for p in layer.parameters() if p.requires_grad)
+        with pytest.warns():
+            y_train = layer(x, shots=100, sampling_method="multinomial")
+            loss = y_train.sum()
+            loss.backward()  # should succeed with gradients flowing (no sampling taken)
+            # At least one trainable parameter should have a gradient
+            assert any(
+                p.grad is not None for p in layer.parameters() if p.requires_grad
+            )
 
         # ---------- Invalid sampling method should error ----------
         with pytest.raises(ValueError):
@@ -269,7 +325,7 @@ class TestQuantumLayer:
 
     def test_simple_wrapper_forwards_sampling_args(self):
         """The .simple() wrapper should accept shots/sampling_method and forward them to the quantum layer."""
-        model = ML.QuantumLayer.simple(input_size=2, n_params=10)
+        model = ML.QuantumLayer.simple(input_size=2)
         x = torch.rand(3, 2)
 
         # Works without sampling
@@ -277,6 +333,7 @@ class TestQuantumLayer:
         assert y.shape[0] == x.shape[0]
 
         # Works with sampling (multinomial default in the wrapper)
+        model.eval()
         y2 = model(x, shots=50)
         assert y2.shape[0] == x.shape[0]
 

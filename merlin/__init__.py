@@ -28,7 +28,14 @@ into PyTorch neural networks with automatic differentiation support.
 """
 
 # Core API - Most users will only need these
-from .algorithms.feed_forward import FeedForwardBlock, PoolingFeedForward
+from .algorithms.feed_forward import FeedForwardBlock
+from .algorithms.feed_forward_legacy import (
+    FeedForwardBlockLegacy,
+    PoolingFeedForwardLegacy,
+    create_circuit,
+    define_layer_no_input,
+    define_layer_with_input,
+)
 from .algorithms.kernels import FeatureMap, FidelityKernel
 from .algorithms.layer import QuantumLayer
 from .algorithms.loss import NKernelAlignment
@@ -40,7 +47,6 @@ from .builder.circuit_builder import CircuitBuilder
 from .core.computation_space import ComputationSpace
 from .core.generators import CircuitGenerator, CircuitType, StateGenerator, StatePattern
 from .core.merlin_processor import MerlinProcessor
-from .core.photonicbackend import PhotonicBackend
 from .core.process import ComputationProcess
 from .measurement import (
     Amplitudes,
@@ -59,7 +65,7 @@ from .utils.grouping import LexGrouping, ModGrouping
 from .utils.torch_codes import FeatureEncoder
 
 # Version and metadata
-__version__ = "0.1.0"
+__version__ = "0.2.3"
 __author__ = "Merlin Team"
 __description__ = "Photonic Quantum Machine Learning Framework"
 
@@ -74,6 +80,10 @@ __all__ = [
     "Combinadics",
     # Advanced components
     "ComputationProcess",
+    "CircuitGenerator",
+    "CircuitType",
+    "StateGenerator",
+    "StatePattern",
     "OutputMapper",
     "Probabilities",
     "DetectorTransform",
@@ -89,13 +99,12 @@ __all__ = [
     "FeatureMap",
     "FidelityKernel",
     "FeedForwardBlock",
+    "FeedForwardBlockLegacy",
+    "PoolingFeedForwardLegacy",
+    "create_circuit",
+    "define_layer_no_input",
+    "define_layer_with_input",
     "CircuitBuilder",
-    "PoolingFeedForward",
-    "CircuitGenerator",
-    "CircuitType",
-    "StateGenerator",
-    "StatePattern",
-    "PhotonicBackend",
     "AutoDiffProcess",
     "SamplingProcess",
     "FeatureEncoder",

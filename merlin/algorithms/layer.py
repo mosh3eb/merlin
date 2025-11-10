@@ -187,6 +187,7 @@ class QuantumLayer(nn.Module):
             - ``pcvl.BasicState`` without annotations (plain FockState only),
             - ``pcvl.StateVector`` (converted to a tensor according to
               ``computation_space``).
+            If QuantumLayer is built from an experiment, the experiment's input state is used.
             If omitted, ``n_photons`` must be provided to derive a default state.
             The dual-rail space defaults to ``[1,0,1,0,...]`` while other spaces
             evenly distribute the photons across the available modes.
@@ -288,7 +289,12 @@ class QuantumLayer(nn.Module):
 
         # computation_space management - default is UNBUNCHED except if overridden by deprecated no_bunching
         if computation_space is None:
-            computation_space_value = ComputationSpace.default(no_bunching=no_bunching)
+            if no_bunching is None:
+                computation_space_value = ComputationSpace.UNBUNCHED
+            else:
+                computation_space_value = ComputationSpace.default(
+                    no_bunching=no_bunching
+                )
         else:
             computation_space_value = ComputationSpace.coerce(computation_space)
         # if no_bunching is provided, check consistency with ComputationSpace
@@ -299,6 +305,16 @@ class QuantumLayer(nn.Module):
             )
 
         self.computation_space = computation_space_value
+
+        if experiment is not None and experiment.input_state is not None:
+            if input_state is not None and experiment.input_state != input_state:
+                warnings.warn(
+                    "Both 'experiment.input_state' and 'input_state' are provided. "
+                    "'experiment.input_state' will be used.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            input_state = experiment.input_state
 
         if isinstance(input_state, pcvl.BasicState):
             if not isinstance(input_state, xqlbr.FockState):
@@ -344,11 +360,23 @@ class QuantumLayer(nn.Module):
 
         if experiment is not None:
             if (
-                not experiment.is_unitary
-                or experiment.post_select_fn is not None
+                experiment.post_select_fn is not None
                 or experiment.heralds
                 or experiment.in_heralds
             ):
+                raise ValueError(
+                    "The provided experiment must not have post-selection or heralding."
+                )
+            if getattr(experiment, "has_feedforward", False):
+                raise ValueError(
+                    "Feed-forward components are not supported inside a QuantumLayer experiment."
+                )
+            has_td_attr = getattr(experiment, "has_td", None)
+            if callable(has_td_attr):
+                has_td = has_td_attr()
+            else:
+                has_td = bool(has_td_attr)
+            if has_td:
                 raise ValueError(
                     "The provided experiment must be unitary, and must not have post-selection or heralding."
                 )
@@ -405,7 +433,7 @@ class QuantumLayer(nn.Module):
         # Detectors are ignored if ComputationSpace is not FOCK
         if (
             self._has_custom_detectors
-            and not self.computation_space == ComputationSpace.FOCK
+            and self.computation_space is not ComputationSpace.FOCK
         ):
             self._detectors = [pcvl.Detector.pnr()] * resolved_circuit.m
             warnings.warn(
@@ -413,12 +441,16 @@ class QuantumLayer(nn.Module):
                 UserWarning,
                 stacklevel=2,
             )
-        # Detector and NoiseModel not allowed with MeasurementStrategy.AMPLITUDES
-        if (
-            self._has_custom_detectors or self.has_custom_noise_model
-        ) and measurement_strategy == MeasurementStrategy.AMPLITUDES:
+        # Noise models or detectors are incompatible with amplitude readout because amplitudes assume noiseless, detector-free evolution.
+        amplitude_readout = measurement_strategy == MeasurementStrategy.AMPLITUDES
+        if amplitude_readout and self.has_custom_noise_model:
             raise RuntimeError(
-                "measurement_strategy=MeasurementStrategy.AMPLITUDES cannot be used when Experiment contains at least one Detector or when it contains a defined NoiseModel."
+                "measurement_strategy=MeasurementStrategy.AMPLITUDES cannot be used when the experiment defines a NoiseModel."
+            )
+        if amplitude_readout and self._has_custom_detectors:
+            raise RuntimeError(
+                "measurement_strategy=MeasurementStrategy.AMPLITUDES does not support experiments with detectors. "
+                "Compute amplitudes without detectors and apply a Partial DetectorTransform manually if needed."
             )
 
         # persist prefixes for export/introspection
@@ -1225,7 +1257,7 @@ class QuantumLayer(nn.Module):
     def simple(
         cls,
         input_size: int,
-        n_params: int = 100,
+        n_params: int = 90,
         output_size: int | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
