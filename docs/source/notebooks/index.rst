@@ -13,5 +13,9 @@ Notebooks
    FirstQuantumLayers
    Kernels
    iris_classification
+   GanEtAl_q_gaussian_kernel
+   GanEtAl_VQC_classification
+   GanEtAl_VQC_fourier_series
+   photonic_QCNN
     
 

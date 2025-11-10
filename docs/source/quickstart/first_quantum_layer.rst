@@ -15,11 +15,6 @@ concepts you will reuse in every project:
 Once the foundations are in place, we show how to reuse the same circuit through a
 :class:`perceval.Experiment` for detector-aware execution.
 
-.. figure:: ../_static/img/diagrams.png
-   :align: center
-   :width: 800px
-   :alt: Quantum Layer
-
 
 Set up the dataset
 ==================
