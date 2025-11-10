@@ -1253,13 +1253,15 @@ class FeedForwardBlock(torch.nn.Module):
                 state_list = ((),)
             if expanded.shape[-1] > expected_dim:
                 expanded = expanded[..., :expected_dim]
-            for idx, state in enumerate(state_list):
-                if len(state) != len(unmeasured_indices):
+            for idx, basis_state in enumerate(state_list):
+                if len(basis_state) != len(unmeasured_indices):
                     raise ValueError(
                         "Basis state dimension mismatch for measurement outcome."
                     )
                 full_key = list(measurement_key)
-                for mode_idx, value in zip(unmeasured_indices, state, strict=False):
+                for mode_idx, value in zip(
+                    unmeasured_indices, basis_state, strict=False
+                ):
                     full_key[mode_idx] = value
                 if any(entry is None for entry in full_key):
                     raise ValueError(
@@ -1367,6 +1369,7 @@ class FeedForwardBlock(torch.nn.Module):
         amplitude_total: torch.Tensor | None = None
         weight_total: torch.Tensor | None = None
         if not branch_list:
+            # Empty canonical basis (typed) – use an explicit tuple() to satisfy mypy.
             return None, None, None, (), 0
         # Fast path: if all branches expose the *same* ordered basis we can
         # accumulate without reindexing (preserves original probability math).
@@ -1408,14 +1411,17 @@ class FeedForwardBlock(torch.nn.Module):
 
         # General path: build a canonical basis as the sorted union of all branch
         # bases to align heterogeneous detector enumerations.
+        # Collect all basis states across branches. Each state is a tuple[int, ...].
         all_states: set[tuple[int, ...]] = set()
         for b in branch_list:
             all_states.update(b.basis_keys)
+        # Canonical basis is the sorted union; make sure it is always typed as
+        # tuple[tuple[int, ...], ...] (even when empty) to avoid mypy inferring tuple[()].
         if not all_states:
-            canonical_basis = ()
+            canonical_basis: tuple[tuple[int, ...], ...] = ()
         else:
             canonical_basis = tuple(sorted(all_states))
-        basis_keys = canonical_basis
+        basis_keys: tuple[tuple[int, ...], ...] = canonical_basis
 
         for branch in branch_list:
             weight_tensor = torch.nan_to_num(branch.weight, nan=0.0)
@@ -1427,7 +1433,8 @@ class FeedForwardBlock(torch.nn.Module):
             if branch.basis_keys != basis_keys:
                 # Build source index map
                 index_of: dict[tuple[int, ...], int] = {
-                    state: idx for idx, state in enumerate(branch.basis_keys)
+                    basis_state: idx
+                    for idx, basis_state in enumerate(branch.basis_keys)
                 }
                 tgt_len = len(basis_keys)
                 src = amplitudes
@@ -1435,8 +1442,8 @@ class FeedForwardBlock(torch.nn.Module):
                 out_shape = list(src.shape[:-1]) + [tgt_len]
                 reindexed = torch.zeros(*out_shape, dtype=src.dtype, device=src.device)
                 # Copy matching indices
-                for tgt_idx, state in enumerate(basis_keys):
-                    src_idx = index_of.get(state)
+                for tgt_idx, basis_state in enumerate(basis_keys):
+                    src_idx = index_of.get(basis_state)
                     if src_idx is not None:
                         reindexed[..., tgt_idx] = src[..., src_idx]
                 amplitudes = reindexed

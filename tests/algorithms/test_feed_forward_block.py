@@ -46,12 +46,9 @@ def _as_keyed_tensors(block: FeedForwardBlock, tensor: torch.Tensor):
         entry = tensor[:, idx]
         if entry.shape[0] == 1:
             entry = entry.squeeze(0)
-        try:
-            size = block.output_state_sizes[key]
-            if entry.ndim > 1 and entry.shape[-1] > size:
-                entry = entry[..., :size]
-        except (AttributeError, KeyError, RuntimeError):
-            pass
+        size = block.output_state_sizes[key]
+        if entry.ndim > 1 and entry.shape[-1] > size:
+            entry = entry[..., :size]
         mapped[key] = entry
     return mapped
 
