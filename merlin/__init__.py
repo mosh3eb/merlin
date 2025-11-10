@@ -45,6 +45,7 @@ from .builder.circuit_builder import CircuitBuilder
 # Essential enums
 # Advanced components (for power users)
 from .core.computation_space import ComputationSpace
+from .core.generators import CircuitGenerator, CircuitType, StateGenerator, StatePattern
 from .core.merlin_processor import MerlinProcessor
 from .core.process import ComputationProcess
 from .measurement import (
@@ -62,10 +63,9 @@ from .pcvl_pytorch import CircuitConverter, build_slos_distribution_computegraph
 from .utils.combinadics import Combinadics
 from .utils.grouping import LexGrouping, ModGrouping
 from .utils.torch_codes import FeatureEncoder
-from .core.generators import CircuitGenerator, CircuitType, StateGenerator, StatePattern
 
 # Version and metadata
-__version__ = "0.1.0"
+__version__ = "0.2.3"
 __author__ = "Merlin Team"
 __description__ = "Photonic Quantum Machine Learning Framework"
 
