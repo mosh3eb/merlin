@@ -62,6 +62,7 @@ from .pcvl_pytorch import CircuitConverter, build_slos_distribution_computegraph
 from .utils.combinadics import Combinadics
 from .utils.grouping import LexGrouping, ModGrouping
 from .utils.torch_codes import FeatureEncoder
+from .core.generators import CircuitGenerator, CircuitType, StateGenerator, StatePattern
 
 # Version and metadata
 __version__ = "0.1.0"
@@ -79,6 +80,10 @@ __all__ = [
     "Combinadics",
     # Advanced components
     "ComputationProcess",
+    "CircuitGenerator",
+    "CircuitType",
+    "StateGenerator",
+    "StatePattern",
     "OutputMapper",
     "Probabilities",
     "DetectorTransform",
