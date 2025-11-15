@@ -24,12 +24,13 @@ from __future__ import annotations
 
 import warnings
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, ClassVar
 
 import torch.nn as nn
 
 
 class MerlinModule(nn.Module):
+    _deprecated_params: ClassVar[dict[str, tuple[str, bool] | str]] = {}
     """Generic MerLin module with shared utility functions
 
     Merlin remote execution policy:
