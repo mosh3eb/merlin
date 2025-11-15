@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterable, Sequence
-from contextlib import contextmanager
 from typing import Any, cast
 
 import exqalibur as xqlbr
@@ -51,24 +50,16 @@ from ..measurement.strategies import MeasurementStrategy
 from ..pcvl_pytorch.utils import pcvl_to_tensor
 from ..utils.dtypes import complex_dtype_for
 from ..utils.grouping import ModGrouping
+from .module import MerlinModule
 
 
-class QuantumLayer(nn.Module):
+class QuantumLayer(MerlinModule):
     """
-    Enhanced Quantum Neural Network Layer with factory-based architecture.
+    Quantum Neural Network Layer with factory-based architecture.
 
-    This layer can be created either from a :class:`CircuitBuilder` instance or a pre-compiled :class:`pcvl.Circuit`.
-
-    Merlin integration (optimal design):
-      - `merlin_leaf = True` marks this module as an indivisible **execution leaf**.
-      - `force_simulation` (bool) defaults to False. When True, the layer MUST run locally.
-      - `supports_offload()` reports whether remote offload is possible (via `export_config()`).
-      - `should_offload(processor, shots)` encapsulates the current offload policy:
-            return supports_offload() and not force_local
+    This layer can be created either from a :class:`CircuitBuilder` instance, a pre-compiled :class:`pcvl.Circuit`,
+    or an :class:Experiment`.
     """
-
-    # ---- Explicit execution-leaf marker (prevents recursion into children like nn.Identity) ----
-    merlin_leaf: bool = True
 
     # Map of deprecated kwargs to (message, raise_error)
     # If raise_error is True the presence of the deprecated parameter will raise a ValueError.
@@ -87,51 +78,6 @@ class QuantumLayer(nn.Module):
             True,
         ),
     }
-
-    @classmethod
-    def _validate_kwargs(cls, method_name: str, kwargs: dict[str, Any]) -> None:
-        if not kwargs:
-            return
-
-        deprecated_raise: list[str] = []
-        deprecated_warn: list[str] = []
-        unknown: list[str] = []
-
-        for key in sorted(kwargs):
-            full_name = f"{method_name}.{key}"
-            if full_name in cls._deprecated_params:
-                # support old-style str values for backwards compatibility
-                val = cls._deprecated_params[full_name]
-                if isinstance(val, tuple):
-                    message, raise_error = val
-                else:
-                    message, raise_error = (str(val), True)
-
-                if raise_error:
-                    deprecated_raise.append(
-                        f"Parameter '{key}' is deprecated. {message}"
-                    )
-                else:
-                    deprecated_warn.append(
-                        f"Parameter '{key}' is deprecated. {message}"
-                    )
-            else:
-                unknown.append(key)
-
-        # Emit non-fatal deprecation warnings
-        if deprecated_warn:
-            warnings.warn(" ".join(deprecated_warn), DeprecationWarning, stacklevel=2)
-
-        # Raise for deprecated parameters that are marked fatal
-        if deprecated_raise:
-            raise ValueError(" ".join(deprecated_raise))
-
-        if unknown:
-            unknown_list = ", ".join(unknown)
-            raise ValueError(
-                f"Unexpected keyword argument(s): {unknown_list}. "
-                "Check the QuantumLayer signature for supported parameters."
-            )
 
     def __init__(
         self,
@@ -258,7 +204,7 @@ class QuantumLayer(nn.Module):
         self.input_size = input_size
         self.measurement_strategy = measurement_strategy
         self.experiment: pcvl.Experiment | None = None
-
+        self.noise_model: Any | None = None  # type: ignore[assignment]
         self._detector_transform: DetectorTransform | None = None
         self._detector_keys: list[tuple[int, ...]] = []
         self._raw_output_keys: list[tuple[int, ...]] = []
@@ -336,13 +282,6 @@ class QuantumLayer(nn.Module):
                 dtype=self.complex_dtype,
             )
         self.input_state = input_state
-
-        # execution policy: when True, always simulate locally (do not offload)
-        self._force_simulation: bool = False
-
-        # optional experiment handle for export
-        self.experiment: pcvl.Experiment | None = None
-        self.noise_model: Any | None = None  # type: ignore[assignment]
 
         # exclusivity of circuit/builder/experiment
         if sum(x is not None for x in (circuit, builder, experiment)) != 1:
@@ -469,39 +408,6 @@ class QuantumLayer(nn.Module):
         # export snapshot cache
         self._current_params: dict[str, Any] = {}
 
-    # -------------------- Execution policy & helpers --------------------
-
-    @property
-    def force_local(self) -> bool:
-        """When True, this layer must run locally (Merlin will not offload it)."""
-        return self._force_simulation
-
-    @force_local.setter
-    def force_local(self, value: bool) -> None:
-        self._force_simulation = bool(value)
-
-    def set_force_simulation(self, value: bool) -> None:
-        self.force_local = value
-
-    @contextmanager
-    def as_simulation(self):
-        """Temporarily force local simulation within the context."""
-        prev = self.force_local
-        self.force_local = True
-        try:
-            yield self
-        finally:
-            self.force_local = prev
-
-    # Offload capability & policy (queried by MerlinProcessor)
-    def supports_offload(self) -> bool:
-        """Return True if this layer is technically offloadable."""
-        return hasattr(self, "export_config") and callable(self.export_config)
-
-    def should_offload(self, _processor=None, _shots=None) -> bool:
-        """Return True if this layer should be offloaded under current policy."""
-        return self.supports_offload() and not self.force_local
-
     # ---------------- core init paths ----------------
 
     def _init_from_custom_circuit(
@@ -552,10 +458,6 @@ class QuantumLayer(nn.Module):
         self._raw_output_keys = [self._normalize_output_key(key) for key in raw_keys]
         self._initialize_photon_loss_transform()
         self._initialize_detector_transform()
-
-        # Pick the effective state space after the factory creates the process so
-        # dual-rail can shrink the logical basis without extra factory plumbing.
-        self.computation_process.configure_computation_space(self.computation_space)
 
         # Validate that the declared input size matches encoder parameters
         spec_mappings = self.computation_process.converter.spec_mappings
@@ -666,8 +568,6 @@ class QuantumLayer(nn.Module):
             # be defensive: `self.circuit` may be None or an untyped external object
             if self.circuit is not None and hasattr(self.circuit, "m"):
                 self._output_size = self.circuit.m
-            elif isinstance(self.circuit, CircuitBuilder):
-                self._output_size = self.circuit.n_modes
             else:
                 raise TypeError(f"Unknown circuit type: {type(self.circuit)}")
         elif measurement_strategy == MeasurementStrategy.AMPLITUDES:
@@ -1040,7 +940,8 @@ class QuantumLayer(nn.Module):
         elif not isinstance(amplitudes, torch.Tensor):
             raise TypeError(f"Unexpected amplitudes type: {type(amplitudes)}")
 
-        # TODO: (Philippe) check why do we calculate distribution here, since it will be redone in measurement
+        # even in amplitude mode, we do need to calculation distribution for renormalization
+        # of the amplitudes
         distribution = amplitudes.real**2 + amplitudes.imag**2
 
         # renormalize distribution and amplitudes for UNBUNCHED and DUAL_RAIL spaces
@@ -1247,9 +1148,6 @@ class QuantumLayer(nn.Module):
             "noise_model": self.noise_model,
         }
         return config
-
-    def get_experiment(self) -> pcvl.Experiment | None:
-        return self.experiment
 
     # ============================================================================
 

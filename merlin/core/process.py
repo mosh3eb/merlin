@@ -24,7 +24,6 @@
 Quantum computation processes and factories.
 """
 
-import itertools  # Used to enumerate dual-rail occupancy patterns.
 import math
 from typing import Literal, overload
 
@@ -47,7 +46,6 @@ class ComputationProcess(AbstractComputationProcess):
         trainable_parameters: list[str],
         input_parameters: list[str],
         n_photons: int = None,
-        reservoir_mode: bool = False,
         dtype: torch.dtype = torch.float32,
         device: torch.device | None = None,
         computation_space: ComputationSpace | None = None,
@@ -59,7 +57,6 @@ class ComputationProcess(AbstractComputationProcess):
         self.n_photons = n_photons
         self.trainable_parameters = trainable_parameters
         self.input_parameters = input_parameters
-        self.reservoir_mode = reservoir_mode
         self.dtype = dtype
         self.device = device
 
@@ -69,10 +66,6 @@ class ComputationProcess(AbstractComputationProcess):
 
         self.computation_space = computation_space
         self.output_map_func = output_map_func
-        # Dual-rail configuration runs after graph construction, so stash whether
-        # we still need to re-check any tensor-shaped input state once the logical
-        # basis has been narrowed.
-        self._pending_state_validation = False
 
         # Extract circuit parameters for graph building
 
@@ -87,19 +80,10 @@ class ComputationProcess(AbstractComputationProcess):
         # Build computation graphs
         self._setup_computation_graphs()
 
-        # Delay validation here because dual-rail may override the logical basis
-        # immediately after graph setup; the follow-up call handles the actual setup.
-        self.configure_computation_space(self.computation_space, validate_input=False)
-        # validate initial input state shape when provided as tensor (may defer for dual-rail)
+        # validate initial input state shape when provided as tensor
         if isinstance(self.input_state, torch.Tensor):
             state_tensor: torch.Tensor = self.input_state
-            try:
-                self._validate_superposition_state_shape(state_tensor)
-            except ValueError as exc:
-                if self._should_defer_state_validation(state_tensor):
-                    self._pending_state_validation = True
-                else:
-                    raise exc
+            self._validate_superposition_state_shape(state_tensor)
 
     def _setup_computation_graphs(self):
         """Setup unitary and simulation computation graphs."""
@@ -121,41 +105,6 @@ class ComputationProcess(AbstractComputationProcess):
             dtype=self.dtype,
         )
 
-    def _init_logical_basis(self) -> None:
-        """Derive logical state keys/indices based on the computation space."""
-        mapped_keys = [tuple(key) for key in self.simulation_graph.mapped_keys]
-        self.logical_keys: list[tuple[int, ...]] = mapped_keys
-        self.logical_indices: torch.Tensor | None = None
-
-        if self.computation_space is ComputationSpace.DUAL_RAIL:
-            if self.n_photons is None:
-                raise ValueError("Dual-rail encoding requires 'n_photons'.")
-            if self.m != 2 * self.n_photons:
-                raise ValueError(
-                    "Dual-rail encoding requires the number of modes to equal 2 * n_photons."
-                )
-
-            key_to_index = {state: idx for idx, state in enumerate(mapped_keys)}
-            allowed_states: list[tuple[int, ...]] = []
-            indices: list[int] = []
-
-            for choices in itertools.product((0, 1), repeat=self.n_photons):
-                state = [0] * self.m
-                for pair_idx, bit in enumerate(choices):
-                    state[2 * pair_idx + bit] = 1
-                state_tuple = tuple(state)
-                try:
-                    index = key_to_index[state_tuple]
-                except KeyError as exc:  # pragma: no cover - defensive guard
-                    raise ValueError(
-                        f"Dual-rail state missing from computation graph: {state_tuple}"
-                    ) from exc
-                allowed_states.append(state_tuple)
-                indices.append(index)
-
-            self.logical_keys = allowed_states
-            self.logical_indices = torch.tensor(indices, dtype=torch.long)
-
     def compute(self, parameters: list[torch.Tensor]) -> torch.Tensor:
         """Compute quantum output distribution."""
         # Generate unitary matrix from parameters
@@ -169,9 +118,6 @@ class ComputationProcess(AbstractComputationProcess):
             input_state = self.input_state
 
         keys, amplitudes = self.simulation_graph.compute(unitary, input_state)
-        # When the logical basis is smaller than the simulator basis (e.g. dual-rail),
-        # trim the tensor so forward callers keep seeing the contracted subspace.
-        amplitudes = self._filter_tensor(amplitudes)
         return amplitudes
 
     @overload
@@ -256,13 +202,7 @@ class ComputationProcess(AbstractComputationProcess):
         # The actual sum of amplitudes weighted by input coefficients (for each batch element) is done here
         final_amplitudes = input_state @ amplitudes
 
-        # Keep output tensors aligned with the currently configured logical subspace.
-        final_amplitudes = self._filter_tensor(final_amplitudes)
-        keys_out = (
-            self.logical_keys
-            if self.logical_indices is not None
-            else list(self.simulation_graph.mapped_keys)
-        )
+        keys_out = list(self.simulation_graph.mapped_keys)
 
         if return_keys:
             return keys_out, final_amplitudes
@@ -383,9 +323,7 @@ class ComputationProcess(AbstractComputationProcess):
         if final_amplitudes.ndim == 3 and final_amplitudes.shape[1] == 1:
             final_amplitudes = final_amplitudes.squeeze(1)
 
-        # Matching the logical basis prevents downstream shape changes when
-        # switching computation spaces
-        return self._filter_tensor(final_amplitudes)
+        return final_amplitudes
 
     def compute_with_keys(self, parameters: list[torch.Tensor]):
         """Compute quantum output distribution and return both keys and probabilities."""
@@ -394,15 +332,8 @@ class ComputationProcess(AbstractComputationProcess):
 
         # Compute output distribution using the input state
         keys, amplitudes = self.simulation_graph.compute(unitary, self.input_state)
-        # Surface the logical keys alongside the trimmed tensor so callers stay consistent.
-        amplitudes = self._filter_tensor(amplitudes)
-        keys_out = (
-            self.logical_keys
-            if self.logical_indices is not None
-            else list(self.simulation_graph.mapped_keys)
-        )
 
-        return keys_out, amplitudes
+        return keys, amplitudes
 
     def _expected_superposition_size(self) -> int:
         """Expected number of Fock states given current computation space."""
@@ -556,61 +487,10 @@ class ComputationProcess(AbstractComputationProcess):
                 f"Unsupported dtype for superposition state: {tensor.dtype}"
             )
 
-        if (
-            self.logical_indices is not None
-            and tensor.shape[-1] == len(self.logical_keys)
-            and len(self.logical_keys) != len(self.simulation_graph.mapped_keys)
-        ):
-            # Superposition tensors captured before dual-rail was configured still
-            # match the full SLOS basis; scatter them so the simulator can process them.
-            tensor = self._scatter_logical_to_full(tensor)
-
         norm = tensor.abs().pow(2).sum(dim=1, keepdim=True).sqrt()
         tensor = tensor / norm
         self.input_state = tensor
         return tensor
-
-    def _filter_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
-        if self.logical_indices is None:
-            return tensor
-        index = self.logical_indices.to(tensor.device)
-        return tensor.index_select(tensor.dim() - 1, index)
-
-    def _scatter_logical_to_full(self, tensor: torch.Tensor) -> torch.Tensor:
-        """Expand a logical-state tensor to the full simulation basis."""
-        full_size = len(self.simulation_graph.mapped_keys)
-        index = self.logical_indices.to(tensor.device)
-        shape = tensor.shape[:-1] + (full_size,)
-        expanded = tensor.new_zeros(shape)
-        expanded.index_copy_(tensor.dim() - 1, index, tensor)
-        return expanded
-
-    def configure_computation_space(
-        self,
-        computation_space: ComputationSpace = ComputationSpace.UNBUNCHED,
-        *,
-        validate_input: bool = True,
-    ) -> None:
-        """Reconfigure the logical basis according to the desired computation space."""
-
-        effective_space = self.computation_space
-        if effective_space is ComputationSpace.DUAL_RAIL:
-            n_photons = self.n_photons
-            if n_photons is None:
-                raise ValueError("Dual-rail encoding requires 'n_photons'.")
-            expected_modes = 2 * n_photons
-            if self.m != expected_modes:
-                raise ValueError(
-                    "Dual-rail encoding requires the number of modes to equal 2 * n_photons. "
-                    f"Here {self.m} modes and {n_photons} photons were provided."
-                )
-
-        self._init_logical_basis()
-        # If validation was postponed while the space was unresolved, finish it now.
-        needs_validation = validate_input or self._pending_state_validation
-        if needs_validation and isinstance(self.input_state, torch.Tensor):
-            self._validate_superposition_state_shape(self.input_state)
-            self._pending_state_validation = False
 
 
 class ComputationProcessFactory:
@@ -622,7 +502,6 @@ class ComputationProcessFactory:
         input_state: list[int] | torch.Tensor,
         trainable_parameters: list[str],
         input_parameters: list[str],
-        reservoir_mode: bool = False,
         computation_space: ComputationSpace | None = None,
         **kwargs,
     ) -> ComputationProcess:
@@ -632,7 +511,6 @@ class ComputationProcessFactory:
             input_state=input_state,
             trainable_parameters=trainable_parameters,
             input_parameters=input_parameters,
-            reservoir_mode=reservoir_mode,
             computation_space=computation_space,
             **kwargs,
         )

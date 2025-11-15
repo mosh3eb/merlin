@@ -6,7 +6,7 @@ Overview
 --------
 
 ``MerlinProcessor`` is a lightweight RPC-style bridge between your PyTorch
-models and Quandela Cloud via Perceval's ``RemoteProcessor``. It lets you:
+models and Remote Cloud provider (for instance Quandela Cloud) via Perceval's ``RemoteProcessor``. It lets you:
 
 * Offload **quantum leaves** (e.g. ``QuantumLayer``) to the cloud while keeping
   **classical layers** local.
@@ -180,7 +180,7 @@ Offload Policy & Local Overrides
   **quantum leaves** and offloaded.
 * Set ``layer.force_local = True`` to force **local** execution
   (useful for debugging and A/B comparisons).
-* Many Merlin tests also use a context helper ``with layer.as_simulation():``
+* You can also use a context helper ``with layer.as_simulation():``
   to temporarily force local-mode (if your layer provides it).
 
 Estimating Required Shots (No Auto-Execute)
