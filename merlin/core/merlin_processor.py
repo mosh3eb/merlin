@@ -309,9 +309,7 @@ class MerlinProcessor:
         def _call(s: int, e: int, idx: int):
             try:
                 rp, pool_slot = _next_rp_for_layer()
-                base_label = (
-                    f"mer:{layer_name}:{state['call_id']}:{idx + 1}/{total_chunks}:{pool_slot}"
-                )
+                base_label = f"mer:{layer_name}:{state['call_id']}:{idx + 1}/{total_chunks}:{pool_slot}"
                 t = self._run_chunk(
                     layer,
                     config,
@@ -538,7 +536,9 @@ class MerlinProcessor:
 
     # ---------------- Per-call RP pool helpers ----------------
 
-    def _ensure_pool_for_layer(self, config: dict, layer: MerlinModule, pool_ctx: dict) -> None:
+    def _ensure_pool_for_layer(
+        self, config: dict, layer: MerlinModule, pool_ctx: dict
+    ) -> None:
         """Create an RP pool for this layer within the current forward call, if absent."""
         lid = id(layer)
         if lid in pool_ctx["pools"]:
