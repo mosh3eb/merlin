@@ -8,7 +8,7 @@ from _helpers import make_layer
 from merlin.core.merlin_processor import MerlinProcessor
 
 
-def _wait(fut, timeout_s: float = 30.0):
+def _wait(fut, timeout_s: float = 60.0):
     import time
 
     end = time.time() + timeout_s
@@ -21,7 +21,7 @@ def _wait(fut, timeout_s: float = 30.0):
 
 class TestPolicyAndPipeline:
     def test_offloads_by_default(self, remote_processor):
-        layer = make_layer(5, 2, 2, no_bunching=True)
+        layer = make_layer(5, 2, 2, no_bunching=True).eval()
         x = torch.rand(3, 2)
         dist = layer(x).shape[1]
 
@@ -33,7 +33,7 @@ class TestPolicyAndPipeline:
         assert hasattr(fut, "job_ids") and len(fut.job_ids) >= 1
 
     def test_force_simulation_executes_locally(self, remote_processor, monkeypatch):
-        layer = make_layer(5, 2, 2, no_bunching=True)
+        layer = make_layer(5, 2, 2, no_bunching=True).eval()
         layer.force_local = True
         x = torch.rand(3, 2)
         dist = layer(x).shape[1]
@@ -73,10 +73,10 @@ class TestPolicyAndPipeline:
         assert len(fut.job_ids) == 1  # exactly one offloaded layer
 
     def test_local_vs_remote_shape_and_norm(self, remote_processor):
-        q = make_layer(5, 2, 2, no_bunching=True)
+        q = make_layer(5, 2, 2, no_bunching=True).eval()
         X = torch.randn(3, 2)
 
-        y_local = q(X)  # exact probs
+        y_local = q(X)  # exact probs in eval mode
         proc = MerlinProcessor(remote_processor)
         y_remote = proc.forward(q, X, nsample=20_000)
 

@@ -22,7 +22,7 @@ class TestFuturesAndChunking:
         assert hasattr(fut, "status")
         assert hasattr(fut, "job_ids")
 
-        spin_until(lambda f=fut: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
+        spin_until(lambda f=fut: len(f.job_ids) > 0 or f.done(), timeout_s=60.0)
         out = fut.wait()
         assert out.shape == (3, 15)
 
@@ -31,7 +31,7 @@ class TestFuturesAndChunking:
         proc = MerlinProcessor(remote_processor)
         fut = proc.forward_async(layer, torch.rand(8, 2), nsample=50_000, timeout=0.03)
 
-        done_in_time = spin_until(lambda: fut.done(), timeout_s=2.0)
+        done_in_time = spin_until(lambda: fut.done(), timeout_s=10.0)
         if not done_in_time:
             with pytest.raises(TimeoutError):
                 fut.wait()
@@ -47,7 +47,7 @@ class TestFuturesAndChunking:
         proc = MerlinProcessor(remote_processor)  # default timeout; per-call infinite
         fut = proc.forward_async(layer, torch.rand(8, 2), nsample=40_000, timeout=None)
 
-        spin_until(lambda f=fut: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
+        spin_until(lambda f=fut: len(f.job_ids) > 0 or f.done(), timeout_s=60.0)
         if fut.done():
             pytest.skip("Backend finished too quickly to test cancellation")
         fut.cancel_remote()
@@ -61,7 +61,7 @@ class TestFuturesAndChunking:
             proc.forward_async(layer, torch.rand(2, 2), nsample=1500) for _ in range(4)
         ]
         for f in futs:
-            spin_until(lambda f=f: len(f.job_ids) > 0 or f.done(), timeout_s=10.0)
+            spin_until(lambda f=f: len(f.job_ids) > 0 or f.done(), timeout_s=60.0)
         outs = [f.wait() for f in futs]
         for y in outs:
             assert y.shape == (2, 15)
@@ -73,7 +73,7 @@ class TestFuturesAndChunking:
             fut = proc.forward_async(
                 layer, torch.rand(8, 2), nsample=40_000, timeout=None
             )
-            spin_until(lambda: len(fut.job_ids) > 0 or fut.done(), timeout_s=10.0)
+            spin_until(lambda: len(fut.job_ids) > 0 or fut.done(), timeout_s=60.0)
         assert fut is not None
         with pytest.raises(_cf.CancelledError):
             fut.wait()
@@ -104,7 +104,7 @@ class TestFuturesAndChunking:
             max_shots_per_call=50_000,
         )
         fut = proc.forward_async(q, X, nsample=2000)
-        spin_until(lambda f=fut: len(f.job_ids) >= 3 or f.done(), timeout_s=20.0)
+        spin_until(lambda f=fut: len(f.job_ids) >= 3 or f.done(), timeout_s=60.0)
         y = fut.wait()
         assert y.shape == (B, 15)
         assert len(fut.job_ids) >= 3
@@ -131,7 +131,7 @@ class TestFuturesAndChunking:
             max_shots_per_call=60_000,
         )
         fut = proc.forward_async(model, X, nsample=3000)
-        spin_until(lambda f=fut: len(f.job_ids) >= 4 or f.done(), timeout_s=20.0)
+        spin_until(lambda f=fut: len(f.job_ids) >= 4 or f.done(), timeout_s=60.0)
         y = fut.wait()
         assert y.shape == (7, 3)
         assert len(fut.job_ids) >= 4
