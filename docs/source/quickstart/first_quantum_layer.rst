@@ -102,7 +102,7 @@ result to :class:`~merlin.algorithms.layer.QuantumLayer`.
     quantum_core = QuantumLayer(
         input_size=X_train.shape[1],
         builder=builder,
-        n_photons=3,                             # Equivalent to input_state=[1,1,1,0,0,0]
+        n_photons=3,                             # 3 photons evenly distributed on 6 modes
         measurement_strategy=MeasurementStrategy.PROBABILITIES,
     )
 

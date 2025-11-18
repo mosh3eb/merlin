@@ -1,5 +1,3 @@
-# merlin/core/merlin_processor.py
-
 from __future__ import annotations
 
 import logging
@@ -11,7 +9,7 @@ import zlib
 from collections.abc import Iterable
 from contextlib import suppress
 from math import comb
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import perceval as pcvl
@@ -21,19 +19,25 @@ from perceval.algorithm import Sampler
 from perceval.runtime import RemoteJob, RemoteProcessor
 from torch.futures import Future
 
+from ..algorithms.module import MerlinModule
+
 logger = logging.getLogger(__name__)
 
 
 class MerlinProcessor:
     """
     RPC-style processor for quantum execution with:
-      - Torch-friendly async interface (Future[Torch.Tensor])
-      - Cloud offload of QuantumLayer leaves
+
+      - Torch-friendly async interface (Future[torch.Tensor])
+      - Cloud offload of MerlinModule leaves (e.g. QuantumLayer)
       - Batch chunking per quantum leaf with limited concurrency
       - Cancellation (per-future and global)
       - Global timeouts that cancel in-flight jobs
       - Per-call RemoteProcessor pooling (no shared RPC handlers across threads)
       - Descriptive cloud job names (<= 50 chars) for traceability
+
+    Only modules that subclass MerlinModule and implement `export_config()` are
+    considered for offload. All other modules are always run locally.
     """
 
     DEFAULT_MAX_SHOTS: int = 100_000
@@ -133,13 +137,18 @@ class MerlinProcessor:
         nsample: int | None = None,
         timeout: float | None = None,
     ) -> Future:
+        """
+        Asynchronous execution of a PyTorch module, offloading MerlinModule leaves
+        to the configured remote processor.
+        """
         with self._lock:
             if self._closed:
                 raise RuntimeError("MerlinProcessor is closed")
 
         if module.training:
             raise RuntimeError(
-                "Remote quantum execution requires `.eval()` mode. Call `module.eval()` before forward."
+                "Remote quantum execution requires `.eval()` mode. "
+                "Call `module.eval()` before forward."
             )
 
         # Determine deadline
@@ -152,7 +161,7 @@ class MerlinProcessor:
 
         original_device = input.device
         original_dtype = input.dtype
-        layers = list(self._iter_layers_in_order(module))
+        layers: list[Any] = list(self._iter_layers_in_order(module))
 
         fut: Future = Future()
         state = {
@@ -212,19 +221,16 @@ class MerlinProcessor:
             try:
                 x = input
                 for layer in layers:
-                    # Policy: offload quantum leaves; else run locally
-                    should_offload = None
-                    if hasattr(layer, "should_offload") and callable(
-                        layer.should_offload
-                    ):
+                    # Policy: offload MerlinModule leaves; else run locally
+                    if isinstance(layer, MerlinModule):
                         try:
                             should_offload = bool(
                                 layer.should_offload(self.remote_processor, nsample)
                             )
                         except Exception:
-                            should_offload = None
-                    if should_offload is None:
-                        should_offload = self._is_quantum_layer(layer)
+                            should_offload = False
+                    else:
+                        should_offload = False
 
                     if state["cancel_requested"]:
                         raise self._cancelled_error()
@@ -250,7 +256,7 @@ class MerlinProcessor:
 
     def _offload_quantum_layer_with_chunking(
         self,
-        layer: Any,
+        layer: MerlinModule,
         input_tensor: torch.Tensor,
         nsample: int | None,
         state: dict,
@@ -258,7 +264,7 @@ class MerlinProcessor:
         pool_ctx: dict,
     ) -> torch.Tensor:
         """
-        Split the batch into chunks of size <= max_batch_size,
+        Split the batch into chunks of size <= microbatch_size,
         submit up to chunk_concurrency jobs concurrently, and stitch.
         """
         if input_tensor.is_cuda:
@@ -274,7 +280,9 @@ class MerlinProcessor:
         # Ensure we have (and cache) layer config
         cache = self._layer_cache.get(id(layer))
         if cache is None:
-            config = layer.export_config()
+            # export_config is provided by QuantumLayer but not on MerlinModule's
+            # static type, so we treat it dynamically for mypy.
+            config = cast(Any, layer).export_config()
             self._layer_cache[id(layer)] = {"config": config}
         else:
             config = cache["config"]
@@ -357,7 +365,7 @@ class MerlinProcessor:
 
     def _run_chunk_wrapper(
         self,
-        layer: Any,
+        layer: MerlinModule,
         input_chunk: torch.Tensor,
         nsample: int | None,
         state: dict,
@@ -367,7 +375,7 @@ class MerlinProcessor:
         """Non-chunking simple path using the per-call RP pool."""
         cache = self._layer_cache.get(id(layer))
         if cache is None:
-            config = layer.export_config()
+            config = cast(Any, layer).export_config()
             self._layer_cache[id(layer)] = {"config": config}
         else:
             config = cache["config"]
@@ -394,7 +402,7 @@ class MerlinProcessor:
 
     def _run_chunk(
         self,
-        layer: Any,
+        layer: MerlinModule,
         config: dict,
         child_rp: RemoteProcessor,
         input_chunk: torch.Tensor,
@@ -530,7 +538,9 @@ class MerlinProcessor:
 
     # ---------------- Per-call RP pool helpers ----------------
 
-    def _ensure_pool_for_layer(self, config: dict, layer: Any, pool_ctx: dict) -> None:
+    def _ensure_pool_for_layer(
+        self, config: dict, layer: MerlinModule, pool_ctx: dict
+    ) -> None:
         """Create an RP pool for this layer within the current forward call, if absent."""
         lid = id(layer)
         if lid in pool_ctx["pools"]:
@@ -578,8 +588,13 @@ class MerlinProcessor:
         )
 
     def _iter_layers_in_order(self, module: nn.Module) -> Iterable[nn.Module]:
-        """Yield execution leaves in a deterministic order."""
-        if getattr(module, "merlin_leaf", False):
+        """
+        Yield execution leaves in a deterministic order.
+
+        Any MerlinModule instance is treated as a single execution leaf: MerlinProcessor
+        will not recurse into its children when building the pipeline.
+        """
+        if isinstance(module, MerlinModule):
             yield module
             return
 
@@ -590,11 +605,6 @@ class MerlinProcessor:
 
         for child in children:
             yield from self._iter_layers_in_order(child)
-
-    def _is_quantum_layer(self, module: Any) -> bool:
-        if getattr(module, "force_local", False):
-            return False
-        return hasattr(module, "export_config") and callable(module.export_config)
 
     def _extract_input_params(self, config: dict) -> list[str]:
         circuit = config["circuit"]
@@ -617,7 +627,7 @@ class MerlinProcessor:
         self,
         raw_results: dict,
         batch_size: int,
-        layer: Any,
+        layer: MerlinModule,
         nsample: int | None = None,
     ) -> torch.Tensor:
         dist_size, state_to_index, valid_states = self._get_state_mapping(layer)
@@ -680,65 +690,93 @@ class MerlinProcessor:
 
         return torch.stack(output_tensors[:batch_size])
 
-    def _get_state_mapping(self, layer: Any) -> tuple[int, dict | None, set | None]:
+    def _get_state_mapping(
+        self, layer: MerlinModule
+    ) -> tuple[int, dict | None, set | None]:
+        """
+        Determine the size of the output distribution and the mapping from Perceval
+        Fock states to tensor indices.
+
+        This requires either:
+          - a `computation_process.simulation_graph` with mapped keys, or
+          - `circuit` and `input_state` attributes on the layer.
+
+        If neither is available, a RuntimeError is raised rather than falling back
+        to an arbitrary default size.
+        """
+        # Preferred path: use the computation_process simulation graph when present.
         if hasattr(layer, "computation_process") and hasattr(
             layer.computation_process, "simulation_graph"
         ):
-            graph = layer.computation_process.simulation_graph
+            graph: Any = layer.computation_process.simulation_graph
 
-            if hasattr(graph, "final_keys") and graph.final_keys:
-                dist_size = len(graph.final_keys)
-                state_to_index = {
-                    state: idx for idx, state in enumerate(graph.final_keys)
-                }
+            final_keys = getattr(graph, "final_keys", None)
+            if final_keys:
+                keys = list(final_keys)
+                dist_size = len(keys)
+                state_to_index = {state: idx for idx, state in enumerate(keys)}
                 valid_states = (
-                    set(graph.final_keys)
-                    if getattr(layer, "no_bunching", False)
-                    else None
+                    set(keys) if getattr(layer, "no_bunching", False) else None
                 )
+                return dist_size, state_to_index, valid_states
+
+            # Fallback: compute combinatorial size from modes / photons
+            if hasattr(layer, "circuit") and hasattr(layer.circuit, "m"):
+                n_modes = int(layer.circuit.m)  # type: ignore[arg-type]
             else:
-                n_modes = layer.circuit.m if hasattr(layer, "circuit") else graph.m
-                n_photons = (
-                    sum(layer.input_state)
-                    if hasattr(layer, "input_state")
-                    else graph.n_photons
+                n_modes = int(graph.m)  # type: ignore[arg-type]
+
+            if hasattr(layer, "input_state"):
+                input_state = layer.input_state
+                n_photons = int(sum(input_state))  # type: ignore[arg-type]
+            else:
+                n_photons = int(graph.n_photons)  # type: ignore[arg-type]
+
+            if getattr(layer, "no_bunching", False):
+                dist_size = comb(n_modes, n_photons)
+                valid_states = set(
+                    self._generate_no_bunching_states(n_modes, n_photons)
                 )
-
-                if getattr(layer, "no_bunching", False):
-                    dist_size = comb(n_modes, n_photons)
-                    valid_states = set(
-                        self._generate_no_bunching_states(n_modes, n_photons)
-                    )
-                    state_to_index = {
-                        state: idx for idx, state in enumerate(sorted(valid_states))
-                    }
-                else:
-                    dist_size = comb(n_modes + n_photons - 1, n_photons)
-                    state_to_index = None
-                    valid_states = None
-        else:
-            if hasattr(layer, "circuit") and hasattr(layer, "input_state"):
-                n_modes = layer.circuit.m
-                n_photons = sum(layer.input_state)
-
-                if getattr(layer, "no_bunching", False):
-                    dist_size = comb(n_modes, n_photons)
-                    valid_states = set(
-                        self._generate_no_bunching_states(n_modes, n_photons)
-                    )
-                    state_to_index = {
-                        state: idx for idx, state in enumerate(sorted(valid_states))
-                    }
-                else:
-                    dist_size = comb(n_modes + n_photons - 1, n_photons)
-                    state_to_index = None
-                    valid_states = None
+                state_to_index = {
+                    state: idx for idx, state in enumerate(sorted(valid_states))
+                }
             else:
-                dist_size = 10
+                dist_size = comb(n_modes + n_photons - 1, n_photons)
                 state_to_index = None
                 valid_states = None
 
-        return dist_size, state_to_index, valid_states
+            return dist_size, state_to_index, valid_states
+
+        # Secondary path: a layer with direct circuit + input_state attributes
+        # Secondary path: a layer with direct circuit + input_state attributes
+        if hasattr(layer, "circuit") and hasattr(layer, "input_state"):
+            circuit = cast(Any, layer.circuit)
+            input_state = cast(Any, layer.input_state)
+
+            n_modes = int(circuit.m)
+            n_photons = int(sum(input_state))
+
+            if getattr(layer, "no_bunching", False):
+                dist_size = comb(n_modes, n_photons)
+                valid_states = set(
+                    self._generate_no_bunching_states(n_modes, n_photons)
+                )
+                state_to_index = {
+                    state: idx for idx, state in enumerate(sorted(valid_states))
+                }
+            else:
+                dist_size = comb(n_modes + n_photons - 1, n_photons)
+                state_to_index = None
+                valid_states = None
+
+            return dist_size, state_to_index, valid_states
+
+        # No valid mapping data => this is a configuration error
+        raise RuntimeError(
+            f"Cannot infer state mapping for layer of type {type(layer)!r}. "
+            "Expected a MerlinModule with either a 'computation_process' + "
+            "'simulation_graph' or 'circuit' and 'input_state' attributes."
+        )
 
     def _generate_no_bunching_states(
         self, n_modes: int, n_photons: int
@@ -762,12 +800,12 @@ class MerlinProcessor:
 
     def estimate_required_shots_per_input(
         self,
-        layer: nn.Module,
+        layer: MerlinModule,
         input: torch.Tensor,
         desired_samples_per_input: int,
     ) -> list[int]:
         """
-        Estimate required shots per input row for a QuantumLayer using the
+        Estimate required shots per input row for a MerlinModule using the
         platform's RemoteProcessor estimator (transmittance, filters, etc.).
 
         - Accepts a single vector (shape: [D]) or a batch (shape: [B, D]).
@@ -775,8 +813,10 @@ class MerlinProcessor:
 
         NOTE: This does not submit any cloud jobs; it only uses the estimator.
         """
-        if not hasattr(layer, "export_config") or not callable(layer.export_config):
-            raise TypeError("layer must provide export_config() like QuantumLayer")
+        if not hasattr(layer, "export_config") or not callable(
+            cast(Any, layer).export_config
+        ):
+            raise TypeError("layer must provide export_config() for shot estimation")
 
         # Normalize input to [B, D]
         if input.dim() == 1:
@@ -787,7 +827,7 @@ class MerlinProcessor:
             raise ValueError("input must be 1D or 2D tensor")
 
         # Prepare a child RemoteProcessor mirroring user's processor (token/proxies)
-        config = layer.export_config()
+        config = cast(Any, layer).export_config()
         child_rp = self._clone_remote_processor(self.remote_processor)
         child_rp.set_circuit(config["circuit"])
 
