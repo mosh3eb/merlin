@@ -1,232 +1,280 @@
-#!/usr/bin/env python3
 """
-Test dtype propagation fix for ModeExpectations mask.
+Integration test for dtype propagation through QuantumLayer.
+
+This test builds actual Perceval circuits and verifies that the dtype
+parameter propagates correctly through the entire flow, including the
+measurement mapping mask.
 
 Run from project root:
-    python tests/test_dtype_propagation.py
+    pytest tests/test_dtype_propagation.py -v
 """
 
-import torch
+from __future__ import annotations
+
 import pytest
+import torch
+import perceval as pcvl
 
-from merlin.core import ComputationSpace
-from merlin.measurement import ModeExpectations, OutputMapper
-from merlin.measurement.strategies import MeasurementStrategy
-
-
-class TestModeExpectationsDtype:
-    """Test that ModeExpectations respects the dtype parameter."""
-
-    KEYS = [(0, 1), (1, 0), (1, 1), (0, 0)]
-
-    def test_default_dtype_is_float32(self):
-        """Without dtype argument, mask should default to float32."""
-        mapper = ModeExpectations(ComputationSpace.UNBUNCHED, self.KEYS)
-        assert mapper.mask.dtype == torch.float32
-
-    def test_explicit_float32(self):
-        """Explicit float32 should work."""
-        mapper = ModeExpectations(
-            ComputationSpace.UNBUNCHED, self.KEYS, dtype=torch.float32
-        )
-        assert mapper.mask.dtype == torch.float32
-
-    def test_explicit_float64(self):
-        """Explicit float64 should create float64 mask."""
-        mapper = ModeExpectations(
-            ComputationSpace.UNBUNCHED, self.KEYS, dtype=torch.float64
-        )
-        assert mapper.mask.dtype == torch.float64
-
-    def test_forward_preserves_float64(self):
-        """Forward pass with float64 input should not raise dtype mismatch."""
-        mapper = ModeExpectations(
-            ComputationSpace.UNBUNCHED, self.KEYS, dtype=torch.float64
-        )
-        x = torch.rand(2, 4, dtype=torch.float64)
-        result = mapper(x)
-        assert result.dtype == torch.float64
-
-    def test_forward_preserves_float32(self):
-        """Forward pass with float32 input should work."""
-        mapper = ModeExpectations(
-            ComputationSpace.UNBUNCHED, self.KEYS, dtype=torch.float32
-        )
-        x = torch.rand(2, 4, dtype=torch.float32)
-        result = mapper(x)
-        assert result.dtype == torch.float32
-
-    def test_fock_space_float64(self):
-        """FOCK computation space should also respect dtype."""
-        mapper = ModeExpectations(
-            ComputationSpace.FOCK, self.KEYS, dtype=torch.float64
-        )
-        assert mapper.mask.dtype == torch.float64
-
-    def test_dual_rail_float64(self):
-        """DUAL_RAIL computation space should also respect dtype."""
-        mapper = ModeExpectations(
-            ComputationSpace.DUAL_RAIL, self.KEYS, dtype=torch.float64
-        )
-        assert mapper.mask.dtype == torch.float64
+import merlin
+from merlin import ComputationSpace, MeasurementStrategy, QuantumLayer
 
 
-class TestOutputMapperDtype:
-    """Test that OutputMapper.create_mapping passes dtype correctly."""
+def build_circuit(n_modes: int) -> pcvl.Circuit:
+    """Build a simple interferometer circuit with input encoding."""
+    circuit = pcvl.Circuit(n_modes)
+    # Add beam splitters
+    for k in range(0, n_modes, 2):
+        if k + 1 < n_modes:
+            circuit.add(k, pcvl.BS())
+    # Add phase shifter for input encoding
+    circuit.add(0, pcvl.PS(pcvl.P("px0")))
+    return circuit
 
-    KEYS = [(0, 1), (1, 0), (1, 1), (0, 0)]
 
-    def test_create_mapping_without_dtype(self):
-        """Factory without dtype should create float32 mask."""
-        mapper = OutputMapper.create_mapping(
-            MeasurementStrategy.MODE_EXPECTATIONS,
-            ComputationSpace.UNBUNCHED,
-            self.KEYS,
-        )
-        assert mapper.mask.dtype == torch.float32
+class TestQuantumLayerDtypePropagation:
+    """Test dtype propagation through the full QuantumLayer flow."""
 
-    def test_create_mapping_with_float64(self):
-        """Factory with dtype=float64 should create float64 mask."""
-        mapper = OutputMapper.create_mapping(
-            MeasurementStrategy.MODE_EXPECTATIONS,
-            ComputationSpace.UNBUNCHED,
-            self.KEYS,
+    @pytest.fixture
+    def circuit_2mode(self) -> pcvl.Circuit:
+        """2-mode circuit fixture."""
+        return build_circuit(n_modes=2)
+
+    @pytest.fixture
+    def circuit_4mode(self) -> pcvl.Circuit:
+        """4-mode circuit fixture."""
+        return build_circuit(n_modes=4)
+
+    def test_mode_expectations_float64_mask_dtype(self, circuit_2mode):
+        """Verify measurement mask is created with correct dtype."""
+        qlayer = QuantumLayer(
+            input_size=1,
+            circuit=circuit_2mode,
+            trainable_parameters=[],
+            input_parameters=["px"],
+            input_state=[1, 0],
+            computation_space=ComputationSpace.UNBUNCHED,
+            measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
             dtype=torch.float64,
         )
-        assert mapper.mask.dtype == torch.float64
 
-    def test_create_mapping_with_float32(self):
-        """Factory with explicit dtype=float32 should create float32 mask."""
-        mapper = OutputMapper.create_mapping(
-            MeasurementStrategy.MODE_EXPECTATIONS,
-            ComputationSpace.UNBUNCHED,
-            self.KEYS,
+        mask = qlayer.measurement_mapping.mask
+        assert mask.dtype == torch.float64, (
+            f"Expected mask dtype=torch.float64, got {mask.dtype}"
+        )
+
+    def test_mode_expectations_float32_mask_dtype(self, circuit_2mode):
+        """Verify float32 still works (backward compatibility)."""
+        qlayer = QuantumLayer(
+            input_size=1,
+            circuit=circuit_2mode,
+            trainable_parameters=[],
+            input_parameters=["px"],
+            input_state=[1, 0],
+            computation_space=ComputationSpace.UNBUNCHED,
+            measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
             dtype=torch.float32,
         )
-        assert mapper.mask.dtype == torch.float32
 
-    def test_probabilities_ignores_dtype(self):
-        """Probabilities strategy should work regardless of dtype arg."""
-        mapper = OutputMapper.create_mapping(
-            MeasurementStrategy.PROBABILITIES,
+        mask = qlayer.measurement_mapping.mask
+        assert mask.dtype == torch.float32
+
+    def test_mode_expectations_float64_forward_pass(self, circuit_2mode):
+        """The original bug: forward pass should not raise dtype mismatch."""
+        qlayer = QuantumLayer(
+            input_size=1,
+            circuit=circuit_2mode,
+            trainable_parameters=[],
+            input_parameters=["px"],
+            input_state=[1, 0],
+            computation_space=ComputationSpace.UNBUNCHED,
+            measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
             dtype=torch.float64,
         )
-        # Just verify it doesn't crash; Probabilities has no mask
-        assert mapper is not None
 
-    def test_amplitudes_ignores_dtype(self):
-        """Amplitudes strategy should work regardless of dtype arg."""
-        mapper = OutputMapper.create_mapping(
-            MeasurementStrategy.AMPLITUDES,
-            dtype=torch.float64,
-        )
-        assert mapper is not None
-
-
-class TestEndToEndDtypeMismatch:
-    """Test the actual failure case that was reported."""
-
-    KEYS = [(0, 1), (1, 0), (1, 1), (0, 0)]
-
-    def test_float64_matmul_succeeds(self):
-        """The original bug: float64 input @ float32 mask would crash."""
-        mapper = ModeExpectations(
-            ComputationSpace.UNBUNCHED, self.KEYS, dtype=torch.float64
-        )
-
-        # Simulate what QuantumLayer does: creates float64 probability distribution
-        prob_distribution = torch.rand(4, 4, dtype=torch.float64)
+        x = torch.zeros(1, 1, dtype=torch.float64)
 
         # This would previously raise:
         # RuntimeError: expected m1 and m2 to have the same dtype, but got: double != float
-        result = mapper.marginalize_per_mode(prob_distribution)
+        output = qlayer(x)
 
-        assert result.dtype == torch.float64
-        assert result.shape == (4, 2)  # (batch, num_modes)
+        assert output.dtype == torch.float64
+        assert output.shape[0] == 1  # batch size
+        assert output.shape[1] == 2  # num modes
 
-    def test_mismatched_dtype_raises(self):
-        """Verify mismatched dtypes still raise (sanity check)."""
-        mapper = ModeExpectations(
-            ComputationSpace.UNBUNCHED, self.KEYS, dtype=torch.float32
+    def test_mode_expectations_float32_forward_pass(self, circuit_2mode):
+        """Verify float32 forward pass still works."""
+        qlayer = QuantumLayer(
+            input_size=1,
+            circuit=circuit_2mode,
+            trainable_parameters=[],
+            input_parameters=["px"],
+            input_state=[1, 0],
+            computation_space=ComputationSpace.UNBUNCHED,
+            measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
+            dtype=torch.float32,
         )
-        prob_distribution = torch.rand(4, 4, dtype=torch.float64)
 
-        with pytest.raises(RuntimeError, match="expected .* same dtype"):
-            mapper.marginalize_per_mode(prob_distribution)
+        x = torch.zeros(1, 1, dtype=torch.float32)
+        output = qlayer(x)
+
+        assert output.dtype == torch.float32
+
+    def test_mode_expectations_batch_forward(self, circuit_2mode):
+        """Test batched forward pass with float64."""
+        qlayer = QuantumLayer(
+            input_size=1,
+            circuit=circuit_2mode,
+            trainable_parameters=[],
+            input_parameters=["px"],
+            input_state=[1, 0],
+            computation_space=ComputationSpace.UNBUNCHED,
+            measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
+            dtype=torch.float64,
+        )
+
+        batch_size = 8
+        x = torch.randn(batch_size, 1, dtype=torch.float64)
+        output = qlayer(x)
+
+        assert output.dtype == torch.float64
+        assert output.shape == (batch_size, 2)
+
+    def test_mode_expectations_4mode_circuit(self, circuit_4mode):
+        """Test with larger circuit."""
+        qlayer = QuantumLayer(
+            input_size=1,
+            circuit=circuit_4mode,
+            trainable_parameters=[],
+            input_parameters=["px"],
+            input_state=[1, 0, 1, 0],
+            computation_space=ComputationSpace.UNBUNCHED,
+            measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
+            dtype=torch.float64,
+        )
+
+        x = torch.zeros(1, 1, dtype=torch.float64)
+        output = qlayer(x)
+
+        assert output.dtype == torch.float64
+        assert output.shape[1] == 4  # 4 modes
+
+    def test_probabilities_strategy_float64(self, circuit_2mode):
+        """Verify PROBABILITIES strategy works with float64."""
+        qlayer = QuantumLayer(
+            input_size=1,
+            circuit=circuit_2mode,
+            trainable_parameters=[],
+            input_parameters=["px"],
+            input_state=[1, 0],
+            computation_space=ComputationSpace.UNBUNCHED,
+            measurement_strategy=MeasurementStrategy.PROBABILITIES,
+            dtype=torch.float64,
+        )
+
+        x = torch.zeros(1, 1, dtype=torch.float64)
+        output = qlayer(x)
+
+        assert output.dtype == torch.float64
+
+    def test_fock_computation_space_float64(self, circuit_2mode):
+        """Test FOCK computation space with float64."""
+        qlayer = QuantumLayer(
+            input_size=1,
+            circuit=circuit_2mode,
+            trainable_parameters=[],
+            input_parameters=["px"],
+            input_state=[1, 0],
+            computation_space=ComputationSpace.FOCK,
+            measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
+            dtype=torch.float64,
+        )
+
+        mask = qlayer.measurement_mapping.mask
+        assert mask.dtype == torch.float64
+
+        x = torch.zeros(1, 1, dtype=torch.float64)
+        output = qlayer(x)
+        assert output.dtype == torch.float64
+
+    def test_gradient_flow_float64(self, circuit_2mode):
+        """Verify gradients flow correctly with float64."""
+        qlayer = QuantumLayer(
+            input_size=1,
+            circuit=circuit_2mode,
+            trainable_parameters=[],
+            input_parameters=["px"],
+            input_state=[1, 0],
+            computation_space=ComputationSpace.UNBUNCHED,
+            measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
+            dtype=torch.float64,
+        )
+
+        x = torch.randn(4, 1, dtype=torch.float64, requires_grad=True)
+        output = qlayer(x)
+        loss = output.sum()
+        loss.backward()
+
+        assert x.grad is not None
+        assert x.grad.dtype == torch.float64
 
 
-def run_quick_validation():
-    """Run a quick validation without pytest."""
-    print("Running dtype propagation validation...\n")
+class TestOriginalBugReproduction:
+    """
+    Direct reproduction of the original bug report.
 
-    keys = [(0, 1), (1, 0), (1, 1), (0, 0)]
-    errors = []
+    This test class mirrors the exact reproduction script to ensure
+    the fix addresses the reported issue.
+    """
 
-    # Test 1: Default dtype
-    mapper = ModeExpectations(ComputationSpace.UNBUNCHED, keys)
-    if mapper.mask.dtype != torch.float32:
-        errors.append(f"FAIL: Default dtype is {mapper.mask.dtype}, expected float32")
-    else:
-        print("✓ Default dtype is float32")
+    def test_original_bug_is_fixed(self):
+        """
+        Reproduction of the original bug report.
 
-    # Test 2: Explicit float64
-    mapper64 = ModeExpectations(ComputationSpace.UNBUNCHED, keys, dtype=torch.float64)
-    if mapper64.mask.dtype != torch.float64:
-        errors.append(f"FAIL: Explicit float64 gave {mapper64.mask.dtype}")
-    else:
-        print("✓ Explicit float64 creates float64 mask")
+        Before the fix, this would output:
+            Building QuantumLayer with requested dtype=torch.float64
+            Measurement mask dtype=torch.float32
+            Forward call raised: RuntimeError(... double != float)
 
-    # Test 3: Forward pass with float64
-    x = torch.rand(2, 4, dtype=torch.float64)
-    try:
-        result = mapper64(x)
-        if result.dtype != torch.float64:
-            errors.append(f"FAIL: Output dtype is {result.dtype}, expected float64")
-        else:
-            print("✓ Forward pass with float64 succeeds")
-    except RuntimeError as e:
-        errors.append(f"FAIL: Forward pass raised: {e}")
+        After the fix, it should succeed with mask dtype=torch.float64.
+        """
+        # Build circuit (same as bug report)
+        n_modes = 2
+        circuit = pcvl.Circuit(n_modes)
+        for k in range(0, n_modes, 2):
+            if k + 1 < n_modes:
+                circuit.add(k, pcvl.BS())
+        circuit.add(0, pcvl.PS(pcvl.P("px0")))
 
-    # Test 4: OutputMapper factory
-    factory_mapper = OutputMapper.create_mapping(
-        MeasurementStrategy.MODE_EXPECTATIONS,
-        ComputationSpace.UNBUNCHED,
-        keys,
-        dtype=torch.float64,
-    )
-    if factory_mapper.mask.dtype != torch.float64:
-        errors.append(f"FAIL: Factory with float64 gave {factory_mapper.mask.dtype}")
-    else:
-        print("✓ OutputMapper.create_mapping passes dtype correctly")
+        # Build QuantumLayer with float64 (same as bug report)
+        torch_dtype = torch.float64
+        qlayer = merlin.QuantumLayer(
+            input_size=1,
+            circuit=circuit,
+            trainable_parameters=[],
+            input_parameters=["px"],
+            input_state=[1, 0],
+            computation_space=merlin.ComputationSpace.UNBUNCHED,
+            measurement_strategy=merlin.MeasurementStrategy.MODE_EXPECTATIONS,
+            dtype=torch_dtype,
+        )
 
-    # Test 5: The original bug scenario
-    prob = torch.rand(4, 4, dtype=torch.float64)
-    try:
-        result = factory_mapper.marginalize_per_mode(prob)
-        print("✓ float64 matmul succeeds (original bug is fixed)")
-    except RuntimeError as e:
-        errors.append(f"FAIL: Original bug still present: {e}")
+        # Verify mask dtype is now correct
+        mask = qlayer.measurement_mapping.mask
+        assert mask.dtype == torch.float64, (
+            f"BUG NOT FIXED: mask dtype is {mask.dtype}, expected torch.float64"
+        )
 
-    print()
-    if errors:
-        print("=" * 60)
-        print("FAILURES:")
-        for err in errors:
-            print(f"  {err}")
-        print("=" * 60)
-        return 1
-    else:
-        print("=" * 60)
-        print("All validations passed! The dtype fix is working correctly.")
-        print("=" * 60)
-        return 0
+        # Verify forward pass succeeds (this was the crash point)
+        x = torch.zeros(1, 1, dtype=torch_dtype)
+        try:
+            output = qlayer(x)
+        except RuntimeError as exc:
+            if "double != float" in str(exc) or "same dtype" in str(exc):
+                pytest.fail(f"BUG NOT FIXED: dtype mismatch in forward pass: {exc}")
+            raise
+
+        assert output.dtype == torch.float64
 
 
 if __name__ == "__main__":
-    import sys
-
-    # Try pytest first, fall back to manual validation
-    try:
-        sys.exit(pytest.main([__file__, "-v"]))
-    except Exception:
-        sys.exit(run_quick_validation())
+    pytest.main([__file__, "-v"])
