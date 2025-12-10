@@ -581,6 +581,7 @@ class QuantumLayer(MerlinModule):
             measurement_strategy,
             self.computation_process.computation_space,
             keys,
+            dtype=self.dtype,
         )
 
     def _init_amplitude_metadata(self) -> None:
