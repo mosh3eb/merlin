@@ -136,10 +136,9 @@ class QuantumLayer(MerlinModule):
             the first positional argument and propagates it through the quantum
             layer; ``input_size`` must not be set in this mode and
             ``n_photons`` must be provided.
-        computation_space : ComputationSpace | str | None, optional
+        computation_space : ComputationSpace | str, optional
             Logical computation subspace to use: one of ``{"fock", "unbunched",
-            "dual_rail"}``. If omitted, defaults to ``UNBUNCHED`` unless
-            overridden by the deprecated ``no_bunching`` kwarg.
+            "dual_rail"}``. If omitted, defaults to ``UNBUNCHED``.
         measurement_strategy : MeasurementStrategy, default: PROBABILITIES
             Output mapping strategy. Supported values include ``PROBABILITIES``,
             ``MODE_EXPECTATIONS`` and ``AMPLITUDES``.
@@ -951,14 +950,13 @@ class QuantumLayer(MerlinModule):
         # Apply measurement mapping (returns tensor of shape [B, output_size])
         return self.measurement_mapping(results)
 
-    def set_sampling_config(self, shots: int | None = None, method: str | None = None):
+    @sanitize_parameters
+    def set_sampling_config(
+        self, shots: int | None = None, sampling_method: str | None = None
+    ):
         """Deprecated: sampling configuration must be provided at call time in `forward`."""
-        warnings.warn(
-            "QuantumLayer.set_sampling_config() is deprecated. "
-            "Provide `shots` and `sampling_method` directly to `forward()`.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        # Fatal deprecation is handled by the sanitize_parameters decorator via registry.
+        return None
 
     def to(self, *args, **kwargs):
         super().to(*args, **kwargs)

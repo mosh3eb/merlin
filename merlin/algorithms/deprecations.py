@@ -59,6 +59,12 @@ DEPRECATION_REGISTRY: dict[
         True,
         None,
     ),
+    # QuantumLayer.set_sampling_config method-level deprecation (fatal)
+    "QuantumLayer.set_sampling_config": (
+        "QuantumLayer.set_sampling_config() is deprecated. Provide 'shots' and 'sampling_method' directly to 'forward()'.",
+        True,
+        None,
+    ),
 }
 
 
@@ -73,6 +79,18 @@ def _collect_deprecations_and_converters(
     warn_msgs: list[str] = []
     raise_msgs: list[str] = []
     converters: list[Callable[[dict[str, Any]], dict[str, Any]]] = []
+
+    # Method-level deprecation without a specific parameter
+    if method_qualname in DEPRECATION_REGISTRY:
+        msg, severity, converter = DEPRECATION_REGISTRY[method_qualname]
+        if msg is not None and severity is not None:
+            base = msg
+            if severity is True:
+                raise_msgs.append(base)
+            elif severity is False:
+                warn_msgs.append(base)
+        if converter is not None:
+            converters.append(converter)
 
     for key in sorted(raw_kwargs.keys()):
         full_name = f"{method_qualname}.{key}"
