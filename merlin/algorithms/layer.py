@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterable, Sequence
-from typing import Any, ClassVar, cast
+from typing import Any, cast
 
 import exqalibur as xqlbr
 import perceval as pcvl
@@ -50,6 +50,7 @@ from ..measurement.strategies import MeasurementStrategy
 from ..pcvl_pytorch.utils import pcvl_to_tensor
 from ..utils.dtypes import complex_dtype_for
 from ..utils.grouping import ModGrouping
+from .deprecations import sanitize_parameters
 from .module import MerlinModule
 
 
@@ -61,25 +62,7 @@ class QuantumLayer(MerlinModule):
     or an :class:Experiment`.
     """
 
-    # Map of deprecated kwargs to (message, raise_error)
-    # If raise_error is True the presence of the deprecated parameter will raise a ValueError.
-    # If raise_error is False the presence will emit a DeprecationWarning but continue.
-    # ClassVar[...] so mypy knows this overrides the base class variable.
-    _deprecated_params: ClassVar[dict[str, tuple[str, bool] | str]] = {
-        "__init__.ansatz": (
-            "Use 'circuit' or 'CircuitBuilder' to define the quantum circuit.",
-            True,
-        ),
-        "__init__.no_bunching": (
-            "The 'no_bunching' keyword is deprecated; prefer selecting the computation_space instead.",
-            False,
-        ),
-        "simple.reservoir_mode": (
-            "The 'reservoir_mode' argument is no longer supported in the 'simple' method.",
-            True,
-        ),
-    }
-
+    @sanitize_parameters
     def __init__(
         self,
         input_size: int | None = None,
@@ -97,12 +80,11 @@ class QuantumLayer(MerlinModule):
         input_parameters: list[str] | None = None,
         # Common parameters
         amplitude_encoding: bool = False,
-        computation_space: ComputationSpace | str | None = None,
+        computation_space: ComputationSpace | str | None = ComputationSpace.UNBUNCHED,
         measurement_strategy: MeasurementStrategy = MeasurementStrategy.PROBABILITIES,
         # device and dtype
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-        **kwargs,
     ):
         """Initialize a QuantumLayer from a builder, a Perceval circuit, or an experiment.
 
@@ -166,8 +148,6 @@ class QuantumLayer(MerlinModule):
         dtype : torch.dtype | None, optional
             Precision for internal tensors (e.g., ``torch.float32``). The matching
             complex dtype is chosen automatically.
-        **kwargs
-            Additional (legacy) keyword arguments.
 
         Raises
         ------
@@ -187,17 +167,12 @@ class QuantumLayer(MerlinModule):
 
         Warns
         -----
-        DeprecationWarning
-            When deprecated keywords (e.g. ``no_bunching``) are supplied.
         UserWarning
             When ``experiment.min_photons_filter`` or ``experiment.detectors`` are
             present (currently ignored).
 
         """
         super().__init__()
-
-        self._validate_kwargs("__init__", kwargs)
-        no_bunching = kwargs.pop("no_bunching", None)
 
         self.device = device
         self.dtype = dtype or torch.float32
@@ -234,24 +209,7 @@ class QuantumLayer(MerlinModule):
             # Defer fixing input_size until converter metadata is available so we can infer it automatically.
             self.input_size = int(input_size) if input_size is not None else None
 
-        # computation_space management - default is UNBUNCHED except if overridden by deprecated no_bunching
-        if computation_space is None:
-            if no_bunching is None:
-                computation_space_value = ComputationSpace.UNBUNCHED
-            else:
-                computation_space_value = ComputationSpace.default(
-                    no_bunching=no_bunching
-                )
-        else:
-            computation_space_value = ComputationSpace.coerce(computation_space)
-        # if no_bunching is provided, check consistency with ComputationSpace
-        derived_no_bunching = computation_space_value is ComputationSpace.UNBUNCHED
-        if no_bunching is not None and no_bunching != derived_no_bunching:
-            raise ValueError(
-                "Incompatible 'no_bunching' value with selected 'computation_space'. "
-            )
-
-        self.computation_space = computation_space_value
+        self.computation_space = ComputationSpace.coerce(computation_space)
 
         if experiment is not None and experiment.input_state is not None:
             if input_state is not None and experiment.input_state != input_state:
@@ -1153,6 +1111,7 @@ class QuantumLayer(MerlinModule):
     # ============================================================================
 
     @classmethod
+    @sanitize_parameters
     def simple(
         cls,
         input_size: int,
@@ -1161,7 +1120,6 @@ class QuantumLayer(MerlinModule):
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
         no_bunching: bool = True,
-        **kwargs,
     ):
         """Create a ready-to-train layer with a 10-mode, 5-photon architecture.
 
@@ -1186,7 +1144,6 @@ class QuantumLayer(MerlinModule):
         Returns:
             QuantumLayer configured with the described architecture.
         """
-        cls._validate_kwargs("simple", kwargs)
 
         n_modes = 10
         n_photons = 5
