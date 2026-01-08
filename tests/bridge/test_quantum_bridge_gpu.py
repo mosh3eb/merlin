@@ -15,7 +15,7 @@ def make_identity_layer(m: int, n_photons: int, device: torch.device) -> Quantum
     return QuantumLayer(
         circuit=c,
         n_photons=n_photons,
-        no_bunching=True,
+        computation_space=ComputationSpace.UNBUNCHED,
         device=device,
         dtype=torch.float32,
         amplitude_encoding=True,
