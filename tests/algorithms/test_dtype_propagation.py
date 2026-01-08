@@ -33,9 +33,9 @@ Run from project root:
 
 from __future__ import annotations
 
+import perceval as pcvl
 import pytest
 import torch
-import perceval as pcvl
 
 import merlin
 from merlin import ComputationSpace, MeasurementStrategy, QuantumLayer
