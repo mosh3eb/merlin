@@ -3,7 +3,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable, Sequence
 from functools import wraps
-from typing import Any
+from typing import Any, TypeVar, cast, overload
 
 from ..core.computation_space import ComputationSpace
 
@@ -93,9 +93,22 @@ def _collect_deprecations_and_converters(
 # (converter defined above and referenced inline in the registry)
 
 
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+@overload
+def sanitize_parameters(func: F) -> F:  # bare decorator usage
+    ...
+
+
+@overload
 def sanitize_parameters(
-    *maybe_processors: Sequence[Callable[[str, dict[str, Any]], dict[str, Any]]],
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    *processors: Callable[[str, dict[str, Any]], dict[str, Any]],
+) -> Callable[[F], F]:  # factory usage with processors
+    ...
+
+
+def sanitize_parameters(*args: Any) -> Any:
     """Decorator to centralize parameter sanitization for method calls.
 
     Usage:
@@ -110,13 +123,13 @@ def sanitize_parameters(
 
     def _build_decorator(
         processors: Sequence[Callable[[str, dict[str, Any]], dict[str, Any]]],
-    ):
+    ) -> Callable[[F], F]:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
-                if not args:
+            def wrapper(*f_args: Any, **kwargs: Any) -> Any:
+                if not f_args:
                     # Defensive: methods should always receive `self` as first arg.
-                    return func(*args, **kwargs)
+                    return func(*f_args, **kwargs)
 
                 # Use __qualname__ to capture Class.method.
                 qual = func.__qualname__
@@ -140,20 +153,17 @@ def sanitize_parameters(
 
                 # 3) Rely on Python's own signature checking to reject unknown kwargs.
 
-                return func(*args, **kwargs)
+                return func(*f_args, **kwargs)
 
             return wrapper
 
-        return decorator
+        return cast(Callable[[F], F], decorator)
 
-    # Detect bare decorator usage: @sanitize_parameters without parentheses
-    if (
-        len(maybe_processors) == 1
-        and callable(maybe_processors[0])
-        and hasattr(maybe_processors[0], "__qualname__")
-    ):
-        func = maybe_processors[0]  # type: ignore[assignment]
-        return _build_decorator([])(func)  # type: ignore[return-value]
+    # Bare decorator usage: @sanitize_parameters
+    if len(args) == 1 and callable(args[0]) and hasattr(args[0], "__qualname__"):
+        func = cast(F, args[0])
+        return _build_decorator([])(func)
 
-    # Normal factory usage with processors
-    return _build_decorator(maybe_processors)
+    # Factory usage: @sanitize_parameters(proc1, proc2, ...)
+    processors = cast(Sequence[Callable[[str, dict[str, Any]], dict[str, Any]]], args)
+    return _build_decorator(processors)
