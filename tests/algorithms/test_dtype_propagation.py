@@ -53,6 +53,40 @@ def build_circuit(n_modes: int) -> pcvl.Circuit:
     return circuit
 
 
+def build_circuit_no_params(n_modes: int) -> pcvl.Circuit:
+    """
+    Build a simple interferometer circuit with NO symbolic parameters.
+
+    This is important for amplitude_encoding=True tests: amplitude encoding
+    provides a complex statevector input, and we don't want any classical
+    input parameter specs to be required by CircuitConverter.
+    """
+    circuit = pcvl.Circuit(n_modes)
+    for k in range(0, n_modes, 2):
+        if k + 1 < n_modes:
+            circuit.add(k, pcvl.BS())
+    # Fixed phase (numeric), not a Perceval Parameter
+    circuit.add(0, pcvl.PS(0.0))
+    return circuit
+
+
+def _basis_size_from_layer(layer: QuantumLayer) -> int:
+    """
+    Basis size resolution for AMPLITUDES/amplitude-encoding path.
+
+    Documented usage uses `len(layer.output_keys)`. Keep defensive.
+    """
+    if hasattr(layer, "output_keys") and layer.output_keys is not None:
+        return len(layer.output_keys)
+    mm = getattr(layer, "measurement_mapping", None)
+    if mm is not None and hasattr(mm, "output_keys") and mm.output_keys is not None:
+        return len(mm.output_keys)
+    raise AttributeError(
+        "Could not determine basis size for AMPLITUDES test: "
+        "expected `layer.output_keys` (or `layer.measurement_mapping.output_keys`)."
+    )
+
+
 class TestQuantumLayerDtypePropagation:
     """Test dtype propagation through the full QuantumLayer flow."""
 
@@ -65,6 +99,11 @@ class TestQuantumLayerDtypePropagation:
     def circuit_4mode(self) -> pcvl.Circuit:
         """4-mode circuit fixture."""
         return build_circuit(n_modes=4)
+
+    @pytest.fixture
+    def circuit_2mode_no_params(self) -> pcvl.Circuit:
+        """2-mode circuit fixture with no symbolic parameters (for amplitude encoding)."""
+        return build_circuit_no_params(n_modes=2)
 
     def test_mode_expectations_float64_mask_dtype(self, circuit_2mode):
         """Verify measurement mask is created with correct dtype."""
@@ -238,6 +277,61 @@ class TestQuantumLayerDtypePropagation:
 
         assert x.grad is not None
         assert x.grad.dtype == torch.float64
+
+    def test_amplitudes_amplitude_encoding_float32_outputs_cfloat(
+        self, circuit_2mode_no_params
+    ):
+        """
+        MeasurementStrategy.AMPLITUDES (amplitude_encoding=True):
+        ensure dtype=torch.float32 leads to complex64 (torch.cfloat) amplitudes.
+
+        IMPORTANT: use a circuit with *no symbolic parameters* to avoid requiring
+        classical input specs (e.g. px0) when amplitude encoding is enabled.
+        """
+        layer = QuantumLayer(
+            circuit=circuit_2mode_no_params,
+            n_photons=1,
+            amplitude_encoding=True,
+            measurement_strategy=MeasurementStrategy.AMPLITUDES,
+            dtype=torch.float32,
+        )
+
+        num_states = _basis_size_from_layer(layer)
+        psi_in = torch.randn(num_states, dtype=torch.cfloat)
+        psi_in = psi_in / psi_in.norm()
+
+        psi_out = layer(psi_in)
+
+        assert psi_out.dtype == torch.cfloat, (
+            f"Expected AMPLITUDES output dtype=torch.cfloat, got {psi_out.dtype}"
+        )
+        assert psi_out.shape in {(num_states,), (1, num_states)}
+
+    def test_amplitudes_amplitude_encoding_float64_outputs_cdouble(
+        self, circuit_2mode_no_params
+    ):
+        """
+        MeasurementStrategy.AMPLITUDES (amplitude_encoding=True):
+        ensure dtype=torch.float64 leads to complex128 (torch.cdouble) amplitudes.
+        """
+        layer = QuantumLayer(
+            circuit=circuit_2mode_no_params,
+            n_photons=1,
+            amplitude_encoding=True,
+            measurement_strategy=MeasurementStrategy.AMPLITUDES,
+            dtype=torch.float64,
+        )
+
+        num_states = _basis_size_from_layer(layer)
+        psi_in = torch.randn(num_states, dtype=torch.cdouble)
+        psi_in = psi_in / psi_in.norm()
+
+        psi_out = layer(psi_in)
+
+        assert psi_out.dtype == torch.cdouble, (
+            f"Expected AMPLITUDES output dtype=torch.cdouble, got {psi_out.dtype}"
+        )
+        assert psi_out.shape in {(num_states,), (1, num_states)}
 
 
 class TestOriginalBugReproduction:
