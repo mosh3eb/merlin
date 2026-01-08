@@ -8,7 +8,9 @@ from typing import Any, TypeVar, cast, overload
 from ..core.computation_space import ComputationSpace
 
 
-def _convert_no_bunching_init(kwargs: dict[str, Any]) -> dict[str, Any]:
+def _convert_no_bunching_init(
+    method_qualname: str, kwargs: dict[str, Any]
+) -> dict[str, Any]:
     """Converter for QuantumLayer.__init__ deprecated `no_bunching`.
     Removes `no_bunching`, sets/validates `computation_space`.
     """
@@ -40,7 +42,11 @@ def _convert_no_bunching_init(kwargs: dict[str, Any]) -> dict[str, Any]:
 # - converter: optional callable to sanitize kwargs when the param is present
 DEPRECATION_REGISTRY: dict[
     str,
-    tuple[str | None, bool | None, Callable[[dict[str, Any]], dict[str, Any]] | None],
+    tuple[
+        str | None,
+        bool | None,
+        Callable[[str, dict[str, Any]], dict[str, Any]] | None,
+    ],
 ] = {
     # QuantumLayer.__init__ deprecations
     "QuantumLayer.__init__.ansatz": (
@@ -70,7 +76,11 @@ DEPRECATION_REGISTRY: dict[
 
 def _collect_deprecations_and_converters(
     method_qualname: str, raw_kwargs: dict[str, Any]
-) -> tuple[list[str], list[str], list[Callable[[dict[str, Any]], dict[str, Any]]]]:
+) -> tuple[
+    list[str],
+    list[str],
+    list[Callable[[str, dict[str, Any]], dict[str, Any]]],
+]:
     """Inspect kwargs against the global deprecation registry and return:
     - warn messages (non-fatal deprecations),
     - raise messages (fatal deprecations),
@@ -78,7 +88,7 @@ def _collect_deprecations_and_converters(
     """
     warn_msgs: list[str] = []
     raise_msgs: list[str] = []
-    converters: list[Callable[[dict[str, Any]], dict[str, Any]]] = []
+    converters: list[Callable[[str, dict[str, Any]], dict[str, Any]]] = []
 
     # Method-level deprecation without a specific parameter
     if method_qualname in DEPRECATION_REGISTRY:
@@ -163,7 +173,7 @@ def sanitize_parameters(*args: Any, **_kw: Any) -> Any:
 
                 # 2) Apply converters for deprecated params
                 for conv in converters:
-                    kwargs = conv(dict(kwargs))
+                    kwargs = conv(qual, dict(kwargs))
 
                 # 2b) Apply optional processors
                 for proc in processors:
