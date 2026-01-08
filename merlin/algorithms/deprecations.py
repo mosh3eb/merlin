@@ -108,7 +108,7 @@ def sanitize_parameters(
     ...
 
 
-def sanitize_parameters(*args: Any) -> Any:
+def sanitize_parameters(*args: Any, **_kw: Any) -> Any:
     """Decorator to centralize parameter sanitization for method calls.
 
     Usage:
@@ -123,7 +123,7 @@ def sanitize_parameters(*args: Any) -> Any:
 
     def _build_decorator(
         processors: Sequence[Callable[[str, dict[str, Any]], dict[str, Any]]],
-    ) -> Callable[[F], F]:
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             def wrapper(*f_args: Any, **kwargs: Any) -> Any:
@@ -157,11 +157,11 @@ def sanitize_parameters(*args: Any) -> Any:
 
             return wrapper
 
-        return cast(Callable[[F], F], decorator)
+        return decorator
 
     # Bare decorator usage: @sanitize_parameters
     if len(args) == 1 and callable(args[0]) and hasattr(args[0], "__qualname__"):
-        func = cast(F, args[0])
+        func = cast(Callable[..., Any], args[0])
         return _build_decorator([])(func)
 
     # Factory usage: @sanitize_parameters(proc1, proc2, ...)
