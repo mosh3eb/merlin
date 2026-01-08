@@ -80,7 +80,7 @@ class QuantumLayer(MerlinModule):
         input_parameters: list[str] | None = None,
         # Common parameters
         amplitude_encoding: bool = False,
-        computation_space: ComputationSpace | str | None = ComputationSpace.UNBUNCHED,
+        computation_space: ComputationSpace | str = ComputationSpace.UNBUNCHED,
         measurement_strategy: MeasurementStrategy = MeasurementStrategy.PROBABILITIES,
         # device and dtype
         device: torch.device | None = None,
