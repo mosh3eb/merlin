@@ -69,7 +69,7 @@ class MerlinModule(nn.Module):
         """Return True if this layer should be offloaded under current policy."""
         return self.supports_offload() and not self.force_local
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         # execution policy: when True, always simulate locally (do not offload)
