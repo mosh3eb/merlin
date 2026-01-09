@@ -61,7 +61,7 @@ DEPRECATION_REGISTRY: dict[
     ),
     # QuantumLayer.simple deprecations
     "QuantumLayer.simple.reservoir_mode": (
-        "The 'reservoir_mode' argument is no longer supported in the 'simple' method.",
+        "The 'reservoir_mode' argument is no longer supported in the 'simple' method. Use torch tooling to freeze weights when needed, e.g., call layer.requires_grad_(False).",
         True,
         None,
     ),
