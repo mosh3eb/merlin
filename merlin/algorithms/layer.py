@@ -48,9 +48,9 @@ from ..measurement.detectors import DetectorTransform, resolve_detectors
 from ..measurement.photon_loss import PhotonLossTransform, resolve_photon_loss
 from ..measurement.strategies import MeasurementStrategy
 from ..pcvl_pytorch.utils import pcvl_to_tensor
+from ..utils.deprecations import sanitize_parameters
 from ..utils.dtypes import complex_dtype_for
 from ..utils.grouping import ModGrouping
-from .deprecations import sanitize_parameters
 from .module import MerlinModule
 
 
