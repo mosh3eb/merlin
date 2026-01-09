@@ -1118,7 +1118,7 @@ class QuantumLayer(MerlinModule):
         output_size: int | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-        no_bunching: bool = True,
+        computation_space: ComputationSpace | str = ComputationSpace.UNBUNCHED,
     ):
         """Create a ready-to-train layer with a 10-mode, 5-photon architecture.
 
@@ -1138,7 +1138,7 @@ class QuantumLayer(MerlinModule):
             output_size: Optional classical output width.
             device: Optional target device for tensors.
             dtype: Optional tensor dtype.
-            no_bunching: Whether to restrict to states without photon bunching.
+            computation_space: Logical computation subspace; one of {"fock", "unbunched", "dual_rail"}.
 
         Returns:
             QuantumLayer configured with the described architecture.
@@ -1214,10 +1214,6 @@ class QuantumLayer(MerlinModule):
                 f"{total_trainable} trainable parameters but {expected_trainable} were expected."
             )
 
-        # Translate legacy no_bunching argument into the computation_space enum to
-        # avoid triggering deprecation in QuantumLayer.__init__ when callers use
-        # the `simple` convenience constructor. If no_bunching was not provided
-        # (None), let QuantumLayer decide the default.
         quantum_layer_kwargs = {
             "input_size": input_size,
             "builder": builder,
@@ -1225,12 +1221,8 @@ class QuantumLayer(MerlinModule):
             "measurement_strategy": MeasurementStrategy.PROBABILITIES,
             "device": device,
             "dtype": dtype,
+            "computation_space": computation_space,
         }
-
-        if no_bunching is not None:
-            quantum_layer_kwargs["computation_space"] = ComputationSpace.default(
-                no_bunching=bool(no_bunching)
-            )
 
         # mypy: quantum_layer_kwargs is constructed dynamically; cast to satisfy
         # the type checker that keys match the constructor signature.

@@ -60,6 +60,11 @@ DEPRECATION_REGISTRY: dict[
         _convert_no_bunching_init,
     ),
     # QuantumLayer.simple deprecations
+    "QuantumLayer.simple.no_bunching": (
+        "The 'no_bunching' keyword is deprecated; prefer selecting the computation_space instead.",
+        False,
+        _convert_no_bunching_init,
+    ),
     "QuantumLayer.simple.reservoir_mode": (
         "The 'reservoir_mode' argument is no longer supported in the 'simple' method. Use torch tooling to freeze weights when needed, e.g., call layer.requires_grad_(False).",
         True,
