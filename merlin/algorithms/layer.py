@@ -46,7 +46,10 @@ from ..measurement import OutputMapper
 from ..measurement.autodiff import AutoDiffProcess
 from ..measurement.detectors import DetectorTransform, resolve_detectors
 from ..measurement.photon_loss import PhotonLossTransform, resolve_photon_loss
-from ..measurement.strategies import MeasurementStrategy
+from ..measurement.strategies import (
+    MeasurementStrategy,
+    resolve_measurement_strategy,
+)
 from ..pcvl_pytorch.utils import pcvl_to_tensor
 from ..utils.deprecations import sanitize_parameters
 from ..utils.dtypes import complex_dtype_for
@@ -927,26 +930,16 @@ class QuantumLayer(MerlinModule):
                     ),
                     amplitudes,
                 )
-        if self.measurement_strategy in (
-            MeasurementStrategy.PROBABILITIES,
-            MeasurementStrategy.MODE_EXPECTATIONS,
-        ):
-            distribution = self._apply_photon_loss_transform(distribution)
-            distribution = self._apply_detector_transform(distribution)
-
-            # Apply sampling if requested
-            if apply_sampling and effective_shots > 0:
-                results = adp.sampling_noise.pcvl_sampler(distribution, effective_shots)
-            else:
-                results = distribution
-
-        # For MeasurementStrategy.AMPLITUDES, bypass detectors and sampling
-        else:
-            if apply_sampling:
-                raise RuntimeError(
-                    "Sampling cannot be applied when measurement_strategy=MeasurementStrategy.AMPLITUDES."
-                )
-            results = amplitudes
+        strategy = resolve_measurement_strategy(self.measurement_strategy)
+        results = strategy.process(
+            distribution=distribution,
+            amplitudes=amplitudes,
+            apply_sampling=apply_sampling,
+            effective_shots=effective_shots,
+            sample_fn=adp.sampling_noise.pcvl_sampler,
+            apply_photon_loss=self._apply_photon_loss_transform,
+            apply_detectors=self._apply_detector_transform,
+        )
 
         # Apply measurement mapping (returns tensor of shape [B, output_size])
         return self.measurement_mapping(results)
