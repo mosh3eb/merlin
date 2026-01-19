@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterable, Sequence
+from contextlib import contextmanager
 from typing import Any, cast
 
 import perceval as pcvl
@@ -46,6 +47,13 @@ from ..measurement.autodiff import AutoDiffProcess
 from ..measurement.detectors import DetectorTransform
 from ..measurement.photon_loss import PhotonLossTransform
 from ..measurement.strategies import MeasurementStrategy
+from ..measurement.detectors import DetectorTransform, resolve_detectors
+from ..measurement.photon_loss import PhotonLossTransform, resolve_photon_loss
+from ..measurement.strategies import (
+    MeasurementStrategy,
+    resolve_measurement_strategy,
+)
+from ..pcvl_pytorch.utils import pcvl_to_tensor
 from ..utils.deprecations import sanitize_parameters
 from ..utils.grouping import ModGrouping
 from .layer_utils import (
@@ -639,86 +647,42 @@ class QuantumLayer(MerlinModule):
             - sampling_method (str): e.g. "multinomial".
         """
 
+        # Phase 1: Input handling (amplitude vs. classical).
         inputs = list(input_parameters)
         amplitude_input: torch.Tensor | None = None
         original_input_state = None
 
         if self.amplitude_encoding:
-            if not inputs:
-                raise ValueError(
-                    "QuantumLayer configured with amplitude_encoding=True expects an amplitude tensor input."
-                )
-            # verify that inputs is of the shape of layer.compute_graph.mapped_keys
-            amplitude_input = self._validate_amplitude_input(inputs.pop(0))
-            original_input_state = getattr(
-                self.computation_process, "input_state", None
+            amplitude_input, inputs, original_input_state = (
+                self._prepare_amplitude_input(inputs)
             )
-            # amplitude_input becomes the new input_state
-            self.set_input_state(amplitude_input)
 
         # classical_inputs = [
         #    tensor for tensor in inputs if isinstance(tensor, torch.Tensor)
         # ]
 
-        # Prepare circuit parameters and any remaining classical inputs
-        params = self.prepare_parameters(inputs)
-        # Track batch width across classical inputs so we can route superposed tensors through the batched path.
-        parameter_batch_dim = 0
-        for tensor in params:
-            if isinstance(tensor, torch.Tensor) and tensor.dim() > 1:
-                batch = tensor.shape[0]
-                if parameter_batch_dim and batch != parameter_batch_dim:
-                    raise ValueError(
-                        "Inconsistent batch dimensions across classical input parameters."
-                    )
-                parameter_batch_dim = batch
-        # TODO: input_state should support StateVector
-        raw_inferred_state = getattr(self.computation_process, "input_state", None)
-        # normalize the retrieved input_state to an optional tensor an
-        inferred_state: torch.Tensor | None
-        if isinstance(raw_inferred_state, torch.Tensor):
-            inferred_state = raw_inferred_state
-        else:
-            inferred_state = None
+        # Phase 2: Parameter assembly for circuit execution.
+        params, parameter_batch_dim = self._prepare_classical_parameters(inputs)
+        # Phase 3: Resolve computation path and evaluate the circuit.
         amplitudes: torch.Tensor
 
-        # TODO: challenge the need for trying/finally here
-        try:
-            if self.amplitude_encoding:
-                # raise error if amplitude encoding finds a non tensor state
-                if inferred_state is None:
-                    raise TypeError(
-                        "Amplitude encoding requires the computation process input_state to be a tensor."
-                    )
-                # we always use the parallel ebs computation path for amplitude encoding to enable batching
-                if simultaneous_processes is not None:
-                    batch_size = simultaneous_processes
-                else:
-                    batch_size = (
-                        inferred_state.dim() == 1 and 1 or inferred_state.shape[0]
-                    )
-                amplitudes = self.computation_process.compute_ebs_simultaneously(
-                    params, simultaneous_processes=batch_size
-                )
-            elif isinstance(inferred_state, torch.Tensor):
-                # otherwise the incremental EBS path allowing batch on input parameters
-                if parameter_batch_dim:
-                    # Classical inputs are batched: reuse the EBS batching kernel to propagate all coefficients at once.
-                    chunk = simultaneous_processes or inferred_state.shape[-1]
-                    amplitudes = self.computation_process.compute_ebs_simultaneously(
-                        params, simultaneous_processes=chunk
-                    )
-                else:
-                    amplitudes = self.computation_process.compute_superposition_state(
-                        params
-                    )
+        with self._temporary_input_state(amplitude_input, original_input_state):
+            # TODO: input_state should support StateVector
+            raw_inferred_state = getattr(self.computation_process, "input_state", None)
+            # normalize the retrieved input_state to an optional tensor
+            inferred_state: torch.Tensor | None
+            if isinstance(raw_inferred_state, torch.Tensor):
+                inferred_state = raw_inferred_state
             else:
-                amplitudes = self.computation_process.compute(params)
-        finally:
-            if amplitude_input is not None and original_input_state is not None:
-                self.set_input_state(original_input_state)
+                inferred_state = None
+            amplitudes = self._compute_amplitudes(
+                params,
+                inferred_state=inferred_state,
+                parameter_batch_dim=parameter_batch_dim,
+                simultaneous_processes=simultaneous_processes,
+            )
 
-        # Determine gradient needs
+        # Phase 4: Configure sampling/autodiff.
         needs_gradient = (
             self.training
             and torch.is_grad_enabled()
@@ -738,12 +702,65 @@ class QuantumLayer(MerlinModule):
             needs_gradient, apply_sampling, requested_shots
         )
 
-        # Convert amplitudes to probabilities if needed
+        # Phase 5: Convert and normalize amplitudes.
         if isinstance(amplitudes, tuple):
             amplitudes = amplitudes[1]
         elif not isinstance(amplitudes, torch.Tensor):
             raise TypeError(f"Unexpected amplitudes type: {type(amplitudes)}")
 
+        distribution, amplitudes = self._renormalize_distribution_and_amplitudes(
+            amplitudes
+        )
+        # Phase 6: Measurement strategy dispatch and output mapping.
+        strategy = resolve_measurement_strategy(self.measurement_strategy)
+        results = strategy.process(
+            distribution=distribution,
+            amplitudes=amplitudes,
+            apply_sampling=apply_sampling,
+            effective_shots=effective_shots,
+            sample_fn=adp.sampling_noise.pcvl_sampler,
+            apply_photon_loss=self._apply_photon_loss_transform,
+            apply_detectors=self._apply_detector_transform,
+        )
+
+        # Apply measurement mapping (returns tensor of shape [B, output_size])
+        return self.measurement_mapping(results)
+
+    def _compute_amplitudes(
+        self,
+        params: list[torch.Tensor],
+        *,
+        inferred_state: torch.Tensor | None,
+        parameter_batch_dim: int,
+        simultaneous_processes: int | None,
+    ) -> torch.Tensor:
+        """Select the computation path based on the encoding mode and input state."""
+        if self.amplitude_encoding:
+            if inferred_state is None:
+                raise TypeError(
+                    "Amplitude encoding requires the computation process input_state to be a tensor."
+                )
+            batch_size = (
+                simultaneous_processes
+                if simultaneous_processes is not None
+                else (1 if inferred_state.dim() == 1 else inferred_state.shape[0])
+            )
+            return self.computation_process.compute_ebs_simultaneously(
+                params, simultaneous_processes=batch_size
+            )
+        if isinstance(inferred_state, torch.Tensor):
+            if parameter_batch_dim:
+                chunk = simultaneous_processes or inferred_state.shape[-1]
+                return self.computation_process.compute_ebs_simultaneously(
+                    params, simultaneous_processes=chunk
+                )
+            return self.computation_process.compute_superposition_state(params)
+        return self.computation_process.compute(params)
+
+    def _renormalize_distribution_and_amplitudes(
+        self, amplitudes: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return probability distribution and renormalized amplitudes."""
         # even in amplitude mode, we do need to calculation distribution for renormalization
         # of the amplitudes
         distribution = amplitudes.real**2 + amplitudes.imag**2
@@ -772,29 +789,53 @@ class QuantumLayer(MerlinModule):
                     ),
                     amplitudes,
                 )
-        if self.measurement_strategy in (
-            MeasurementStrategy.PROBABILITIES,
-            MeasurementStrategy.MODE_EXPECTATIONS,
-        ):
-            distribution = self._apply_photon_loss_transform(distribution)
-            distribution = self._apply_detector_transform(distribution)
 
-            # Apply sampling if requested
-            if apply_sampling and effective_shots > 0:
-                results = adp.sampling_noise.pcvl_sampler(distribution, effective_shots)
-            else:
-                results = distribution
+        return distribution, amplitudes
 
-        # For MeasurementStrategy.AMPLITUDES, bypass detectors and sampling
-        else:
-            if apply_sampling:
-                raise RuntimeError(
-                    "Sampling cannot be applied when measurement_strategy=MeasurementStrategy.AMPLITUDES."
-                )
-            results = amplitudes
+    def _prepare_amplitude_input(
+        self, inputs: list[torch.Tensor]
+    ) -> tuple[torch.Tensor, list[torch.Tensor], torch.Tensor | None]:
+        """Validate amplitude-encoded input and return remaining inputs."""
+        if not inputs:
+            raise ValueError(
+                "QuantumLayer configured with amplitude_encoding=True expects an amplitude tensor input."
+            )
+        amplitude_input = self._validate_amplitude_input(inputs[0])
+        original_input_state = getattr(self.computation_process, "input_state", None)
+        return amplitude_input, inputs[1:], original_input_state
 
-        # Apply measurement mapping (returns tensor of shape [B, output_size])
-        return self.measurement_mapping(results)
+    @contextmanager
+    def _temporary_input_state(
+        self,
+        amplitude_input: torch.Tensor | None,
+        original_input_state: torch.Tensor | None,
+    ):
+        if amplitude_input is None:
+            yield
+            return
+        self.set_input_state(amplitude_input)
+        try:
+            yield
+        finally:
+            if original_input_state is not None:
+                self.set_input_state(original_input_state)
+
+    def _prepare_classical_parameters(
+        self, inputs: list[torch.Tensor]
+    ) -> tuple[list[torch.Tensor], int]:
+        """Prepare parameter list and return inferred batch dimension for classical inputs."""
+        params = self.prepare_parameters(inputs)
+        # Track batch width across classical inputs so we can route superposed tensors through the batched path.
+        parameter_batch_dim = 0
+        for tensor in params:
+            if isinstance(tensor, torch.Tensor) and tensor.dim() > 1:
+                batch = tensor.shape[0]
+                if parameter_batch_dim and batch != parameter_batch_dim:
+                    raise ValueError(
+                        "Inconsistent batch dimensions across classical input parameters."
+                    )
+                parameter_batch_dim = batch
+        return params, parameter_batch_dim
 
     @sanitize_parameters
     def set_sampling_config(
