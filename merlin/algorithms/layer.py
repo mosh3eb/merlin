@@ -28,7 +28,8 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterable, Sequence
-from typing import Any, ClassVar, cast
+from contextlib import contextmanager
+from typing import Any, cast
 
 import exqalibur as xqlbr
 import perceval as pcvl
@@ -46,8 +47,12 @@ from ..measurement import OutputMapper
 from ..measurement.autodiff import AutoDiffProcess
 from ..measurement.detectors import DetectorTransform, resolve_detectors
 from ..measurement.photon_loss import PhotonLossTransform, resolve_photon_loss
-from ..measurement.strategies import MeasurementStrategy
+from ..measurement.strategies import (
+    MeasurementStrategy,
+    resolve_measurement_strategy,
+)
 from ..pcvl_pytorch.utils import pcvl_to_tensor
+from ..utils.deprecations import sanitize_parameters
 from ..utils.dtypes import complex_dtype_for
 from ..utils.grouping import ModGrouping
 from .module import MerlinModule
@@ -61,25 +66,7 @@ class QuantumLayer(MerlinModule):
     or an :class:Experiment`.
     """
 
-    # Map of deprecated kwargs to (message, raise_error)
-    # If raise_error is True the presence of the deprecated parameter will raise a ValueError.
-    # If raise_error is False the presence will emit a DeprecationWarning but continue.
-    # ClassVar[...] so mypy knows this overrides the base class variable.
-    _deprecated_params: ClassVar[dict[str, tuple[str, bool] | str]] = {
-        "__init__.ansatz": (
-            "Use 'circuit' or 'CircuitBuilder' to define the quantum circuit.",
-            True,
-        ),
-        "__init__.no_bunching": (
-            "The 'no_bunching' keyword is deprecated; prefer selecting the computation_space instead.",
-            False,
-        ),
-        "simple.reservoir_mode": (
-            "The 'reservoir_mode' argument is no longer supported in the 'simple' method.",
-            True,
-        ),
-    }
-
+    @sanitize_parameters
     def __init__(
         self,
         input_size: int | None = None,
@@ -97,12 +84,11 @@ class QuantumLayer(MerlinModule):
         input_parameters: list[str] | None = None,
         # Common parameters
         amplitude_encoding: bool = False,
-        computation_space: ComputationSpace | str | None = None,
+        computation_space: ComputationSpace | str = ComputationSpace.UNBUNCHED,
         measurement_strategy: MeasurementStrategy = MeasurementStrategy.PROBABILITIES,
         # device and dtype
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-        **kwargs,
     ):
         """Initialize a QuantumLayer from a builder, a Perceval circuit, or an experiment.
 
@@ -154,10 +140,9 @@ class QuantumLayer(MerlinModule):
             the first positional argument and propagates it through the quantum
             layer; ``input_size`` must not be set in this mode and
             ``n_photons`` must be provided.
-        computation_space : ComputationSpace | str | None, optional
+        computation_space : ComputationSpace | str, optional
             Logical computation subspace to use: one of ``{"fock", "unbunched",
-            "dual_rail"}``. If omitted, defaults to ``UNBUNCHED`` unless
-            overridden by the deprecated ``no_bunching`` kwarg.
+            "dual_rail"}``. If omitted, defaults to ``UNBUNCHED``.
         measurement_strategy : MeasurementStrategy, default: PROBABILITIES
             Output mapping strategy. Supported values include ``PROBABILITIES``,
             ``MODE_EXPECTATIONS`` and ``AMPLITUDES``.
@@ -166,8 +151,6 @@ class QuantumLayer(MerlinModule):
         dtype : torch.dtype | None, optional
             Precision for internal tensors (e.g., ``torch.float32``). The matching
             complex dtype is chosen automatically.
-        **kwargs
-            Additional (legacy) keyword arguments.
 
         Raises
         ------
@@ -187,17 +170,12 @@ class QuantumLayer(MerlinModule):
 
         Warns
         -----
-        DeprecationWarning
-            When deprecated keywords (e.g. ``no_bunching``) are supplied.
         UserWarning
             When ``experiment.min_photons_filter`` or ``experiment.detectors`` are
             present (currently ignored).
 
         """
         super().__init__()
-
-        self._validate_kwargs("__init__", kwargs)
-        no_bunching = kwargs.pop("no_bunching", None)
 
         self.device = device
         self.dtype = dtype or torch.float32
@@ -234,24 +212,7 @@ class QuantumLayer(MerlinModule):
             # Defer fixing input_size until converter metadata is available so we can infer it automatically.
             self.input_size = int(input_size) if input_size is not None else None
 
-        # computation_space management - default is UNBUNCHED except if overridden by deprecated no_bunching
-        if computation_space is None:
-            if no_bunching is None:
-                computation_space_value = ComputationSpace.UNBUNCHED
-            else:
-                computation_space_value = ComputationSpace.default(
-                    no_bunching=no_bunching
-                )
-        else:
-            computation_space_value = ComputationSpace.coerce(computation_space)
-        # if no_bunching is provided, check consistency with ComputationSpace
-        derived_no_bunching = computation_space_value is ComputationSpace.UNBUNCHED
-        if no_bunching is not None and no_bunching != derived_no_bunching:
-            raise ValueError(
-                "Incompatible 'no_bunching' value with selected 'computation_space'. "
-            )
-
-        self.computation_space = computation_space_value
+        self.computation_space = ComputationSpace.coerce(computation_space)
 
         if experiment is not None and experiment.input_state is not None:
             if input_state is not None and experiment.input_state != input_state:
@@ -581,6 +542,7 @@ class QuantumLayer(MerlinModule):
             measurement_strategy,
             self.computation_process.computation_space,
             keys,
+            dtype=self.dtype,
         )
 
     def _init_amplitude_metadata(self) -> None:
@@ -836,86 +798,42 @@ class QuantumLayer(MerlinModule):
             - sampling_method (str): e.g. "multinomial".
         """
 
+        # Phase 1: Input handling (amplitude vs. classical).
         inputs = list(input_parameters)
         amplitude_input: torch.Tensor | None = None
         original_input_state = None
 
         if self.amplitude_encoding:
-            if not inputs:
-                raise ValueError(
-                    "QuantumLayer configured with amplitude_encoding=True expects an amplitude tensor input."
-                )
-            # verify that inputs is of the shape of layer.compute_graph.mapped_keys
-            amplitude_input = self._validate_amplitude_input(inputs.pop(0))
-            original_input_state = getattr(
-                self.computation_process, "input_state", None
+            amplitude_input, inputs, original_input_state = (
+                self._prepare_amplitude_input(inputs)
             )
-            # amplitude_input becomes the new input_state
-            self.set_input_state(amplitude_input)
 
         # classical_inputs = [
         #    tensor for tensor in inputs if isinstance(tensor, torch.Tensor)
         # ]
 
-        # Prepare circuit parameters and any remaining classical inputs
-        params = self.prepare_parameters(inputs)
-        # Track batch width across classical inputs so we can route superposed tensors through the batched path.
-        parameter_batch_dim = 0
-        for tensor in params:
-            if isinstance(tensor, torch.Tensor) and tensor.dim() > 1:
-                batch = tensor.shape[0]
-                if parameter_batch_dim and batch != parameter_batch_dim:
-                    raise ValueError(
-                        "Inconsistent batch dimensions across classical input parameters."
-                    )
-                parameter_batch_dim = batch
-        # TODO: input_state should support StateVector
-        raw_inferred_state = getattr(self.computation_process, "input_state", None)
-        # normalize the retrieved input_state to an optional tensor an
-        inferred_state: torch.Tensor | None
-        if isinstance(raw_inferred_state, torch.Tensor):
-            inferred_state = raw_inferred_state
-        else:
-            inferred_state = None
+        # Phase 2: Parameter assembly for circuit execution.
+        params, parameter_batch_dim = self._prepare_classical_parameters(inputs)
+        # Phase 3: Resolve computation path and evaluate the circuit.
         amplitudes: torch.Tensor
 
-        # TODO: challenge the need for trying/finally here
-        try:
-            if self.amplitude_encoding:
-                # raise error if amplitude encoding finds a non tensor state
-                if inferred_state is None:
-                    raise TypeError(
-                        "Amplitude encoding requires the computation process input_state to be a tensor."
-                    )
-                # we always use the parallel ebs computation path for amplitude encoding to enable batching
-                if simultaneous_processes is not None:
-                    batch_size = simultaneous_processes
-                else:
-                    batch_size = (
-                        inferred_state.dim() == 1 and 1 or inferred_state.shape[0]
-                    )
-                amplitudes = self.computation_process.compute_ebs_simultaneously(
-                    params, simultaneous_processes=batch_size
-                )
-            elif isinstance(inferred_state, torch.Tensor):
-                # otherwise the incremental EBS path allowing batch on input parameters
-                if parameter_batch_dim:
-                    # Classical inputs are batched: reuse the EBS batching kernel to propagate all coefficients at once.
-                    chunk = simultaneous_processes or inferred_state.shape[-1]
-                    amplitudes = self.computation_process.compute_ebs_simultaneously(
-                        params, simultaneous_processes=chunk
-                    )
-                else:
-                    amplitudes = self.computation_process.compute_superposition_state(
-                        params
-                    )
+        with self._temporary_input_state(amplitude_input, original_input_state):
+            # TODO: input_state should support StateVector
+            raw_inferred_state = getattr(self.computation_process, "input_state", None)
+            # normalize the retrieved input_state to an optional tensor
+            inferred_state: torch.Tensor | None
+            if isinstance(raw_inferred_state, torch.Tensor):
+                inferred_state = raw_inferred_state
             else:
-                amplitudes = self.computation_process.compute(params)
-        finally:
-            if amplitude_input is not None and original_input_state is not None:
-                self.set_input_state(original_input_state)
+                inferred_state = None
+            amplitudes = self._compute_amplitudes(
+                params,
+                inferred_state=inferred_state,
+                parameter_batch_dim=parameter_batch_dim,
+                simultaneous_processes=simultaneous_processes,
+            )
 
-        # Determine gradient needs
+        # Phase 4: Configure sampling/autodiff.
         needs_gradient = (
             self.training
             and torch.is_grad_enabled()
@@ -935,12 +853,65 @@ class QuantumLayer(MerlinModule):
             needs_gradient, apply_sampling, requested_shots
         )
 
-        # Convert amplitudes to probabilities if needed
+        # Phase 5: Convert and normalize amplitudes.
         if isinstance(amplitudes, tuple):
             amplitudes = amplitudes[1]
         elif not isinstance(amplitudes, torch.Tensor):
             raise TypeError(f"Unexpected amplitudes type: {type(amplitudes)}")
 
+        distribution, amplitudes = self._renormalize_distribution_and_amplitudes(
+            amplitudes
+        )
+        # Phase 6: Measurement strategy dispatch and output mapping.
+        strategy = resolve_measurement_strategy(self.measurement_strategy)
+        results = strategy.process(
+            distribution=distribution,
+            amplitudes=amplitudes,
+            apply_sampling=apply_sampling,
+            effective_shots=effective_shots,
+            sample_fn=adp.sampling_noise.pcvl_sampler,
+            apply_photon_loss=self._apply_photon_loss_transform,
+            apply_detectors=self._apply_detector_transform,
+        )
+
+        # Apply measurement mapping (returns tensor of shape [B, output_size])
+        return self.measurement_mapping(results)
+
+    def _compute_amplitudes(
+        self,
+        params: list[torch.Tensor],
+        *,
+        inferred_state: torch.Tensor | None,
+        parameter_batch_dim: int,
+        simultaneous_processes: int | None,
+    ) -> torch.Tensor:
+        """Select the computation path based on the encoding mode and input state."""
+        if self.amplitude_encoding:
+            if inferred_state is None:
+                raise TypeError(
+                    "Amplitude encoding requires the computation process input_state to be a tensor."
+                )
+            batch_size = (
+                simultaneous_processes
+                if simultaneous_processes is not None
+                else (1 if inferred_state.dim() == 1 else inferred_state.shape[0])
+            )
+            return self.computation_process.compute_ebs_simultaneously(
+                params, simultaneous_processes=batch_size
+            )
+        if isinstance(inferred_state, torch.Tensor):
+            if parameter_batch_dim:
+                chunk = simultaneous_processes or inferred_state.shape[-1]
+                return self.computation_process.compute_ebs_simultaneously(
+                    params, simultaneous_processes=chunk
+                )
+            return self.computation_process.compute_superposition_state(params)
+        return self.computation_process.compute(params)
+
+    def _renormalize_distribution_and_amplitudes(
+        self, amplitudes: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return probability distribution and renormalized amplitudes."""
         # even in amplitude mode, we do need to calculation distribution for renormalization
         # of the amplitudes
         distribution = amplitudes.real**2 + amplitudes.imag**2
@@ -969,38 +940,61 @@ class QuantumLayer(MerlinModule):
                     ),
                     amplitudes,
                 )
-        if self.measurement_strategy in (
-            MeasurementStrategy.PROBABILITIES,
-            MeasurementStrategy.MODE_EXPECTATIONS,
-        ):
-            distribution = self._apply_photon_loss_transform(distribution)
-            distribution = self._apply_detector_transform(distribution)
 
-            # Apply sampling if requested
-            if apply_sampling and effective_shots > 0:
-                results = adp.sampling_noise.pcvl_sampler(distribution, effective_shots)
-            else:
-                results = distribution
+        return distribution, amplitudes
 
-        # For MeasurementStrategy.AMPLITUDES, bypass detectors and sampling
-        else:
-            if apply_sampling:
-                raise RuntimeError(
-                    "Sampling cannot be applied when measurement_strategy=MeasurementStrategy.AMPLITUDES."
-                )
-            results = amplitudes
+    def _prepare_amplitude_input(
+        self, inputs: list[torch.Tensor]
+    ) -> tuple[torch.Tensor, list[torch.Tensor], torch.Tensor | None]:
+        """Validate amplitude-encoded input and return remaining inputs."""
+        if not inputs:
+            raise ValueError(
+                "QuantumLayer configured with amplitude_encoding=True expects an amplitude tensor input."
+            )
+        amplitude_input = self._validate_amplitude_input(inputs[0])
+        original_input_state = getattr(self.computation_process, "input_state", None)
+        return amplitude_input, inputs[1:], original_input_state
 
-        # Apply measurement mapping (returns tensor of shape [B, output_size])
-        return self.measurement_mapping(results)
+    @contextmanager
+    def _temporary_input_state(
+        self,
+        amplitude_input: torch.Tensor | None,
+        original_input_state: torch.Tensor | None,
+    ):
+        if amplitude_input is None:
+            yield
+            return
+        self.set_input_state(amplitude_input)
+        try:
+            yield
+        finally:
+            if original_input_state is not None:
+                self.set_input_state(original_input_state)
 
-    def set_sampling_config(self, shots: int | None = None, method: str | None = None):
+    def _prepare_classical_parameters(
+        self, inputs: list[torch.Tensor]
+    ) -> tuple[list[torch.Tensor], int]:
+        """Prepare parameter list and return inferred batch dimension for classical inputs."""
+        params = self.prepare_parameters(inputs)
+        # Track batch width across classical inputs so we can route superposed tensors through the batched path.
+        parameter_batch_dim = 0
+        for tensor in params:
+            if isinstance(tensor, torch.Tensor) and tensor.dim() > 1:
+                batch = tensor.shape[0]
+                if parameter_batch_dim and batch != parameter_batch_dim:
+                    raise ValueError(
+                        "Inconsistent batch dimensions across classical input parameters."
+                    )
+                parameter_batch_dim = batch
+        return params, parameter_batch_dim
+
+    @sanitize_parameters
+    def set_sampling_config(
+        self, shots: int | None = None, sampling_method: str | None = None
+    ):
         """Deprecated: sampling configuration must be provided at call time in `forward`."""
-        warnings.warn(
-            "QuantumLayer.set_sampling_config() is deprecated. "
-            "Provide `shots` and `sampling_method` directly to `forward()`.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        # Fatal deprecation is handled by the sanitize_parameters decorator via registry.
+        return None
 
     def to(self, *args, **kwargs):
         super().to(*args, **kwargs)
@@ -1153,6 +1147,7 @@ class QuantumLayer(MerlinModule):
     # ============================================================================
 
     @classmethod
+    @sanitize_parameters
     def simple(
         cls,
         input_size: int,
@@ -1160,8 +1155,7 @@ class QuantumLayer(MerlinModule):
         output_size: int | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-        no_bunching: bool = True,
-        **kwargs,
+        computation_space: ComputationSpace | str = ComputationSpace.UNBUNCHED,
     ):
         """Create a ready-to-train layer with a 10-mode, 5-photon architecture.
 
@@ -1181,12 +1175,11 @@ class QuantumLayer(MerlinModule):
             output_size: Optional classical output width.
             device: Optional target device for tensors.
             dtype: Optional tensor dtype.
-            no_bunching: Whether to restrict to states without photon bunching.
+            computation_space: Logical computation subspace; one of {"fock", "unbunched", "dual_rail"}.
 
         Returns:
             QuantumLayer configured with the described architecture.
         """
-        cls._validate_kwargs("simple", kwargs)
 
         n_modes = 10
         n_photons = 5
@@ -1258,10 +1251,6 @@ class QuantumLayer(MerlinModule):
                 f"{total_trainable} trainable parameters but {expected_trainable} were expected."
             )
 
-        # Translate legacy no_bunching argument into the computation_space enum to
-        # avoid triggering deprecation in QuantumLayer.__init__ when callers use
-        # the `simple` convenience constructor. If no_bunching was not provided
-        # (None), let QuantumLayer decide the default.
         quantum_layer_kwargs = {
             "input_size": input_size,
             "builder": builder,
@@ -1269,12 +1258,8 @@ class QuantumLayer(MerlinModule):
             "measurement_strategy": MeasurementStrategy.PROBABILITIES,
             "device": device,
             "dtype": dtype,
+            "computation_space": computation_space,
         }
-
-        if no_bunching is not None:
-            quantum_layer_kwargs["computation_space"] = ComputationSpace.default(
-                no_bunching=bool(no_bunching)
-            )
 
         # mypy: quantum_layer_kwargs is constructed dynamically; cast to satisfy
         # the type checker that keys match the constructor signature.
