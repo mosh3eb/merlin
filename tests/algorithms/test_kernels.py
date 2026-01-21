@@ -743,15 +743,6 @@ class TestKernelCircuitBuilder:
         with pytest.raises(ValueError, match="Input size must be specified"):
             builder.n_modes(4).build_feature_map()
 
-    def test_builder_bandwidth_tuning(self):
-        """Test builder with bandwidth tuning enabled."""
-        builder = KernelCircuitBuilder()
-        feature_map = (
-            builder.input_size(2).n_modes(4).bandwidth_tuning(True).build_feature_map()
-        )
-
-        assert feature_map.input_size == 2
-
 
 class TestKernelConstructionConsistency:
     """Test integration using the supported circuit construction APIs."""

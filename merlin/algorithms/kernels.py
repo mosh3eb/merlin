@@ -457,7 +457,6 @@ class KernelCircuitBuilder:
         self._n_photons: int | None = None
         self._dtype: str | torch.dtype = torch.float32
         self._device: torch.device | None = None
-        self._use_bandwidth_tuning: bool = False
         self._angle_encoding_scale: float = 1.0
         self._trainable: bool = True
         self._trainable_prefix: str = "phi"
@@ -497,11 +496,6 @@ class KernelCircuitBuilder:
     def device(self, device: torch.device) -> "KernelCircuitBuilder":
         """Set the computation device."""
         self._device = device
-        return self
-
-    def bandwidth_tuning(self, enabled: bool = True) -> "KernelCircuitBuilder":
-        """Enable or disable bandwidth tuning."""
-        self._use_bandwidth_tuning = enabled
         return self
 
     def angle_encoding(
