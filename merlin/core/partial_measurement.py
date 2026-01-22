@@ -25,6 +25,7 @@ from dataclasses import dataclass
 import torch
 
 from merlin.core.state_vector import StateVector
+from merlin.utils.grouping import LexGrouping, ModGrouping
 
 DetectorTransformOutput = list[
     dict[tuple[int | None, ...], list[tuple[torch.Tensor, torch.Tensor]]]
@@ -72,6 +73,7 @@ class PartialMeasurement:
         self.branches = branches
         self.measured_modes = measured_modes
         self.unmeasured_modes = unmeasured_modes
+        self.grouping: LexGrouping | ModGrouping | None = None
 
         self.verify_branches_order()
 
@@ -94,7 +96,10 @@ class PartialMeasurement:
     def probability_tensor_shape(self) -> tuple[int, int]:
         """Return the expected (batch, n_outcomes) shape for the probability tensor."""
         batch = self._as_batch(self.branches[0].probability).shape[0]
-        return (batch, len(self.branches))
+        if self.grouping is None:
+            return (batch, len(self.branches))
+        else:
+            return (batch, self.grouping.output_size)
 
     @property
     def n_measured_modes(self) -> int:
@@ -107,7 +112,8 @@ class PartialMeasurement:
     @property
     def tensor(self) -> torch.Tensor:
         """
-        Return the probabilities of all branches as a tensor of shape (batch, n_outcomes).
+        Return the probabilities of all branches as a tensor of shape (batch, n_branches). unless a grouping was set
+        in which case, the probabilities are grouped and the returned tensor has shape (batch, grouping_output_size).
 
         This property assumes that all branches are ordered lexicographically by their outcomes
         so the stacking of probabilities follows the same order.
@@ -115,10 +121,35 @@ class PartialMeasurement:
         probas = torch.stack(
             [self._as_batch(branch.probability) for branch in self.branches], dim=1
         )
-        assert self.probability_tensor_shape == probas.shape, (
-            "Inconsistent probability tensor shape."
-        )
-        return probas
+        if self.grouping is None:
+            assert self.probability_tensor_shape == probas.shape, (
+                "Inconsistent probability tensor shape."
+            )
+            return probas
+        else:
+            assert self.probability_tensor_shape == (
+                probas.shape[0],
+                self.grouping.output_size,
+            ), "Inconsistent grouped probability tensor shape"
+            return self.grouping(probas)
+
+    @property
+    def probabilities(self) -> torch.Tensor:
+        """
+        Return the probabilities of all branches as a tensor of shape (batch, n_branches) unless a grouping was set
+        in which case, the probabilities are grouped and the returned tensor has shape (batch, grouping_output_size).
+
+        Same property as self.tensor.
+        """
+        return self.tensor
+
+    @property
+    def amplitudes(self):
+        return [branch.amplitudes for branch in self.branches]
+
+    @property
+    def outcomes(self):
+        return [branch.outcome for branch in self.branches]
 
     @staticmethod
     def _as_batch(probability: torch.Tensor) -> torch.Tensor:
@@ -134,6 +165,20 @@ class PartialMeasurement:
             f"probability tensor shape={self.probability_tensor_shape}, "
             f"StateVector shape={self.branches[0].amplitudes.shape})"
         )
+
+    def set_grouping(self, grouping: LexGrouping | ModGrouping | None) -> None:
+        """
+        Set the grouping used to group probabilities.
+
+        Once the grouping is set, the properties `probabilities` and `tensor` return grouped probabilities.
+
+        Args:
+            grouping: Grouping object used to group probabilities.
+        """
+        if grouping is not None:
+            allowed_groupings = [LexGrouping, ModGrouping]
+            assert type(grouping) in allowed_groupings, "Grouping set is not allowed"
+        self.grouping = grouping
 
     @staticmethod
     def from_detector_transform_output(

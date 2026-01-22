@@ -23,9 +23,13 @@
 from dataclasses import FrozenInstanceError
 
 import pytest
+import torch
 
 from merlin.core.computation_space import ComputationSpace
+from merlin.core.partial_measurement import PartialMeasurement
+from merlin.core.state_vector import StateVector
 from merlin.measurement.strategies import MeasurementStrategyV3, MeasurementType
+from merlin.utils.grouping import LexGrouping, ModGrouping
 
 
 class TestMeasurementStrategyV3:
@@ -157,3 +161,59 @@ class TestMeasurementStrategyV3:
             match="All modes are measured",
         ):
             strategy.get_unmeasured_modes(n_modes=3)
+
+    def test_partial_measurement_output(self):
+        """Test that _process_partial_measurement returns a PartialMeasurement object."""
+        strategy = MeasurementStrategyV3.partial(
+            modes=[0, 2],
+        )
+
+        amplitudes = torch.randn(2, 10, dtype=torch.cfloat)
+        state = StateVector(tensor=amplitudes, n_modes=4, n_photons=2)
+        result = strategy.process_measurement(state)
+        assert isinstance(result, PartialMeasurement)
+        assert len(result.branches) > 0
+        assert all(
+            type(branch.amplitudes) is StateVector and branch.amplitudes.n_modes == 2
+            for branch in result.branches
+        )
+        assert result.measured_modes == (0, 2)
+        assert result.unmeasured_modes == (1, 3)
+        assert type(result.tensor) is torch.Tensor and result.tensor.shape[0] == 2
+
+    def test_partial_measurement_grouping(self):
+        """Test that grouping is only applied on probabilities when specified with partial measurement."""
+        strategy_g1 = MeasurementStrategyV3.partial(
+            modes=[0, 1, 3],
+            grouping=LexGrouping(10, 2),
+        )
+        strategy_g2 = MeasurementStrategyV3.partial(
+            modes=[0, 1, 3],
+            grouping=ModGrouping(10, 5),
+        )
+        strategy_no_grouping = MeasurementStrategyV3.partial(
+            modes=[0, 1, 3],
+        )
+
+        amplitudes = torch.randn(3, 10, dtype=torch.cfloat)
+        state = StateVector(tensor=amplitudes, n_modes=4, n_photons=2)
+        result_g1 = strategy_g1.process_measurement(state)
+        result_g2 = strategy_g2.process_measurement(state)
+        result_no_grouping = strategy_no_grouping.process_measurement(state)
+
+        assert type(result_g1) is PartialMeasurement
+        assert type(result_g2) is PartialMeasurement
+        assert type(result_no_grouping) is PartialMeasurement
+        assert result_g1.measured_modes == (0, 1, 3)
+        assert result_g1.unmeasured_modes == (2,)
+        assert type(result_g1.tensor) is torch.Tensor and result_g1.tensor.shape == (
+            3,
+            2,
+        )
+        assert type(result_g2.tensor) is torch.Tensor and result_g2.tensor.shape == (
+            3,
+            5,
+        )
+        assert type(
+            result_no_grouping.tensor
+        ) is torch.Tensor and result_no_grouping.tensor.shape == (3, 10)

@@ -26,9 +26,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
+import perceval as pcvl
 import torch
 
 from merlin.core.computation_space import ComputationSpace
+from merlin.core.partial_measurement import PartialMeasurement
+from merlin.core.state_vector import StateVector
+from merlin.measurement.detectors import DetectorTransform
 from merlin.utils.grouping import LexGrouping, ModGrouping
 
 
@@ -147,13 +151,13 @@ class MeasurementStrategyV3:
 
     type: MeasurementType
     measured_modes: tuple[int, ...]
-    computation_space: ComputationSpace | None = None
+    computation_space: ComputationSpace = ComputationSpace.FOCK
     grouping: LexGrouping | ModGrouping | None = None
 
     @staticmethod
     def partial(
         modes: list[int],
-        computation_space: ComputationSpace,
+        computation_space: ComputationSpace = ComputationSpace.FOCK,
         grouping: LexGrouping | ModGrouping | None = None,
     ) -> "MeasurementStrategyV3":
         """Create a partial measurement on the given mode indices."""
@@ -188,3 +192,44 @@ class MeasurementStrategyV3:
         """Return the complement of the measured modes after validation."""
         self.validate_modes(n_modes)
         return tuple(m for m in range(n_modes) if m not in self.measured_modes)
+
+    def process_measurement(
+        self, state: StateVector
+    ) -> StateVector | torch.Tensor | PartialMeasurement:
+        """Process the measurement on the given state vector according to the strategy."""
+        if self.type == MeasurementType.PARTIAL:
+            return self._process_partial_measurement(state)
+        # Process other measurement types
+        # ...
+        raise NotImplementedError(f"Measurement type {self.type} not implemented.")
+
+    def _process_partial_measurement(self, state: StateVector) -> PartialMeasurement:
+        """Process a partial measurement on the given state vector."""
+        n_modes = state.n_modes
+        self.validate_modes(n_modes)
+
+        # Use detector transform (partial_measurement=True) to get measured probs and unmeasured state
+        keys = (
+            state.basis.enumerate_states()
+        )  # TODO: check if that corresponds to the simulation_keys
+        # Use PNR detectors to stay as general as possible
+        detector_list = [
+            pcvl.Detector.pnr() if m in self.measured_modes else None
+            for m in range(n_modes)
+        ]
+        detector_transform = DetectorTransform(
+            simulation_keys=keys, detectors=detector_list, partial_measurement=True
+        )
+        # Apply transform
+        # Use state.tensor for now, because detector_transform does not support StateVector yet
+        output = detector_transform(state.tensor)
+
+        partial_measurement = PartialMeasurement.from_detector_transform_output(output)
+
+        # Apply grouping (if provided) on probabilities only
+        if self.grouping is not None:
+            partial_measurement.set_grouping(self.grouping)
+
+        # Warning: self.computation_space is not taken into account
+
+        return partial_measurement
