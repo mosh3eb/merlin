@@ -1,10 +1,10 @@
-import torch
 import perceval as pcvl
 import pytest
+import torch
 
+from merlin.core.computation_space import ComputationSpace
 from merlin.core.probability_distribution import ProbabilityDistribution
 from merlin.core.state_vector import StateVector
-from merlin.core.computation_space import ComputationSpace
 
 
 def test_from_tensor_and_normalize_dense():
