@@ -145,7 +145,7 @@ class TestQuantumLayerMeasurementStrategy:
         with pytest.raises(TypeError):
             layer = ML.QuantumLayer(
                 input_size=2,
-                output_size=5, # cannot specify output_size
+                output_size=5,  # cannot specify output_size
                 n_photons=1,
                 builder=builder,
                 measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
