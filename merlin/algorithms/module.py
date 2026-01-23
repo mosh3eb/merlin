@@ -68,7 +68,7 @@ class MerlinModule(nn.Module):
         """Return True if this layer is technically offloadable."""
         return hasattr(self, "export_config") and callable(self.export_config)
 
-    def should_offload(self, _processor=None, _shots=None) -> bool:
+    def should_offload(self) -> bool:
         """Return True if this layer should be offloaded under current policy."""
         return self.supports_offload() and not self.force_local
 

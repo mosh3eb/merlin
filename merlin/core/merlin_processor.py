@@ -9,7 +9,7 @@ import zlib
 from collections.abc import Iterable
 from contextlib import suppress
 from math import comb
-from typing import Any, cast
+from typing import Any, Dict, cast
 
 import numpy as np
 import perceval as pcvl
@@ -17,6 +17,7 @@ import torch
 import torch.nn as nn
 from perceval.algorithm import Sampler
 from perceval.runtime import RemoteJob, RemoteProcessor
+from perceval.runtime.session import ISession
 from torch.futures import Future
 
 from ..algorithms.module import MerlinModule
@@ -46,22 +47,25 @@ class MerlinProcessor:
 
     def __init__(
         self,
-        remote_processor: RemoteProcessor,
+        session: ISession,
         microbatch_size: int = 32,
         timeout: float = 3600.0,
         max_shots_per_call: int | None = None,
         chunk_concurrency: int = 1,
     ):
-        if not isinstance(remote_processor, RemoteProcessor):
-            raise TypeError(
-                f"Expected pcvl.RemoteProcessor, got {type(remote_processor)}"
-            )
+        if not isinstance(session, ISession):
+            raise TypeError(f"Expected pcvl.runtime.ISession, got {type(session)}")
 
-        self.remote_processor = remote_processor
-        self.backend_name = getattr(remote_processor, "name", "unknown")
+        self.session = session
+        self.backend_name = getattr(session, "platform_name", "unknown")
 
-        if hasattr(remote_processor, "available_commands"):
-            self.available_commands = remote_processor.available_commands
+        platform_specs: (
+            Dict
+        ) = self.session.default_rpc_handler.fetch_platform_details().get(
+            "specs", {}
+        )  # TODO: Protect this call properly
+        if hasattr(platform_specs, "available_commands"):
+            self.available_commands = platform_specs.get("available_commands")
             if not self.available_commands:
                 warnings.warn(
                     "Remote processor has no available commands. "
@@ -201,9 +205,11 @@ class MerlinProcessor:
         def _status():
             js = state.get("current_status")
             base = {
-                "state": "COMPLETE"
-                if fut.done() and not js
-                else (js.get("state") if js else "IDLE"),
+                "state": (
+                    "COMPLETE"
+                    if fut.done() and not js
+                    else (js.get("state") if js else "IDLE")
+                ),
                 "progress": js.get("progress") if js else 0.0,
                 "message": js.get("message") if js else None,
                 "chunks_total": state["chunks_total"],
@@ -224,9 +230,7 @@ class MerlinProcessor:
                     # Policy: offload MerlinModule leaves; else run locally
                     if isinstance(layer, MerlinModule):
                         try:
-                            should_offload = bool(
-                                layer.should_offload(self.remote_processor, nsample)
-                            )
+                            should_offload = bool(layer.should_offload())
                         except Exception:
                             should_offload = False
                     else:
@@ -549,7 +553,8 @@ class MerlinProcessor:
         # Build independent RPs (each with its own handler)
         rps: list[RemoteProcessor] = []
         for _ in range(pool_size):
-            rp = self._clone_remote_processor(self.remote_processor)
+            # rp = self._clone_remote_processor(self.remote_processor)
+            rp = self.session.build_remote_processor()
             rp.set_circuit(config["circuit"])
             if config.get("input_state"):
                 input_state = pcvl.BasicState(config["input_state"])
@@ -575,17 +580,17 @@ class MerlinProcessor:
 
     # ---------------- Utilities & mapping ----------------
 
-    def _clone_remote_processor(self, rp: RemoteProcessor) -> RemoteProcessor:
-        """Create a sibling RemoteProcessor sharing auth/endpoint, with its OWN handler (avoid cross-thread sharing)."""
-        # IMPORTANT: do NOT pass rpc_handler=... (avoid sharing handler across threads)
-        return RemoteProcessor(
-            name=rp.name,
-            token=None,  # RemoteConfig pulls token from cache
-            url=rp.get_rpc_handler().url
-            if hasattr(rp.get_rpc_handler(), "url")
-            else None,
-            proxies=rp.proxies,
-        )
+    # def _clone_remote_processor(self, rp: RemoteProcessor) -> RemoteProcessor:
+    #     """Create a sibling RemoteProcessor sharing auth/endpoint, with its OWN handler (avoid cross-thread sharing)."""
+    #     # IMPORTANT: do NOT pass rpc_handler=... (avoid sharing handler across threads)
+    #     return RemoteProcessor(
+    #         name=rp.name,
+    #         token=None,  # RemoteConfig pulls token from cache
+    #         url=rp.get_rpc_handler().url
+    #         if hasattr(rp.get_rpc_handler(), "url")
+    #         else None,
+    #         proxies=rp.proxies,
+    #     )
 
     def _iter_layers_in_order(self, module: nn.Module) -> Iterable[nn.Module]:
         """
@@ -828,7 +833,8 @@ class MerlinProcessor:
 
         # Prepare a child RemoteProcessor mirroring user's processor (token/proxies)
         config = cast(Any, layer).export_config()
-        child_rp = self._clone_remote_processor(self.remote_processor)
+        # child_rp = self._clone_remote_processor(self.remote_processor)
+        child_rp = self.session.build_remote_processor()
         child_rp.set_circuit(config["circuit"])
 
         # Mirror input_state & min_detected_photons if present in the exported config
