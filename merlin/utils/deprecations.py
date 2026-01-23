@@ -65,6 +65,11 @@ DEPRECATION_REGISTRY: dict[
         False,
         _convert_no_bunching_init,
     ),
+    "QuantumLayer.simple.n_params": (
+        "Since merlin >= 0.3, input parameter allocation is automatically inferred from input dimensionality, following Gan et al. (2022) on Fock-space expressivity. Manual control of input/trainable parameters is deprecated.",
+        False,
+        None,
+    ),
     "QuantumLayer.simple.reservoir_mode": (
         "The 'reservoir_mode' argument is no longer supported in the 'simple' method. Use torch tooling to freeze weights when needed, e.g., call layer.requires_grad_(False).",
         True,
@@ -74,6 +79,33 @@ DEPRECATION_REGISTRY: dict[
     "QuantumLayer.set_sampling_config": (
         "QuantumLayer.set_sampling_config() is deprecated. Provide 'shots' and 'sampling_method' directly to 'forward()'.",
         True,
+        None,
+    ),
+    # FeatureMap.simple deprecations
+    "FeatureMap.simple.n_photons": (
+        "Since merlin >= 0.3, the number of photons is automatically inferred from input dimensionality, following Gan et al. (2022) on Fock-space expressivity. Manual control of photons is deprecated.",
+        False,
+        None,
+    ),
+    "FeatureMap.simple.trainable": (
+        "Since merlin >= 0.3, input parameter allocation is automatically inferred from input dimensionality, following Gan et al. (2022) on Fock-space expressivity. Manual control of input/trainable parameters is deprecated.",
+        False,
+        None,
+    ),
+    # FidelityKernel.simple deprecations
+    "FidelityKernel.simple.n_photons": (
+        "Since merlin >= 0.3, the number of photons is automatically inferred from input dimensionality, following Gan et al. (2022) on Fock-space expressivity. Manual control of photons is deprecated.",
+        False,
+        None,
+    ),
+    "FidelityKernel.simple.trainable": (
+        "Since merlin >= 0.3, input parameter allocation is automatically inferred from input dimensionality, following Gan et al. (2022) on Fock-space expressivity. Manual control of input/trainable parameters is deprecated.",
+        False,
+        None,
+    ),
+    "FidelityKernel.simple.input_state": (
+        "Since merlin >= 0.3, The input state is alway going to be a [0,1,0,1,...] state depending on input size.",
+        False,
         None,
     ),
 }
