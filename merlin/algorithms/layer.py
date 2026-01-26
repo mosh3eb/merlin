@@ -28,9 +28,9 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterable, Sequence
+from contextlib import contextmanager
 from typing import Any, cast
 
-import exqalibur as xqlbr
 import perceval as pcvl
 import torch
 import torch.nn as nn
@@ -43,13 +43,27 @@ from ..core.generators import StateGenerator, StatePattern
 from ..core.process import ComputationProcessFactory
 from ..measurement import OutputMapper
 from ..measurement.autodiff import AutoDiffProcess
-from ..measurement.detectors import DetectorTransform, resolve_detectors
-from ..measurement.photon_loss import PhotonLossTransform, resolve_photon_loss
-from ..measurement.strategies import MeasurementStrategy
-from ..pcvl_pytorch.utils import pcvl_to_tensor
+from ..measurement.detectors import DetectorTransform
+from ..measurement.photon_loss import PhotonLossTransform
+from ..measurement.strategies import (
+    MeasurementStrategy,
+    resolve_measurement_strategy,
+)
 from ..utils.deprecations import sanitize_parameters
-from ..utils.dtypes import complex_dtype_for
 from ..utils.grouping import ModGrouping
+from .layer_utils import (
+    InitializationContext,
+    apply_angle_encoding,
+    feature_count_for_prefix,
+    prepare_input_encoding,
+    prepare_input_state,
+    resolve_circuit,
+    setup_noise_and_detectors,
+    split_inputs_by_prefix,
+    validate_and_resolve_circuit_source,
+    validate_encoding_mode,
+    vet_experiment,
+)
 from .module import MerlinModule
 
 
@@ -172,211 +186,127 @@ class QuantumLayer(MerlinModule):
         """
         super().__init__()
 
-        self.device = device
-        self.dtype = dtype or torch.float32
-        self.complex_dtype = complex_dtype_for(self.dtype)
-        self.input_size = input_size
-        self.measurement_strategy = measurement_strategy
-        self.experiment: pcvl.Experiment | None = None
-        self.noise_model: Any | None = None  # type: ignore[assignment]
-        self._detector_transform: DetectorTransform | None = None
-        self._detector_keys: list[tuple[int, ...]] = []
-        self._raw_output_keys: list[tuple[int, ...]] = []
-        self._detector_is_identity: bool = True
-        self._output_size: int = 0
-        self.amplitude_encoding = amplitude_encoding
+        # Phase 1: device + dtype normalization
+        device, dtype, complex_dtype = MerlinModule.setup_device_and_dtype(
+            device, dtype
+        )
+        # Phase 2: computation space coercion
+        computation_space = ComputationSpace.coerce(computation_space)
 
-        # input_size management: input_size can be given only if amplitude_encoding is False
-        # otherwise, it is determined by the computation space and n_photons
-        if self.amplitude_encoding:
-            if input_size is not None:
-                raise ValueError(
-                    "When amplitude_encoding is enabled, do not specify input_size; it "
-                    "is inferred from the computation space."
-                )
-            self.input_size = 0  # temporary value, revisited after setup
-            if n_photons is None:
-                raise ValueError(
-                    "n_photons must be provided when amplitude_encoding=True."
-                )
-            if input_parameters:
-                raise ValueError(
-                    "Amplitude encoding cannot be combined with classical input parameters."
-                )
-        else:
-            # Defer fixing input_size until converter metadata is available so we can infer it automatically.
-            self.input_size = int(input_size) if input_size is not None else None
-
-        self.computation_space = ComputationSpace.coerce(computation_space)
-
-        if experiment is not None and experiment.input_state is not None:
-            if input_state is not None and experiment.input_state != input_state:
-                warnings.warn(
-                    "Both 'experiment.input_state' and 'input_state' are provided. "
-                    "'experiment.input_state' will be used.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-            input_state = experiment.input_state
-
-        if isinstance(input_state, pcvl.BasicState):
-            if not isinstance(input_state, xqlbr.FockState):
-                raise ValueError("BasicState with annotations is not supported")
-            input_state = list(input_state)
-        elif isinstance(input_state, pcvl.StateVector):
-            if len(input_state) == 0:
-                raise ValueError("input_state StateVector cannot be empty")
-            sv_n_photons = input_state.n.pop()
-            if n_photons is not None and sv_n_photons != n_photons:
-                raise ValueError(
-                    "Inconsistent number of photons between input_state and n_photons."
-                )
-            self.n_photons = sv_n_photons
-            input_state = pcvl_to_tensor(
-                input_state,
-                self.computation_space,
-                device=device,
-                dtype=self.complex_dtype,
-            )
-        self.input_state = input_state
-
-        # exclusivity of circuit/builder/experiment
-        if sum(x is not None for x in (circuit, builder, experiment)) != 1:
-            raise ValueError(
-                "Provide exactly one of 'circuit', 'builder', or 'experiment'."
-            )
-
-        if builder is not None and (
-            trainable_parameters is not None or input_parameters is not None
-        ):
-            raise ValueError(
-                "When providing a builder, do not also specify 'trainable_parameters' "
-                "or 'input_parameters'. Those prefixes are derived from the builder."
-            )
-
+        # Phase 3: circuit source resolution (builder/circuit/experiment)
+        circuit_source = validate_and_resolve_circuit_source(
+            builder, circuit, experiment, trainable_parameters, input_parameters
+        )
+        # Phase 4: encoding validation (post-resolution)
+        encoding_config = validate_encoding_mode(
+            amplitude_encoding,
+            input_size,
+            n_photons,
+            circuit_source.input_parameters,
+        )
+        # Phase 5: input state normalization
+        # Phase 6: experiment vetting (if provided)
         if experiment is not None:
-            if (
-                experiment.post_select_fn is not None
-                or experiment.heralds
-                or experiment.in_heralds
-            ):
-                raise ValueError(
-                    "The provided experiment must not have post-selection or heralding."
-                )
-            if getattr(experiment, "has_feedforward", False):
-                raise ValueError(
-                    "Feed-forward components are not supported inside a QuantumLayer experiment."
-                )
-            has_td_attr = getattr(experiment, "has_td", None)
-            if callable(has_td_attr):
-                has_td = has_td_attr()
-            else:
-                has_td = bool(has_td_attr)
-            if has_td:
-                raise ValueError(
-                    "The provided experiment must be unitary, and must not have post-selection or heralding."
-                )
+            vet_experiment(experiment)
 
-            # TODO: handle "min_detected_photons" from experiment, currently ignored => will come with post_selection_scheme introduction
-            if experiment.min_photons_filter:
-                raise ValueError(
-                    "The provided experiment must not have a min_photons_filter."
-                )
-            self.experiment = experiment
-
-        self.angle_encoding_specs: dict[str, dict[str, Any]] = {}
-
-        resolved_circuit: pcvl.Circuit | None = None
-        trainable_parameters = (
-            list(trainable_parameters) if trainable_parameters else []
-        )
-        input_parameters = list(input_parameters) if input_parameters else []
-
-        if builder is not None:
-            if circuit is not None:
-                raise ValueError("Provide either 'circuit' or 'builder', not both")
-            trainable_parameters = list(builder.trainable_parameter_prefixes)
-            input_parameters = list(builder.input_parameter_prefixes)
-            self.angle_encoding_specs = builder.angle_encoding_specs
-            resolved_circuit = builder.to_pcvl_circuit(pcvl)
-            self.experiment = pcvl.Experiment(resolved_circuit)
-        elif circuit is not None:
-            resolved_circuit = circuit
-            self.experiment = pcvl.Experiment(resolved_circuit)
-        elif experiment is not None:
-            self.experiment = experiment
-            self.noise_model = getattr(experiment, "noise", None)
-            resolved_circuit = experiment.unitary_circuit()
-        else:
-            raise RuntimeError("Resolved circuit could not be determined.")
-
-        if self.experiment is None:
-            raise RuntimeError("Experiment must be initialised.")
-
-        self.circuit = resolved_circuit
-
-        self._photon_survival_probs, empty_noise_model = resolve_photon_loss(
-            self.experiment, resolved_circuit.m
-        )
-        self.has_custom_noise_model = not empty_noise_model
-
-        self._detectors, empty_detectors = resolve_detectors(
-            self.experiment, resolved_circuit.m
-        )
-        self._has_custom_detectors = not empty_detectors
-        self.detectors = self._detectors  # Backward compatibility alias
-
-        # Detectors are ignored if ComputationSpace is not FOCK
-        if (
-            self._has_custom_detectors
-            and self.computation_space is not ComputationSpace.FOCK
-        ):
-            self._detectors = [pcvl.Detector.pnr()] * resolved_circuit.m
-            warnings.warn(
-                f"Detectors are ignored in favor of ComputationSpace: {self.computation_space}",
-                UserWarning,
-                stacklevel=2,
-            )
-        # Noise models or detectors are incompatible with amplitude readout because amplitudes assume noiseless, detector-free evolution.
-        amplitude_readout = measurement_strategy == MeasurementStrategy.AMPLITUDES
-        if amplitude_readout and self.has_custom_noise_model:
-            raise RuntimeError(
-                "measurement_strategy=MeasurementStrategy.AMPLITUDES cannot be used when the experiment defines a NoiseModel."
-            )
-        if amplitude_readout and self._has_custom_detectors:
-            raise RuntimeError(
-                "measurement_strategy=MeasurementStrategy.AMPLITUDES does not support experiments with detectors. "
-                "Compute amplitudes without detectors and apply a Partial DetectorTransform manually if needed."
-            )
-
-        # persist prefixes for export/introspection
-        self.trainable_parameters: list[str] = list(trainable_parameters)
-        self.input_parameters: list[str] = list(input_parameters)
-
-        self._init_from_custom_circuit(
-            resolved_circuit,
+        # Phase 7: circuit resolution
+        resolved_circuit = resolve_circuit(circuit_source, pcvl)
+        # Phase 8: input state normalization
+        input_state, resolved_n_photons = prepare_input_state(
             input_state,
             n_photons,
-            trainable_parameters,
-            input_parameters,
+            computation_space,
+            device,
+            complex_dtype,
+            resolved_circuit.experiment,
+            circuit_m=resolved_circuit.circuit.m,
+            amplitude_encoding=amplitude_encoding,
+        )
+        # Phase 9: noise + detector setup
+        noise_and_detectors = setup_noise_and_detectors(
+            resolved_circuit.experiment,
+            resolved_circuit.circuit,
+            computation_space,
             measurement_strategy,
         )
 
-        # export snapshot cache
+        # Phase 10: build initialization context
+        context = InitializationContext(
+            device=device,
+            dtype=dtype,
+            complex_dtype=complex_dtype,
+            amplitude_encoding=encoding_config.amplitude_encoding,
+            input_size=encoding_config.input_size,
+            circuit=resolved_circuit.circuit,
+            experiment=resolved_circuit.experiment,
+            noise_model=resolved_circuit.noise_model,
+            has_custom_noise=resolved_circuit.has_custom_noise,
+            input_state=input_state,
+            n_photons=resolved_n_photons,
+            trainable_parameters=circuit_source.trainable_parameters,
+            input_parameters=circuit_source.input_parameters,
+            angle_encoding_specs=circuit_source.angle_encoding_specs,
+            photon_survival_probs=noise_and_detectors.photon_survival_probs,
+            detectors=noise_and_detectors.detectors,
+            has_custom_detectors=noise_and_detectors.has_custom_detectors,
+            computation_space=computation_space,
+            measurement_strategy=measurement_strategy,
+            warnings=noise_and_detectors.detector_warnings,
+        )
+
+        # Phase 11: assign context to self + warnings
+        self._finalize_from_context(context)
+        # Phase 12: downstream setup
+        # Defaults/validation handled in this method:
+        # - Generate default input_state from n_photons when missing.
+        # - Infer/validate input_size against encoder metadata.
+        # - Setup parameters, measurement strategy, and output sizing.
+        self._init_from_custom_circuit(context)
+
+    def _finalize_from_context(self, context: InitializationContext) -> None:
+        """Assign initialization context to instance attributes."""
+        self.device = context.device
+        self.dtype = context.dtype
+        self.complex_dtype = context.complex_dtype
+        self.input_size = context.input_size
+        self.measurement_strategy = context.measurement_strategy
+        self.experiment = context.experiment
+        self.noise_model = context.noise_model
+        self.amplitude_encoding = context.amplitude_encoding
+        self.computation_space = context.computation_space
+        self.angle_encoding_specs = context.angle_encoding_specs
+        self.circuit = context.circuit
+        self.has_custom_noise_model = context.has_custom_noise
+        self.trainable_parameters = context.trainable_parameters
+        self.input_parameters = context.input_parameters
+        self.input_state = context.input_state
+        self.n_photons = context.n_photons
+        self._photon_survival_probs = context.photon_survival_probs
+        self._detectors = context.detectors
+        self._has_custom_detectors = context.has_custom_detectors
+        self.detectors = self._detectors
+        self._detector_transform: DetectorTransform | None = None
+        self._photon_loss_transform: PhotonLossTransform | None = None
+        self._detector_keys: list[tuple[int, ...]] = []
+        self._raw_output_keys: list[tuple[int, ...]] = []
+        self._detector_is_identity = True
+        self._output_size = 0
         self._current_params: dict[str, Any] = {}
+
+        for warning_msg in context.warnings:
+            warnings.warn(warning_msg, UserWarning, stacklevel=3)
 
     # ---------------- core init paths ----------------
 
-    def _init_from_custom_circuit(
-        self,
-        circuit: pcvl.Circuit,
-        input_state: list[int] | None,
-        n_photons: int | None,
-        trainable_parameters: list[str],
-        input_parameters: list[str],
-        measurement_strategy: MeasurementStrategy,
-    ):
+    def _init_from_custom_circuit(self, context: InitializationContext):
         """Initialize from custom circuit (backward compatible mode)."""
+        circuit = context.circuit
+        input_state = context.input_state
+        n_photons = context.n_photons
+        trainable_parameters = context.trainable_parameters
+        input_parameters = context.input_parameters
+        measurement_strategy = context.measurement_strategy
+
         if input_state is not None:
             self.input_state = input_state
         elif n_photons is not None:
@@ -470,10 +400,6 @@ class QuantumLayer(MerlinModule):
         if self.amplitude_encoding:
             self._init_amplitude_metadata()
 
-        # set input_size for amplitude encoding
-        if self.amplitude_encoding:
-            self.input_size = len(self.output_keys)
-
     def _setup_parameters_from_custom(self, trainable_parameters: list[str] | None):
         """Setup parameters from custom circuit configuration."""
         spec_mappings = self.computation_process.converter.spec_mappings
@@ -533,7 +459,7 @@ class QuantumLayer(MerlinModule):
             raise TypeError(f"Unknown measurement_strategy: {measurement_strategy}")
 
         # Create measurement mapping
-        self.measurement_mapping = OutputMapper.create_mapping(
+        self.measurement_mapping: nn.Module = OutputMapper.create_mapping(
             measurement_strategy,
             self.computation_process.computation_space,
             keys,
@@ -546,6 +472,8 @@ class QuantumLayer(MerlinModule):
             "logical_keys",
             list(self.computation_process.simulation_graph.mapped_keys),
         )
+        # TODO: here, the input_size corresponds to the size of the computation space
+        # In future, we might want to decouple those two concepts
         self.input_size = len(logical_keys)
 
     def _create_dummy_parameters(self) -> list[torch.Tensor]:
@@ -592,110 +520,31 @@ class QuantumLayer(MerlinModule):
 
     def _feature_count_for_prefix(self, prefix: str) -> int | None:
         """Infer the number of raw features associated with an encoding prefix."""
-        spec = self.angle_encoding_specs.get(prefix)
-        if spec:
-            combos = spec.get("combinations", [])
-            feature_indices = {idx for combo in combos for idx in combo}
-            if feature_indices:
-                return len(feature_indices)
-
         spec_mappings = getattr(self.computation_process.converter, "spec_mappings", {})
-        mapping = spec_mappings.get(prefix, [])
-        if mapping:
-            return len(mapping)
-
-        return None
+        return feature_count_for_prefix(
+            prefix, self.angle_encoding_specs, spec_mappings
+        )
 
     def _split_inputs_by_prefix(
         self, prefixes: list[str], tensor: torch.Tensor
     ) -> list[torch.Tensor] | None:
         """Split a single logical input tensor into per-prefix chunks when possible."""
-
-        counts: list[int] = []
-        for prefix in prefixes:
-            count = self._feature_count_for_prefix(prefix)
-            if count is None:
-                return None
-            counts.append(count)
-
-        total_required = sum(counts)
-        feature_dim = tensor.shape[-1] if tensor.dim() > 1 else tensor.shape[0]
-        if total_required != feature_dim:
-            return None
-
-        slices: list[torch.Tensor] = []
-        offset = 0
-        for count in counts:
-            end = offset + count
-            slices.append(
-                tensor[..., offset:end] if tensor.dim() > 1 else tensor[offset:end]
-            )
-            offset = end
-        return slices
+        spec_mappings = getattr(self.computation_process.converter, "spec_mappings", {})
+        return split_inputs_by_prefix(
+            prefixes, tensor, self.angle_encoding_specs, spec_mappings
+        )
 
     def _prepare_input_encoding(
         self, x: torch.Tensor, prefix: str | None = None
     ) -> torch.Tensor:
         """Prepare input encoding based on mode."""
-        spec = None
-        if prefix is not None:
-            spec = self.angle_encoding_specs.get(prefix)
-        elif len(self.angle_encoding_specs) == 1:
-            spec = next(iter(self.angle_encoding_specs.values()))
-
-        if spec:
-            return self._apply_angle_encoding(x, spec)
-
-        return x
+        return prepare_input_encoding(x, prefix, self.angle_encoding_specs)
 
     def _apply_angle_encoding(
         self, x: torch.Tensor, spec: dict[str, Any]
     ) -> torch.Tensor:
         """Apply custom angle encoding using stored metadata."""
-        combos: list[tuple[int, ...]] = spec.get("combinations", [])
-        scale_map: dict[int, float] = spec.get("scales", {})
-
-        if x.dim() == 1:
-            x_batch = x.unsqueeze(0)
-            squeeze = True
-        elif x.dim() == 2:
-            x_batch = x
-            squeeze = False
-        else:
-            raise ValueError(
-                f"Angle encoding expects 1D or 2D tensors, got shape {tuple(x.shape)}"
-            )
-
-        if not combos:
-            encoded = x_batch
-            return encoded.squeeze(0) if squeeze else encoded
-
-        encoded_cols: list[torch.Tensor] = []
-        feature_dim = x_batch.shape[-1]
-
-        for combo in combos:
-            indices = list(combo)
-            if any(idx >= feature_dim for idx in indices):
-                raise ValueError(
-                    f"Input feature dimension {feature_dim} insufficient for angle encoding combination {combo}"
-                )
-
-            # Select per-combo features and scale
-            selected = x_batch[:, indices]
-            scales = [scale_map.get(idx, 1.0) for idx in indices]
-            scale_tensor = x_batch.new_tensor(scales)
-            value = (selected * scale_tensor).sum(dim=1, keepdim=True)
-            encoded_cols.append(value)
-
-        encoded = (
-            torch.cat(encoded_cols, dim=1)
-            if encoded_cols
-            else x_batch.new_zeros((x_batch.shape[0], 0))
-        )
-
-        if squeeze:
-            return encoded.squeeze(0)
-        return encoded
+        return apply_angle_encoding(x, spec)
 
     def _validate_amplitude_input(self, amplitude: torch.Tensor) -> torch.Tensor:
         if not isinstance(amplitude, torch.Tensor):
@@ -793,86 +642,42 @@ class QuantumLayer(MerlinModule):
             - sampling_method (str): e.g. "multinomial".
         """
 
+        # Phase 1: Input handling (amplitude vs. classical).
         inputs = list(input_parameters)
         amplitude_input: torch.Tensor | None = None
         original_input_state = None
 
         if self.amplitude_encoding:
-            if not inputs:
-                raise ValueError(
-                    "QuantumLayer configured with amplitude_encoding=True expects an amplitude tensor input."
-                )
-            # verify that inputs is of the shape of layer.compute_graph.mapped_keys
-            amplitude_input = self._validate_amplitude_input(inputs.pop(0))
-            original_input_state = getattr(
-                self.computation_process, "input_state", None
+            amplitude_input, inputs, original_input_state = (
+                self._prepare_amplitude_input(inputs)
             )
-            # amplitude_input becomes the new input_state
-            self.set_input_state(amplitude_input)
 
         # classical_inputs = [
         #    tensor for tensor in inputs if isinstance(tensor, torch.Tensor)
         # ]
 
-        # Prepare circuit parameters and any remaining classical inputs
-        params = self.prepare_parameters(inputs)
-        # Track batch width across classical inputs so we can route superposed tensors through the batched path.
-        parameter_batch_dim = 0
-        for tensor in params:
-            if isinstance(tensor, torch.Tensor) and tensor.dim() > 1:
-                batch = tensor.shape[0]
-                if parameter_batch_dim and batch != parameter_batch_dim:
-                    raise ValueError(
-                        "Inconsistent batch dimensions across classical input parameters."
-                    )
-                parameter_batch_dim = batch
-        # TODO: input_state should support StateVector
-        raw_inferred_state = getattr(self.computation_process, "input_state", None)
-        # normalize the retrieved input_state to an optional tensor an
-        inferred_state: torch.Tensor | None
-        if isinstance(raw_inferred_state, torch.Tensor):
-            inferred_state = raw_inferred_state
-        else:
-            inferred_state = None
+        # Phase 2: Parameter assembly for circuit execution.
+        params, parameter_batch_dim = self._prepare_classical_parameters(inputs)
+        # Phase 3: Resolve computation path and evaluate the circuit.
         amplitudes: torch.Tensor
 
-        # TODO: challenge the need for trying/finally here
-        try:
-            if self.amplitude_encoding:
-                # raise error if amplitude encoding finds a non tensor state
-                if inferred_state is None:
-                    raise TypeError(
-                        "Amplitude encoding requires the computation process input_state to be a tensor."
-                    )
-                # we always use the parallel ebs computation path for amplitude encoding to enable batching
-                if simultaneous_processes is not None:
-                    batch_size = simultaneous_processes
-                else:
-                    batch_size = (
-                        inferred_state.dim() == 1 and 1 or inferred_state.shape[0]
-                    )
-                amplitudes = self.computation_process.compute_ebs_simultaneously(
-                    params, simultaneous_processes=batch_size
-                )
-            elif isinstance(inferred_state, torch.Tensor):
-                # otherwise the incremental EBS path allowing batch on input parameters
-                if parameter_batch_dim:
-                    # Classical inputs are batched: reuse the EBS batching kernel to propagate all coefficients at once.
-                    chunk = simultaneous_processes or inferred_state.shape[-1]
-                    amplitudes = self.computation_process.compute_ebs_simultaneously(
-                        params, simultaneous_processes=chunk
-                    )
-                else:
-                    amplitudes = self.computation_process.compute_superposition_state(
-                        params
-                    )
+        with self._temporary_input_state(amplitude_input, original_input_state):
+            # TODO: input_state should support StateVector
+            raw_inferred_state = getattr(self.computation_process, "input_state", None)
+            # normalize the retrieved input_state to an optional tensor
+            inferred_state: torch.Tensor | None
+            if isinstance(raw_inferred_state, torch.Tensor):
+                inferred_state = raw_inferred_state
             else:
-                amplitudes = self.computation_process.compute(params)
-        finally:
-            if amplitude_input is not None and original_input_state is not None:
-                self.set_input_state(original_input_state)
+                inferred_state = None
+            amplitudes = self._compute_amplitudes(
+                params,
+                inferred_state=inferred_state,
+                parameter_batch_dim=parameter_batch_dim,
+                simultaneous_processes=simultaneous_processes,
+            )
 
-        # Determine gradient needs
+        # Phase 4: Configure sampling/autodiff.
         needs_gradient = (
             self.training
             and torch.is_grad_enabled()
@@ -892,12 +697,65 @@ class QuantumLayer(MerlinModule):
             needs_gradient, apply_sampling, requested_shots
         )
 
-        # Convert amplitudes to probabilities if needed
+        # Phase 5: Convert and normalize amplitudes.
         if isinstance(amplitudes, tuple):
             amplitudes = amplitudes[1]
         elif not isinstance(amplitudes, torch.Tensor):
             raise TypeError(f"Unexpected amplitudes type: {type(amplitudes)}")
 
+        distribution, amplitudes = self._renormalize_distribution_and_amplitudes(
+            amplitudes
+        )
+        # Phase 6: Measurement strategy dispatch and output mapping.
+        strategy = resolve_measurement_strategy(self.measurement_strategy)
+        results = strategy.process(
+            distribution=distribution,
+            amplitudes=amplitudes,
+            apply_sampling=apply_sampling,
+            effective_shots=effective_shots,
+            sample_fn=adp.sampling_noise.pcvl_sampler,
+            apply_photon_loss=self._apply_photon_loss_transform,
+            apply_detectors=self._apply_detector_transform,
+        )
+
+        # Apply measurement mapping (returns tensor of shape [B, output_size])
+        return self.measurement_mapping(results)
+
+    def _compute_amplitudes(
+        self,
+        params: list[torch.Tensor],
+        *,
+        inferred_state: torch.Tensor | None,
+        parameter_batch_dim: int,
+        simultaneous_processes: int | None,
+    ) -> torch.Tensor:
+        """Select the computation path based on the encoding mode and input state."""
+        if self.amplitude_encoding:
+            if inferred_state is None:
+                raise TypeError(
+                    "Amplitude encoding requires the computation process input_state to be a tensor."
+                )
+            batch_size = (
+                simultaneous_processes
+                if simultaneous_processes is not None
+                else (1 if inferred_state.dim() == 1 else inferred_state.shape[0])
+            )
+            return self.computation_process.compute_ebs_simultaneously(
+                params, simultaneous_processes=batch_size
+            )
+        if isinstance(inferred_state, torch.Tensor):
+            if parameter_batch_dim:
+                chunk = simultaneous_processes or inferred_state.shape[-1]
+                return self.computation_process.compute_ebs_simultaneously(
+                    params, simultaneous_processes=chunk
+                )
+            return self.computation_process.compute_superposition_state(params)
+        return self.computation_process.compute(params)
+
+    def _renormalize_distribution_and_amplitudes(
+        self, amplitudes: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return probability distribution and renormalized amplitudes."""
         # even in amplitude mode, we do need to calculation distribution for renormalization
         # of the amplitudes
         distribution = amplitudes.real**2 + amplitudes.imag**2
@@ -926,29 +784,53 @@ class QuantumLayer(MerlinModule):
                     ),
                     amplitudes,
                 )
-        if self.measurement_strategy in (
-            MeasurementStrategy.PROBABILITIES,
-            MeasurementStrategy.MODE_EXPECTATIONS,
-        ):
-            distribution = self._apply_photon_loss_transform(distribution)
-            distribution = self._apply_detector_transform(distribution)
 
-            # Apply sampling if requested
-            if apply_sampling and effective_shots > 0:
-                results = adp.sampling_noise.pcvl_sampler(distribution, effective_shots)
-            else:
-                results = distribution
+        return distribution, amplitudes
 
-        # For MeasurementStrategy.AMPLITUDES, bypass detectors and sampling
-        else:
-            if apply_sampling:
-                raise RuntimeError(
-                    "Sampling cannot be applied when measurement_strategy=MeasurementStrategy.AMPLITUDES."
-                )
-            results = amplitudes
+    def _prepare_amplitude_input(
+        self, inputs: list[torch.Tensor]
+    ) -> tuple[torch.Tensor, list[torch.Tensor], torch.Tensor | None]:
+        """Validate amplitude-encoded input and return remaining inputs."""
+        if not inputs:
+            raise ValueError(
+                "QuantumLayer configured with amplitude_encoding=True expects an amplitude tensor input."
+            )
+        amplitude_input = self._validate_amplitude_input(inputs[0])
+        original_input_state = getattr(self.computation_process, "input_state", None)
+        return amplitude_input, inputs[1:], original_input_state
 
-        # Apply measurement mapping (returns tensor of shape [B, output_size])
-        return self.measurement_mapping(results)
+    @contextmanager
+    def _temporary_input_state(
+        self,
+        amplitude_input: torch.Tensor | None,
+        original_input_state: torch.Tensor | None,
+    ):
+        if amplitude_input is None:
+            yield
+            return
+        self.set_input_state(amplitude_input)
+        try:
+            yield
+        finally:
+            if original_input_state is not None:
+                self.set_input_state(original_input_state)
+
+    def _prepare_classical_parameters(
+        self, inputs: list[torch.Tensor]
+    ) -> tuple[list[torch.Tensor], int]:
+        """Prepare parameter list and return inferred batch dimension for classical inputs."""
+        params = self.prepare_parameters(inputs)
+        # Track batch width across classical inputs so we can route superposed tensors through the batched path.
+        parameter_batch_dim = 0
+        for tensor in params:
+            if isinstance(tensor, torch.Tensor) and tensor.dim() > 1:
+                batch = tensor.shape[0]
+                if parameter_batch_dim and batch != parameter_batch_dim:
+                    raise ValueError(
+                        "Inconsistent batch dimensions across classical input parameters."
+                    )
+                parameter_batch_dim = batch
+        return params, parameter_batch_dim
 
     @sanitize_parameters
     def set_sampling_config(
@@ -1015,14 +897,15 @@ class QuantumLayer(MerlinModule):
         self._photon_loss_is_identity = self._photon_loss_transform.is_identity
 
     def _initialize_detector_transform(self) -> None:
-        self._detector_transform = DetectorTransform(
+        detector_transform = DetectorTransform(
             self._photon_loss_keys,
             self._detectors,
             dtype=self.dtype,
             device=self.device,
         )
-        self._detector_keys = self._detector_transform.output_keys
-        self._detector_is_identity = self._detector_transform.is_identity
+        self._detector_transform = detector_transform
+        self._detector_keys = detector_transform.output_keys
+        self._detector_is_identity = detector_transform.is_identity
 
     @staticmethod
     def _normalize_output_key(
