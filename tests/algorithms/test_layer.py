@@ -31,6 +31,13 @@ import perceval as pcvl
 import pytest
 import torch
 from perceval import FFCircuitProvider
+from merlin.core.state_vector import StateVector
+from merlin.core.probability_distribution import ProbabilityDistribution
+from merlin.core.partial_measurement import (
+    PartialMeasurement,
+    PartialMeasurementBranch,
+)
+from merlin.measurement import ModeExpectations
 
 import merlin as ML
 
@@ -294,10 +301,12 @@ class TestQuantumLayer:
 
         amplitude = torch.rand(len(layer.output_keys))
         remaining_input = torch.rand(2)
-        amplitude_out, remaining, saved_state = layer._prepare_amplitude_input([
-            amplitude,
-            remaining_input,
-        ])
+        amplitude_out, remaining, saved_state = layer._prepare_amplitude_input(
+            [
+                amplitude,
+                remaining_input,
+            ]
+        )
 
         assert saved_state is original_state
         assert remaining[0] is remaining_input
@@ -338,10 +347,12 @@ class TestQuantumLayer:
             measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
         )
 
-        params, batch_dim = layer._prepare_classical_parameters([
-            torch.rand(2, 2),
-            torch.rand(2, 2),
-        ])
+        params, batch_dim = layer._prepare_classical_parameters(
+            [
+                torch.rand(2, 2),
+                torch.rand(2, 2),
+            ]
+        )
 
         assert batch_dim == 2
         assert len(params) >= 2
@@ -907,9 +918,9 @@ class TestQuantumLayer:
         assert model[1].out_features == 3
         # Check that it has trainable parameters (only in Linear layer)
         trainable_params_layer = [p for p in layer.parameters() if p.requires_grad]
-        assert len(trainable_params_layer) == 0, (
-            "Layer should have no trainable parameters"
-        )
+        assert (
+            len(trainable_params_layer) == 0
+        ), "Layer should have no trainable parameters"
         trainable_params = [p for p in model.parameters() if p.requires_grad]
         assert len(trainable_params) > 0, "Model should have trainable parameters"
 
@@ -977,3 +988,103 @@ class TestQuantumLayer:
                 computation_space=ML.ComputationSpace.FOCK,
                 input_state=bs_annot,
             )
+
+    def test_forward_output_objects(self):
+        # MS:None, ro:false
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+        )
+
+        assert isinstance(qlayer(), torch.Tensor)
+
+        # MS:None, ro:true
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+            return_object=True,
+        )
+
+        assert isinstance(qlayer(), StateVector)
+
+        # MS:probs, ro:false
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+        )
+
+        assert isinstance(qlayer(), torch.Tensor)
+
+        # MS:probs, ro:true
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            return_object=True,
+        )
+
+        assert isinstance(qlayer(), ProbabilityDistribution)
+
+        # MS:mode_expectation, ro:false
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+            measurement_strategy=ML.MeasurementStrategy.MODE_EXPECTATIONS,
+        )
+
+        assert isinstance(qlayer(), torch.Tensor)
+
+        # MS:mode_expectation, ro:true
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+            measurement_strategy=ML.MeasurementStrategy.MODE_EXPECTATIONS,
+            return_object=True,
+        )
+
+        assert isinstance(qlayer(), torch.Tensor)
+
+        # # TODO uncomment when partial is ready
+        # # MS:partial, ro:false
+        # builder = ML.CircuitBuilder(5)
+        # builder.add_entangling_layer()
+        # qlayer = ML.QuantumLayer(
+        #     input_size=0,
+        #     builder=builder,
+        #     input_state=[0, 1, 0, 1, 0],
+        #     measurement_strategy=ML.MeasurementStrategy.PARTIAL,
+        # )
+
+        # assert isinstance(qlayer(), PartialMeasurement)
+
+        # # MS:mode_expectpartial, ro:true
+        # builder = ML.CircuitBuilder(5)
+        # builder.add_entangling_layer()
+        # qlayer = ML.QuantumLayer(
+        #     input_size=0,
+        #     builder=builder,
+        #     input_state=[0, 1, 0, 1, 0],
+        #     measurement_strategy=ML.MeasurementStrategy.PARTIAL,
+        #     return_object=True,
+        # )
+
+        assert isinstance(qlayer(), PartialMeasurement)

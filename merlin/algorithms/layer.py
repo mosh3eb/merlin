@@ -42,12 +42,16 @@ from ..builder.circuit_builder import (
 from ..core.computation_space import ComputationSpace
 from ..core.generators import StateGenerator, StatePattern
 from ..core.process import ComputationProcessFactory
-from ..measurement import OutputMapper
+from ..core.state_vector import StateVector
+from ..core.probability_distribution import ProbabilityDistribution
+from ..core.partial_measurement import PartialMeasurement, PartialMeasurementBranch
+from ..measurement import OutputMapper, ModeExpectations
 from ..measurement.autodiff import AutoDiffProcess
 from ..measurement.detectors import DetectorTransform
 from ..measurement.photon_loss import PhotonLossTransform
 from ..measurement.strategies import (
     MeasurementStrategy,
+    MeasurementType,
     resolve_measurement_strategy,
 )
 from ..utils.deprecations import sanitize_parameters
@@ -96,6 +100,7 @@ class QuantumLayer(MerlinModule):
         amplitude_encoding: bool = False,
         computation_space: ComputationSpace | str = ComputationSpace.UNBUNCHED,
         measurement_strategy: MeasurementStrategy = MeasurementStrategy.PROBABILITIES,
+        return_object: bool = False,
         # device and dtype
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
@@ -156,6 +161,15 @@ class QuantumLayer(MerlinModule):
         measurement_strategy : MeasurementStrategy, default: PROBABILITIES
             Output mapping strategy. Supported values include ``PROBABILITIES``,
             ``MODE_EXPECTATIONS`` and ``AMPLITUDES``.
+        return_object: bool, default: False
+            When True, a typed object related to the measurement_strategy will be returned by forward(). If
+            false, a torch.Tensor will be returned. Here are the objects to be returned
+            |   measurement_strategy   |  return_object=False   | return_object=True |
+            | :-------  | :--------  | :----------: |
+            | None | torch.Tensor |  StateVector  |
+            | PROBABILITIES  | torch.Tensor  |  ProbabilityDistribution  |
+            | PARTIALMEASUREMENT | torch.Tensor   |  PartialMeasurement  |
+            | MODE_EXPECTATIONS  | torch.Tensor   |  torch.Tensor    |
         device : torch.device | None, optional
             Target device for internal tensors (e.g., ``torch.device("cuda")``).
         dtype : torch.dtype | None, optional
@@ -253,6 +267,7 @@ class QuantumLayer(MerlinModule):
             computation_space=computation_space,
             measurement_strategy=measurement_strategy,
             warnings=noise_and_detectors.detector_warnings,
+            return_object=return_object,
         )
 
         # Phase 11: assign context to self + warnings
@@ -293,6 +308,7 @@ class QuantumLayer(MerlinModule):
         self._detector_is_identity = True
         self._output_size = 0
         self._current_params: dict[str, Any] = {}
+        self.return_object = context.return_object
 
         for warning_msg in context.warnings:
             warnings.warn(warning_msg, UserWarning, stacklevel=3)
@@ -718,7 +734,30 @@ class QuantumLayer(MerlinModule):
             apply_photon_loss=self._apply_photon_loss_transform,
             apply_detectors=self._apply_detector_transform,
         )
+        # TODO Change according to the real measurement object
+        # if self.measurement_strategy == MeasurementType.PARTIAL:
+        #     return PartialMeasurement(
+        #         branches=[
+        #             PartialMeasurementBranch(
+        #                 results,
+        #             )
+        #         ],
+        #     )
 
+        if self.return_object is True:
+            if self.measurement_strategy == MeasurementStrategy.PROBABILITIES:
+                return ProbabilityDistribution(
+                    results,
+                    n_modes=len(self.input_state),
+                    computation_space=self.computation_space,
+                )
+            return StateVector(
+                self.measurement_mapping(results),
+                n_modes=len(self.input_state),
+                n_photons=self.n_photons,
+            )
+
+        # All other cases go to this one
         # Apply measurement mapping (returns tensor of shape [B, output_size])
         return self.measurement_mapping(results)
 
@@ -981,9 +1020,11 @@ class QuantumLayer(MerlinModule):
             "output_size": self.output_size,
             "input_state": getattr(self, "input_state", None),
             "n_modes": exported_circuit.m,
-            "n_photons": sum(getattr(self, "input_state", []) or [])
-            if hasattr(self, "input_state")
-            else None,
+            "n_photons": (
+                sum(getattr(self, "input_state", []) or [])
+                if hasattr(self, "input_state")
+                else None
+            ),
             "trainable_parameters": list(self.trainable_parameters),
             "input_parameters": list(self.input_parameters),
             "noise_model": self.noise_model,

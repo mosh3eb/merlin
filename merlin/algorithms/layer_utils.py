@@ -121,6 +121,7 @@ class InitializationContext:
     computation_space: ComputationSpace
     measurement_strategy: MeasurementStrategy
     warnings: list[str]
+    return_object: bool
 
 
 def validate_encoding_mode(
