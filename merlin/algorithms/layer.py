@@ -36,7 +36,6 @@ import torch
 import torch.nn as nn
 
 from ..builder.circuit_builder import (
-    ANGLE_ENCODING_MODE_ERROR,
     CircuitBuilder,
 )
 from ..core.computation_space import ComputationSpace
@@ -1121,9 +1120,11 @@ class QuantumLayer(MerlinModule):
             "output_size": self.output_size,
             "input_state": getattr(self, "input_state", None),
             "n_modes": exported_circuit.m,
-            "n_photons": sum(getattr(self, "input_state", []) or [])
-            if hasattr(self, "input_state")
-            else None,
+            "n_photons": (
+                sum(getattr(self, "input_state", []) or [])
+                if hasattr(self, "input_state")
+                else None
+            ),
             "trainable_parameters": list(self.trainable_parameters),
             "input_parameters": list(self.input_parameters),
             "noise_model": self.noise_model,
@@ -1137,27 +1138,21 @@ class QuantumLayer(MerlinModule):
     def simple(
         cls,
         input_size: int,
-        n_params: int = 90,
         output_size: int | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
         computation_space: ComputationSpace | str = ComputationSpace.UNBUNCHED,
     ):
-        """Create a ready-to-train layer with a 10-mode, 5-photon architecture.
+        """Create a ready-to-train layer with a input_size-mode, (input_size//2)-photon architecture.
 
         The circuit is assembled via :class:`CircuitBuilder` with the following layout:
 
         1. A fully trainable entangling layer acting on all modes;
         2. A full input encoding layer spanning all encoded features;
-        3. A non-trainable entangling layer that redistributes encoded information;
-        4. Optional trainable Mach-Zehnder blocks (two parameters each) to reach the requested ``n_params`` budget;
-        5. A final entangling layer prior to measurement.
+        3. A fully trainable entangling layer acting on all modes.
 
         Args:
-            input_size: Size of the classical input vector.
-            n_params: Number of trainable parameters to allocate across the additional MZI blocks. Values
-                below the default entangling budget trigger a warning; values above it must differ by an even
-                amount because each added MZI exposes two parameters.
+            input_size: Size of the classical input vector. Must be 20 or lower.
             output_size: Optional classical output width.
             device: Optional target device for tensors.
             dtype: Optional tensor dtype.
@@ -1166,79 +1161,55 @@ class QuantumLayer(MerlinModule):
         Returns:
             QuantumLayer configured with the described architecture.
         """
-
-        n_modes = 10
-        n_photons = 5
-
-        builder = CircuitBuilder(n_modes=n_modes)
-
-        # Trainable entangling layer before encoding
-        builder.add_entangling_layer(trainable=True, name="gi_simple")
-        entangling_params = n_modes * (n_modes - 1)
-
-        requested_params = max(int(n_params), 0)
-        if entangling_params > requested_params:
-            warnings.warn(
-                "Entangling layer introduces "
-                f"{entangling_params} trainable parameters, exceeding the requested "
-                f"budget of {requested_params}. The simple layer will expose "
-                f"{entangling_params} trainable parameters.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-
-        if input_size > n_modes:
-            raise ValueError(ANGLE_ENCODING_MODE_ERROR)
-
-        input_modes = list(range(input_size))
-        builder.add_angle_encoding(
-            modes=input_modes,
-            name="input",
-            subset_combinations=False,
-        )
-
-        # Allocate additional trainable MZIs only if the budget exceeds the entangling layer
-        remaining = max(requested_params - entangling_params, 0)
-        if remaining % 2 != 0:
+        if input_size > 20:
             raise ValueError(
-                "Additional parameter budget must be even: each extra MZI exposes "
-                "two trainable parameters."
+                "Input size too large for the simple layer construction. For large inputs (with larger size than 20), please use the CircuitBuilder. Here is a quick tutorial on how to use it: https://merlinquantum.ai/quickstart/first_quantum_layer.html#circuitbuilder-walkthrough"
+            )
+        if input_size < 1:
+            raise ValueError(f"input_size must be at least 1, got {input_size}")
+
+        if input_size == 1:
+            n_photons = 1
+            input_state = [0, 1]
+            builder = CircuitBuilder(n_modes=2)
+
+            # Trainable entangling layer before encoding
+            builder.add_entangling_layer(trainable=True, name="LI_simple")
+
+            # Angle encoding
+            builder.add_angle_encoding(
+                modes=[1], name="input", subset_combinations=False
             )
 
-        mzi_idx = 0
-        added_mzi_params = 0
+            # Trainable entangling layer after encoding
+            builder.add_entangling_layer(trainable=True, name="RI_simple")
 
-        while remaining > 0:
-            if n_modes < 2:
-                raise ValueError("At least two modes are required to place an MZI.")
+        else:
+            n_photons = input_size // 2
 
-            start_mode = mzi_idx % (n_modes - 1)
-            span_modes = [start_mode, start_mode + 1]
-            prefix = f"mzi_extra{mzi_idx}"
+            input_state = input_size * [0]
+            for i in range(input_size):
+                if i % 2 == 1:
+                    input_state[i] = 1
+            input_state = pcvl.BasicState(input_state)
 
-            builder.add_entangling_layer(
-                modes=span_modes,
-                trainable=True,
-                name=prefix,
+            builder = CircuitBuilder(n_modes=input_size)
+
+            # Trainable entangling layer before encoding
+            builder.add_entangling_layer(trainable=True, name="LI_simple")
+
+            # Angle encoding
+            builder.add_angle_encoding(
+                name="input",
+                subset_combinations=False,
             )
 
-            remaining -= 2
-            added_mzi_params += 2
-            mzi_idx += 1
-
-        # Post-MZI entanglement
-        builder.add_superpositions()
-
-        total_trainable = entangling_params + added_mzi_params
-        expected_trainable = max(requested_params, entangling_params)
-        if total_trainable != expected_trainable:
-            raise ValueError(
-                "Constructed circuit exposes "
-                f"{total_trainable} trainable parameters but {expected_trainable} were expected."
-            )
+            # Trainable entangling layer after encoding
+            builder.add_entangling_layer(trainable=True, name="RI_simple")
 
         quantum_layer_kwargs = {
             "input_size": input_size,
+            "input_state": input_state,
             "builder": builder,
             "n_photons": n_photons,
             "measurement_strategy": MeasurementStrategy.PROBABILITIES,
