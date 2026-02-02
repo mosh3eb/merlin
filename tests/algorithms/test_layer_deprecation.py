@@ -1,4 +1,3 @@
-import warnings
 import perceval as pcvl
 import pytest
 
@@ -26,17 +25,14 @@ def test_simple_no_bunching_deprecation_and_conversion():
 
 
 def test_simple_accepts_computation_space_with_deprecation_warning():
-    with warnings.catch_warnings(record=True) as rec:
-        warnings.simplefilter("always")
+    with pytest.warns(
+        DeprecationWarning,
+        match=r"Parameter 'computation_space' is deprecated",
+    ):
         model = QuantumLayer.simple(
             input_size=2,
             computation_space=ComputationSpace.FOCK,
         )
-
-    assert not any(
-        isinstance(w.message, DeprecationWarning) or w.category is DeprecationWarning
-        for w in rec
-    )
 
     assert model.quantum_layer.computation_space == ComputationSpace.FOCK
 

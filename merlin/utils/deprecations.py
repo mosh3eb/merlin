@@ -51,6 +51,7 @@ def _convert_no_bunching_init(
 # Deprecation registry (parameter-based)
 # ---------------------------------------------------------------------------
 
+
 def _remove_QuantumLayer_simple_n_params(
     method_qualname: str, kwargs: dict[str, Any]
 ) -> dict[str, Any]:
