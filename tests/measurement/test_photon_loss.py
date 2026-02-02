@@ -619,8 +619,6 @@ class TestPhotonLossWithFidelityKernel:
         feature_map = ML.FeatureMap.simple(
             input_size=1,
             n_modes=3,
-            n_photons=3,
-            trainable=False,
         )
         input_state = [1, 1, 1]
 
@@ -632,8 +630,6 @@ class TestPhotonLossWithFidelityKernel:
         feature_map_noise = ML.FeatureMap.simple(
             input_size=1,
             n_modes=3,
-            n_photons=3,
-            trainable=False,
         )
         experiment_noise = feature_map_noise.experiment
         experiment_noise.noise = pcvl.NoiseModel(brightness=0.8, transmittance=1.0)
