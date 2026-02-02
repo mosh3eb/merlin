@@ -89,13 +89,15 @@ class QuantumLayer(MerlinModule):
         # Custom experiment construction
         experiment: pcvl.Experiment | None = None,
         # For both custom circuits and builder
-        input_state: StateVector
-        | pcvl.StateVector
-        | pcvl.BasicState
-        | list
-        | tuple
-        | torch.Tensor
-        | None = None,
+        input_state: (
+            StateVector
+            | pcvl.StateVector
+            | pcvl.BasicState
+            | list
+            | tuple
+            | torch.Tensor
+            | None
+        ) = None,
         n_photons: int | None = None,
         # only for custom circuits and experiments
         trainable_parameters: list[str] | None = None,
@@ -696,13 +698,7 @@ class QuantumLayer(MerlinModule):
         shots: int | None = None,
         sampling_method: str | None = None,
         simultaneous_processes: int | None = None,
-    ) -> (
-        tuple[torch.Tensor, torch.Tensor]
-        | torch.Tensor
-        | PartialMeasurement
-        | StateVector
-        | ProbabilityDistribution
-    ):
+    ) -> torch.Tensor | PartialMeasurement | StateVector | ProbabilityDistribution:
         """Forward pass through the quantum layer.
 
         Encoding is inferred from the input type:
@@ -886,15 +882,6 @@ class QuantumLayer(MerlinModule):
             apply_photon_loss=self._apply_photon_loss_transform,
             apply_detectors=self._apply_detector_transform,
         )
-        # TODO Change according to the real measurement object
-        # if self.measurement_strategy == MeasurementType.PARTIAL:
-        #     return PartialMeasurement(
-        #         branches=[
-        #             PartialMeasurementBranch(
-        #                 results,
-        #             )
-        #         ],
-        #     )
 
         if (
             self.return_object is True
@@ -902,7 +889,7 @@ class QuantumLayer(MerlinModule):
         ):
             if self.measurement_strategy == MeasurementStrategy.PROBABILITIES:
                 return ProbabilityDistribution(
-                    results,
+                    self.measurement_mapping(results),
                     n_modes=len(self.input_state),
                     n_photons=self.n_photons,
                     computation_space=self.computation_space,
