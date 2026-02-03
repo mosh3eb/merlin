@@ -41,6 +41,7 @@ from ..builder.circuit_builder import (
 from ..core.computation_space import ComputationSpace
 from ..core.generators import StateGenerator, StatePattern
 from ..core.partial_measurement import PartialMeasurement
+from ..core.probability_distribution import ProbabilityDistribution
 from ..core.process import ComputationProcessFactory
 from ..core.state_vector import StateVector
 from ..measurement import OutputMapper
@@ -94,23 +95,26 @@ class QuantumLayer(MerlinModule):
         # Custom experiment construction
         experiment: pcvl.Experiment | None = None,
         # For both custom circuits and builder
-        input_state: StateVector
-        | pcvl.StateVector
-        | pcvl.BasicState
-        | list
-        | tuple
-        | torch.Tensor
-        | None = None,
+        input_state: (
+            StateVector
+            | pcvl.StateVector
+            | pcvl.BasicState
+            | list
+            | tuple
+            | torch.Tensor
+            | None
+        ) = None,
         n_photons: int | None = None,
         # only for custom circuits and experiments
         trainable_parameters: list[str] | None = None,
         input_parameters: list[str] | None = None,
         # Common parameters
         amplitude_encoding: bool = False,
-        computation_space: ComputationSpace | str | None = None,
+        computation_space: ComputationSpace | str = ComputationSpace.UNBUNCHED,
         measurement_strategy: MeasurementStrategyLike = MeasurementKind[
             "PROBABILITIES"
         ],
+        return_object: bool = False,
         # device and dtype
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
@@ -173,6 +177,15 @@ class QuantumLayer(MerlinModule):
         measurement_strategy : MeasurementStrategy, default: PROBABILITIES
             Output mapping strategy. Supported values include ``PROBABILITIES``,
             ``MODE_EXPECTATIONS`` and ``AMPLITUDES``.
+        return_object: bool, default: False
+            When True, a typed object related to the measurement_strategy will be returned by forward(). If
+            false, a torch.Tensor will be returned. Here are the objects to be returned
+            |   measurement_strategy   |  return_object=False   | return_object=True |
+            | :-------  | :--------  | :----------: |
+            | AMPLTITUDES | torch.Tensor |  StateVector  |
+            | PROBABILITIES  | torch.Tensor  |  ProbabilityDistribution  |
+            | PARTIAL_MEASUREMENT | PartialMeasurement   |  PartialMeasurement  |
+            | MODE_EXPECTATIONS  | torch.Tensor   |  torch.Tensor    |
         device : torch.device | None, optional
             Target device for internal tensors (e.g., ``torch.device("cuda")``).
         dtype : torch.dtype | None, optional
@@ -286,6 +299,7 @@ class QuantumLayer(MerlinModule):
             computation_space=computation_space,
             measurement_strategy=measurement_strategy,
             warnings=noise_and_detectors.detector_warnings,
+            return_object=return_object,
         )
 
         # Phase 11: assign context to self + warnings
@@ -326,6 +340,7 @@ class QuantumLayer(MerlinModule):
         self._detector_is_identity = True
         self._output_size = 0
         self._current_params: dict[str, Any] = {}
+        self.return_object = context.return_object
 
         for warning_msg in context.warnings:
             warnings.warn(warning_msg, UserWarning, stacklevel=3)
@@ -705,7 +720,7 @@ class QuantumLayer(MerlinModule):
         shots: int | None = None,
         sampling_method: str | None = None,
         simultaneous_processes: int | None = None,
-    ) -> torch.Tensor | PartialMeasurement:
+    ) -> torch.Tensor | PartialMeasurement | StateVector | ProbabilityDistribution:
         """Forward pass through the quantum layer.
 
         Encoding is inferred from the input type:
@@ -728,9 +743,10 @@ class QuantumLayer(MerlinModule):
 
         Returns
         -------
-        torch.Tensor | PartialMeasurement
-            Output tensor after measurement mapping, or a ``PartialMeasurement``
-            when using ``MeasurementStrategy.partial()``.
+        torch.Tensor | PartialMeasurement | StateVector | ProbabilityDistribution
+            Output after measurement mapping.
+            Depending on the return_object argument and measurement strategy defined in the input, the output
+            type will be different. Check the constructor for more details.
 
         Raises
         ------
@@ -901,6 +917,23 @@ class QuantumLayer(MerlinModule):
             == MeasurementKind.PARTIAL
         ):
             return results
+
+        if (
+            self.return_object is True
+            and not self.measurement_strategy == MeasurementStrategy.MODE_EXPECTATIONS
+        ):
+            if self.measurement_strategy == MeasurementStrategy.PROBABILITIES:
+                return ProbabilityDistribution(
+                    self.measurement_mapping(results),
+                    n_modes=len(self.input_state),
+                    n_photons=self.n_photons,
+                    computation_space=self.computation_space,
+                )
+            return StateVector(
+                self.measurement_mapping(results),
+                n_modes=len(self.input_state),
+                n_photons=self.n_photons,
+            )
 
         return self.measurement_mapping(results)
 

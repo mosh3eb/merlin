@@ -30,9 +30,17 @@ import numpy as np
 import perceval as pcvl
 import pytest
 import torch
+import torch.nn as nn
 from perceval import FFCircuitProvider
 
 import merlin as ML
+from merlin.core.probability_distribution import ProbabilityDistribution
+from merlin.core.state_vector import StateVector
+
+# TODO Uncomment when partial measurement is ready
+# from merlin.core.partial_measurement import (
+#     PartialMeasurement,
+# )
 
 
 class TestQuantumLayer:
@@ -977,6 +985,275 @@ class TestQuantumLayer:
                 computation_space=ML.ComputationSpace.FOCK,
                 input_state=bs_annot,
             )
+
+    # TODO Change the default returns when the default measurement strategy will be changed. Also, uncomment the partial_measurment tests when it is ready
+    def test_forward_output_objects(self):
+        # MS:None, ro:false
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+        )
+        res_no_obj = qlayer()
+
+        assert isinstance(res_no_obj, torch.Tensor)
+
+        # MS:None, ro:true
+        qlayer.return_object = True
+        res_obj = qlayer()
+        assert isinstance(res_obj, ProbabilityDistribution)
+        assert isinstance(res_obj.tensor, torch.Tensor)
+        assert np.allclose(res_no_obj.detach().numpy(), res_obj.tensor.detach().numpy())
+
+        # -------------------------------------------------------------------------------#
+
+        # MS:amplitudes, ro:false
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+        )
+
+        res_no_obj = qlayer()
+
+        assert isinstance(qlayer(), torch.Tensor)
+
+        # MS:amplitudes, ro:true
+        qlayer.return_object = True
+        res_obj = qlayer()
+
+        assert isinstance(qlayer(), StateVector)
+        assert isinstance(res_obj.tensor, torch.Tensor)
+        assert np.allclose(res_no_obj.detach().numpy(), res_obj.tensor.detach().numpy())
+
+        # -------------------------------------------------------------------------------#
+
+        # MS:probs, ro:false
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+        )
+        res_no_obj = qlayer()
+
+        assert isinstance(res_no_obj, torch.Tensor)
+
+        # MS:probs, ro:true
+        qlayer.return_object = True
+        res_obj = qlayer()
+
+        assert isinstance(res_obj, ProbabilityDistribution)
+        assert isinstance(res_obj.tensor, torch.Tensor)
+        assert np.allclose(res_no_obj.detach().numpy(), res_obj.tensor.detach().numpy())
+
+        # -------------------------------------------------------------------------------#
+
+        # MS:mode_expectation, ro:false
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+            measurement_strategy=ML.MeasurementStrategy.MODE_EXPECTATIONS,
+        )
+
+        res_no_obj = qlayer()
+
+        assert isinstance(res_no_obj, torch.Tensor)
+
+        # MS:mode_expectation, ro:true
+        qlayer.return_object = True
+        res_obj = qlayer()
+
+        assert isinstance(res_obj, torch.Tensor)
+        assert np.allclose(res_obj.detach().numpy(), res_obj.detach().numpy())
+
+        # -------------------------------------------------------------------------------#
+
+        # TODO uncomment when partial is ready
+        # # MS:partial, ro:false
+        # builder = ML.CircuitBuilder(5)
+        # builder.add_entangling_layer()
+        # qlayer = ML.QuantumLayer(
+        #     input_size=0,
+        #     builder=builder,
+        #     input_state=[0, 1, 0, 1, 0],
+        #     measurement_strategy=ML.MeasurementStrategy.PARTIAL,
+        # )
+
+        # res_no_obj = qlayer()
+
+        # assert isinstance(res_no_obj, PartialMeasurement)
+
+        # # MS:partial, ro:true
+        # qlayer.return_object = True
+        # res_obj = qlayer()
+
+        # assert isinstance(res_obj, PartialMeasurement)
+        # assert isinstance(res_obj.tensor, torch.Tensor)
+        # assert np.allclose(
+        #     res_no_obj.tensor.detach().numpy(), res_obj.tensor.detach().numpy()
+        # )
+
+    def test_gradient_through_typed_objects_ProbabilityDistribution(self):
+        """Test that gradients flow through the layer."""
+
+        builder = ML.CircuitBuilder(n_modes=4)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        class custom_layer(nn.Module):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.qlayer = ML.QuantumLayer(
+                    input_size=2,
+                    input_state=[1, 1, 0, 0],
+                    builder=builder,
+                    measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+                    return_object=True,
+                )
+                self.clayer = torch.nn.Linear(
+                    self.qlayer.output_size,
+                    3,
+                )
+
+            def forward(self, x):
+                output_q = self.qlayer(x)
+                return self.clayer(output_q.tensor)
+
+        model = custom_layer()
+        x = torch.rand(5, 2, requires_grad=True)
+        output = model(x)
+        loss = output.sum()
+        loss.backward()
+
+        # Check that input gradients exist
+        assert x.grad is not None
+
+        # Check that layer parameters have gradients
+        has_trainable_params = False
+        for param in model.parameters():
+            if param.requires_grad:
+                has_trainable_params = True
+                assert param.grad is not None
+
+        assert has_trainable_params, "Model should have trainable parameters"
+
+    def test_gradient_through_typed_objects_StateVector(self):
+        """Test that gradients flow through the layer."""
+
+        builder = ML.CircuitBuilder(n_modes=4)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        class custom_layer(nn.Module):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.qlayer = ML.QuantumLayer(
+                    input_size=2,
+                    input_state=[1, 1, 0, 0],
+                    builder=builder,
+                    measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+                    return_object=True,
+                )
+                self.clayer = torch.nn.Linear(
+                    self.qlayer.output_size,
+                    3,
+                )
+
+            def forward(self, x):
+                output_q = self.qlayer(x)
+                return self.clayer(output_q.tensor.abs())
+
+        model = custom_layer()
+        x = torch.rand(5, 2, requires_grad=True)
+        output = model(x)
+        loss = output.sum()
+        loss.backward()
+
+        # Check that input gradients exist
+        assert x.grad is not None
+
+        # Check that layer parameters have gradients
+        has_trainable_params = False
+        for param in model.parameters():
+            if param.requires_grad:
+                has_trainable_params = True
+                assert param.grad is not None
+
+        assert has_trainable_params, "Model should have trainable parameters"
+
+    # TODO Define test_gradient_through_typed_objects_PartialMeasurement when MeasurementStrategy is completed.
+
+    def test_gradient_through_typed_objects_outputs_tensor(self):
+        """Test that gradients flow through the layer."""
+
+        builder = ML.CircuitBuilder(n_modes=4)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        to_test = [
+            [ML.MeasurementStrategy.MODE_EXPECTATIONS, False],
+            [ML.MeasurementStrategy.MODE_EXPECTATIONS, True],
+            [ML.MeasurementStrategy.PROBABILITIES, False],
+            [ML.MeasurementStrategy.AMPLITUDES, False],
+        ]
+        for strategy, typed_object in to_test:
+
+            class custom_layer(nn.Module):
+                def __init__(
+                    self,
+                    *args,
+                    _strategy=strategy,
+                    _typed_object=typed_object,
+                    **kwargs,
+                ):
+                    super().__init__(*args, **kwargs)
+                    self.qlayer = ML.QuantumLayer(
+                        input_size=2,
+                        input_state=[1, 1, 0, 0],
+                        builder=builder,
+                        measurement_strategy=_strategy,
+                        return_object=_typed_object,
+                    )
+                    self.clayer = torch.nn.Linear(
+                        self.qlayer.output_size,
+                        3,
+                    )
+
+                def forward(self, x):
+                    output_q = self.qlayer(x)
+                    return self.clayer(output_q.abs())
+
+            model = custom_layer()
+            x = torch.rand(5, 2, requires_grad=True)
+            output = model(x)
+            loss = output.sum()
+            loss.backward()
+
+            # Check that input gradients exist
+            assert x.grad is not None
+
+            # Check that layer parameters have gradients
+            has_trainable_params = False
+            for param in model.parameters():
+                if param.requires_grad:
+                    has_trainable_params = True
+                    assert param.grad is not None
+
+            assert has_trainable_params, "Model should have trainable parameters"
 
 
 def test_simple_num_photons_modes_and_input_state():
