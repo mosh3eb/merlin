@@ -110,10 +110,8 @@ class QuantumLayer(MerlinModule):
         input_parameters: list[str] | None = None,
         # Common parameters
         amplitude_encoding: bool = False,
-        computation_space: ComputationSpace | str = ComputationSpace.UNBUNCHED,
-        measurement_strategy: MeasurementStrategyLike = MeasurementKind[
-            "PROBABILITIES"
-        ],
+        computation_space: ComputationSpace | str | None = None,
+        measurement_strategy: MeasurementStrategyLike | None = None,
         return_object: bool = False,
         # device and dtype
         device: torch.device | None = None,
@@ -170,13 +168,14 @@ class QuantumLayer(MerlinModule):
             the first positional argument and propagates it through the quantum
             layer; ``input_size`` must not be set in this mode and
             ``n_photons`` must be provided.
-        computation_space : ComputationSpace | str, optional
+        computation_space : ComputationSpace | str | None, optional
             Logical computation subspace to use: one of ``{"fock", "unbunched",
             "dual_rail"}``. If omitted, defaults to ``UNBUNCHED``. This argument
             is deprecated; move it into ``MeasurementStrategy.probs(...)``.
-        measurement_strategy : MeasurementStrategy, default: PROBABILITIES
-            Output mapping strategy. Supported values include ``PROBABILITIES``,
-            ``MODE_EXPECTATIONS`` and ``AMPLITUDES``.
+        measurement_strategy : MeasurementStrategy | None, default: None
+            Output mapping strategy. When omitted, defaults to
+            ``MeasurementStrategy.probs(computation_space)``. Supported values
+            include ``PROBABILITIES``, ``MODE_EXPECTATIONS`` and ``AMPLITUDES``.
         return_object: bool, default: False
             When True, a typed object related to the measurement_strategy will be returned by forward(). If
             false, a torch.Tensor will be returned. Here are the objects to be returned
@@ -1314,7 +1313,6 @@ class QuantumLayer(MerlinModule):
             "input_state": input_state,
             "builder": builder,
             "n_photons": n_photons,
-            "measurement_strategy": MeasurementKind["PROBABILITIES"],
             "device": device,
             "dtype": dtype,
             "computation_space": computation_space,
