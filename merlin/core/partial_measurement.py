@@ -20,6 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
@@ -69,6 +70,7 @@ class PartialMeasurement:
         branches: tuple[PartialMeasurementBranch, ...],
         measured_modes: tuple[int, ...],
         unmeasured_modes: tuple[int, ...],
+        grouping: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
         self.branches = branches
         self.measured_modes = measured_modes
@@ -118,6 +120,9 @@ class PartialMeasurement:
         This property assumes that all branches are ordered lexicographically by their outcomes
         so the stacking of probabilities follows the same order.
         """
+        return self._probability_tensor()
+
+    def _probability_tensor(self) -> torch.Tensor:
         probas = torch.stack(
             [self._as_batch(branch.probability) for branch in self.branches], dim=1
         )
@@ -183,6 +188,8 @@ class PartialMeasurement:
     @staticmethod
     def from_detector_transform_output(
         detector_output: DetectorTransformOutput,
+        *,
+        grouping: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> "PartialMeasurement":
         """
         Branch-based `PartialMeasurement` wrapper from DetectorTransform(partial_measurement=True) output.
@@ -228,4 +235,5 @@ class PartialMeasurement:
             branches=tuple(branches),
             measured_modes=measured_modes,
             unmeasured_modes=unmeasured_modes,
+            grouping=grouping,
         )
