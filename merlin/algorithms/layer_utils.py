@@ -50,7 +50,11 @@ from ..core.generators import StateGenerator, StatePattern
 from ..core.state_vector import StateVector
 from ..measurement.detectors import resolve_detectors
 from ..measurement.photon_loss import resolve_photon_loss
-from ..measurement.strategies import MeasurementStrategy
+from ..measurement.strategies import (
+    MeasurementKind,
+    MeasurementStrategyLike,
+    _resolve_measurement_kind,
+)
 from ..pcvl_pytorch.utils import pcvl_to_tensor
 
 
@@ -120,7 +124,7 @@ class InitializationContext:
     detectors: list[pcvl.Detector]
     has_custom_detectors: bool
     computation_space: ComputationSpace
-    measurement_strategy: MeasurementStrategy
+    measurement_strategy: MeasurementStrategyLike
     warnings: list[str]
     return_object: bool
 
@@ -422,7 +426,7 @@ def setup_noise_and_detectors(
     experiment: pcvl.Experiment,
     circuit: pcvl.Circuit,
     computation_space: ComputationSpace,
-    measurement_strategy: MeasurementStrategy,
+    measurement_strategy: MeasurementStrategyLike,
 ) -> NoiseAndDetectorConfig:
     """Extract and validate noise/detectors."""
     photon_survival_probs, empty_noise_model = resolve_photon_loss(
@@ -440,7 +444,9 @@ def setup_noise_and_detectors(
             f"Detectors are ignored in favor of ComputationSpace: {computation_space}"
         )
 
-    amplitude_readout = measurement_strategy == MeasurementStrategy.AMPLITUDES
+    amplitude_readout = (
+        _resolve_measurement_kind(measurement_strategy) == MeasurementKind.AMPLITUDES
+    )
     if amplitude_readout and has_custom_noise:
         raise RuntimeError(
             "measurement_strategy=MeasurementStrategy.AMPLITUDES cannot be used when the experiment defines a NoiseModel."
