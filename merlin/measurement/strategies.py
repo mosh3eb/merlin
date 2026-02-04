@@ -28,12 +28,12 @@ import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, ClassVar, TypeAlias, cast
+from typing import TYPE_CHECKING, ClassVar, TypeAlias
 
 import torch
 
 from merlin.core.computation_space import ComputationSpace
-from merlin.core.partial_measurement import DetectorTransformOutput, PartialMeasurement
+from merlin.core.partial_measurement import PartialMeasurement
 from merlin.measurement.process import partial_measurement
 from merlin.utils.deprecations import warn_deprecated_enum_access
 from merlin.utils.grouping import LexGrouping, ModGrouping
@@ -169,39 +169,10 @@ class PartialMeasurementStrategy(BaseMeasurementStrategy):
             raise TypeError(
                 "Partial measurement expects detector output in partial_measurement mode."
             )
-        """
-        n_modes = state.n_modes
-        self.validate_modes(n_modes)
-
-        # Use detector transform (partial_measurement=True) to get measured probs and unmeasured state
-        keys = (
-            state.basis.enumerate_states()
-        )  # TODO: check if that corresponds to the simulation_keys
-        # Use PNR detectors to stay as general as possible
-        detector_list = [
-            pcvl.Detector.pnr() if m in self.measured_modes else None
-            for m in range(n_modes)
-        ]
-        detector_transform = DetectorTransform(
-            simulation_keys=keys, detectors=detector_list, partial_measurement=True
+        partial_measurement_result = partial_measurement(
+            detector_output, grouping=grouping
         )
-        # Apply transform
-        # Use state.tensor for now, because detector_transform does not support StateVector yet
-        output = detector_transform(state.tensor)
-
-        partial_measurement = PartialMeasurement.from_detector_transform_output(output)
-
-        # Apply grouping (if provided) on probabilities only
-        if self.grouping is not None:
-            partial_measurement.set_grouping(self.grouping)
-
-        # Warning: self.computation_space is not taken into account
-
-        return partial_measurement
-        """
-        return partial_measurement(
-            cast(DetectorTransformOutput, detector_output), grouping=grouping
-        )
+        return partial_measurement_result
 
 
 class MeasurementKind(Enum):
@@ -285,9 +256,10 @@ class MeasurementStrategy(metaclass=_MeasurementStrategyMeta):
         computation_space: ComputationSpace = ComputationSpace.UNBUNCHED,
         grouping: LexGrouping | ModGrouping | None = None,
     ) -> MeasurementStrategy:
-        """Create a partial measurement on the given mode indices."""
-        # TODO: the partial implementation is not end-to-end yet - to be completed in PML-146
-        # TODO: this implementation is partially tested (for instance, lack of backprop testing)
+        """
+        Create a partial measurement on the given mode indices.
+        Note that the specified grouping only applies on the resulting probabilities, not on the amplitudes.
+        """
 
         if len(modes) == 0:
             raise ValueError("modes cannot be empty")
