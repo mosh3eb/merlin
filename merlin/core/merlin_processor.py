@@ -9,7 +9,7 @@ import zlib
 from collections.abc import Iterable
 from contextlib import suppress
 from math import comb
-from typing import Any, Dict, cast
+from typing import Any, cast
 
 import numpy as np
 import perceval as pcvl
@@ -39,6 +39,12 @@ class MerlinProcessor:
 
     Only modules that subclass MerlinModule and implement `export_config()` are
     considered for offload. All other modules are always run locally.
+
+    Args:
+        remote_processor: A Perceval RemoteProcessor (legacy path).
+        session:          A Perceval ISession — e.g. from Scaleway or Perceval
+                          Cloud (preferred path).  Exactly one of
+                          ``remote_processor`` or ``session`` must be provided.
     """
 
     DEFAULT_MAX_SHOTS: int = 100_000
@@ -47,33 +53,67 @@ class MerlinProcessor:
 
     def __init__(
         self,
-        session: ISession,
+        remote_processor: RemoteProcessor | None = None,
+        session: ISession | None = None,
         microbatch_size: int = 32,
         timeout: float = 3600.0,
         max_shots_per_call: int | None = None,
         chunk_concurrency: int = 1,
     ):
-        if not isinstance(session, ISession):
-            raise TypeError(f"Expected pcvl.runtime.ISession, got {type(session)}")
+        # ── Validate: exactly one of the two must be provided ──
+        if remote_processor is not None and session is not None:
+            raise TypeError(
+                "Provide either 'remote_processor' or 'session', not both."
+            )
+        if remote_processor is None and session is None:
+            raise TypeError(
+                "One of 'remote_processor' or 'session' must be provided."
+            )
 
-        self.session = session
-        self.backend_name = getattr(session, "platform_name", "unknown")
+        self.session: ISession | None = None
+        self.remote_processor: RemoteProcessor | None = None
 
-        platform_specs: (
-            Dict
-        ) = self.session.default_rpc_handler.fetch_platform_details().get(
-            "specs", {}
-        )  # TODO: Protect this call properly
-        if hasattr(platform_specs, "available_commands"):
-            self.available_commands = platform_specs.get("available_commands")
-            if not self.available_commands:
-                warnings.warn(
-                    "Remote processor has no available commands. "
-                    "Ensure the platform is properly configured.",
-                    stacklevel=2,
+        if session is not None:
+            # ── ISession path ──
+            if not isinstance(session, ISession):
+                raise TypeError(
+                    f"Expected ISession, got {type(session)}"
                 )
-        else:
+            self.session = session
+            self.backend_name = getattr(session, "platform_name", "unknown")
+
+            # Build ONE RemoteProcessor from the session.  This single RP is
+            # reused for every chunk / layer — calling build_remote_processor()
+            # multiple times creates RPs that share session internals and
+            # corrupt each other's results.
+            self._session_rp: RemoteProcessor = session.build_remote_processor()
+
+            # Command detection is not supported on ISession-based platforms
+            # (e.g. Scaleway).  Leave empty so _run_chunk falls through to
+            # sample_count, which is the only primitive known to work
+            # reliably across all session-based backends.
             self.available_commands = []
+
+        else:
+            # ── Legacy RemoteProcessor path ──
+            assert remote_processor is not None  # for type checker
+            if not isinstance(remote_processor, RemoteProcessor):
+                raise TypeError(
+                    f"Expected RemoteProcessor, got {type(remote_processor)}"
+                )
+            self.remote_processor = remote_processor
+            self.backend_name = getattr(remote_processor, "name", "unknown")
+
+            if hasattr(remote_processor, "available_commands"):
+                self.available_commands = remote_processor.available_commands
+                if not self.available_commands:
+                    warnings.warn(
+                        "Remote processor has no available commands. "
+                        "Ensure the platform is properly configured.",
+                        stacklevel=2,
+                    )
+            else:
+                self.available_commands = []
 
         self.microbatch_size = microbatch_size
 
@@ -85,6 +125,16 @@ class MerlinProcessor:
 
         # Concurrency of chunk submissions inside a single quantum leaf
         self.chunk_concurrency = max(1, int(chunk_concurrency))
+
+        # ISession-created RPs share internal session state, so concurrent
+        # result retrieval corrupts responses.  Force sequential execution.
+        if self.session is not None and self.chunk_concurrency > 1:
+            logger.info(
+                "ISession detected: clamping chunk_concurrency to 1 "
+                "(concurrent result retrieval through a shared session "
+                "handler is not supported)"
+            )
+            self.chunk_concurrency = 1
 
         # Caches & global tracking
         # id(layer) -> {"config": ...}  (we do NOT cache an RP anymore)
@@ -205,11 +255,9 @@ class MerlinProcessor:
         def _status():
             js = state.get("current_status")
             base = {
-                "state": (
-                    "COMPLETE"
-                    if fut.done() and not js
-                    else (js.get("state") if js else "IDLE")
-                ),
+                "state": "COMPLETE"
+                if fut.done() and not js
+                else (js.get("state") if js else "IDLE"),
                 "progress": js.get("progress") if js else 0.0,
                 "message": js.get("message") if js else None,
                 "chunks_total": state["chunks_total"],
@@ -230,7 +278,14 @@ class MerlinProcessor:
                     # Policy: offload MerlinModule leaves; else run locally
                     if isinstance(layer, MerlinModule):
                         try:
-                            should_offload = bool(layer.should_offload())
+                            if self.session is not None:
+                                should_offload = bool(layer.should_offload())
+                            else:
+                                should_offload = bool(
+                                    layer.should_offload(
+                                        self.remote_processor, nsample
+                                    )
+                                )
                         except Exception:
                             should_offload = False
                     else:
@@ -268,39 +323,119 @@ class MerlinProcessor:
         pool_ctx: dict,
     ) -> torch.Tensor:
         """
-        Split the batch into chunks of size <= microbatch_size,
-        submit up to chunk_concurrency jobs concurrently, and stitch.
+        Split the batch into chunks and submit jobs.
+
+        - ISession path:  single job on the single session RP (no chunking).
+        - RemoteProcessor path:  pooled RPs with threaded concurrency.
         """
         if input_tensor.is_cuda:
             input_tensor = input_tensor.cpu()
 
-        B = input_tensor.shape[0]
-        if B <= self.microbatch_size and self.chunk_concurrency == 1:
-            # Fast path: single chunk, single job.
-            return self._run_chunk_wrapper(
-                layer, input_tensor, nsample, state, deadline, pool_ctx
-            )
-
         # Ensure we have (and cache) layer config
         cache = self._layer_cache.get(id(layer))
         if cache is None:
-            # export_config is provided by QuantumLayer but not on MerlinModule's
-            # static type, so we treat it dynamically for mypy.
             config = cast(Any, layer).export_config()
             self._layer_cache[id(layer)] = {"config": config}
         else:
             config = cache["config"]
 
+        B = input_tensor.shape[0]
+
+        if self.session is not None:
+            # ── ISession: single job, no chunking ──
+            # Chunking is not supported for session-based backends;
+            # the entire batch is submitted as one job on the single RP.
+            chunks = [(0, B)]
+            return self._run_chunks_sequential(
+                layer, config, input_tensor, chunks, nsample, state, deadline
+            )
+        else:
+            # ── Legacy RP: chunk by microbatch_size, pool + concurrency ──
+            chunks: list[tuple[int, int]] = []
+            start = 0
+            while start < B:
+                end = min(start + self.microbatch_size, B)
+                chunks.append((start, end))
+                start = end
+            return self._run_chunks_pooled(
+                layer, config, input_tensor, chunks, nsample, state, deadline,
+                pool_ctx
+            )
+
+    # ---- ISession sequential path ----
+
+    def _run_chunks_sequential(
+        self,
+        layer: MerlinModule,
+        config: dict,
+        input_tensor: torch.Tensor,
+        chunks: list[tuple[int, int]],
+        nsample: int | None,
+        state: dict,
+        deadline: float | None,
+    ) -> torch.Tensor:
+        """
+        Process chunks one at a time on the single session RP.
+        No pooling, no threads, no extra ``build_remote_processor()`` calls.
+        """
+        total_chunks = len(chunks)
+        layer_name = getattr(layer, "name", layer.__class__.__name__)
+        state["chunks_total"] += total_chunks
+        outputs: list[torch.Tensor] = []
+
+        # Configure the single session RP for this layer
+        rp = self._session_rp
+        rp.set_circuit(config["circuit"])
+        if config.get("input_state"):
+            input_state = pcvl.BasicState(config["input_state"])
+            rp.with_input(input_state)
+            n_photons = sum(config["input_state"])
+            rp.min_detected_photons_filter(n_photons)
+
+        for idx, (s, e) in enumerate(chunks):
+            if state.get("cancel_requested"):
+                raise self._cancelled_error()
+            if deadline is not None and time.time() >= deadline:
+                self.cancel_all()
+                raise TimeoutError("Remote call timed out (remote cancel issued)")
+
+            base_label = (
+                f"mer:{layer_name}:{state['call_id']}:{idx + 1}/{total_chunks}"
+            )
+            with self._lock:
+                state["active_chunks"] = 1
+
+            t = self._run_chunk(
+                layer, config, rp, input_tensor[s:e],
+                nsample, state, deadline,
+                job_base_label=base_label,
+            )
+            outputs.append(t)
+            with self._lock:
+                state["active_chunks"] = 0
+                state["chunks_done"] += 1
+
+        return torch.cat(outputs, dim=0)
+
+    # ---- Legacy RP pooled/concurrent path ----
+
+    def _run_chunks_pooled(
+        self,
+        layer: MerlinModule,
+        config: dict,
+        input_tensor: torch.Tensor,
+        chunks: list[tuple[int, int]],
+        nsample: int | None,
+        state: dict,
+        deadline: float | None,
+        pool_ctx: dict,
+    ) -> torch.Tensor:
+        """
+        Process chunks with a thread pool of cloned RemoteProcessors.
+        Only used for the legacy RemoteProcessor path.
+        """
         # Ensure a per-call pool exists for this layer
         self._ensure_pool_for_layer(config, layer, pool_ctx)
-
-        # Build chunks
-        chunks: list[tuple[int, int]] = []
-        start = 0
-        while start < B:
-            end = min(start + self.microbatch_size, B)
-            chunks.append((start, end))
-            start = end
 
         state["chunks_total"] += len(chunks)
         outputs: list[torch.Tensor | None] = [None] * len(chunks)
@@ -362,47 +497,9 @@ class MerlinProcessor:
             time.sleep(0.01)
 
         if errors:
-            # Raise first error (others are likely the same)
             raise errors[0]
 
         return torch.cat(outputs, dim=0)  # type: ignore[arg-type]
-
-    def _run_chunk_wrapper(
-        self,
-        layer: MerlinModule,
-        input_chunk: torch.Tensor,
-        nsample: int | None,
-        state: dict,
-        deadline: float | None,
-        pool_ctx: dict,
-    ) -> torch.Tensor:
-        """Non-chunking simple path using the per-call RP pool."""
-        cache = self._layer_cache.get(id(layer))
-        if cache is None:
-            config = cast(Any, layer).export_config()
-            self._layer_cache[id(layer)] = {"config": config}
-        else:
-            config = cache["config"]
-
-        # Ensure a per-call pool exists for this layer
-        self._ensure_pool_for_layer(config, layer, pool_ctx)
-
-        rp, pool_slot = self._pool_next_rp(id(layer), pool_ctx)
-        layer_name = getattr(layer, "name", layer.__class__.__name__)
-        base_label = f"mer:{layer_name}:{state['call_id']}:1/1:{pool_slot}"
-        t = self._run_chunk(
-            layer,
-            config,
-            rp,
-            input_chunk,
-            nsample,
-            state,
-            deadline,
-            job_base_label=base_label,
-        )
-        state["chunks_total"] += 1
-        state["chunks_done"] += 1
-        return t
 
     def _run_chunk(
         self,
@@ -419,7 +516,9 @@ class MerlinProcessor:
         from concurrent.futures import CancelledError  # used for cancellation mapping
 
         batch_size = input_chunk.shape[0]
-        if batch_size > self.microbatch_size:
+        # ISession sends the entire batch as a single job (no chunking),
+        # so the microbatch_size guard only applies to the legacy RP path.
+        if self.session is None and batch_size > self.microbatch_size:
             raise ValueError(
                 f"Chunk size {batch_size} exceeds microbatch {self.microbatch_size}. "
                 "Please report this bug."
@@ -542,6 +641,19 @@ class MerlinProcessor:
 
     # ---------------- Per-call RP pool helpers ----------------
 
+    def _create_fresh_rp(self) -> RemoteProcessor:
+        """
+        Provide a RemoteProcessor for pool / estimator use.
+
+        - ISession path: returns the single ``_session_rp`` (never create
+          more than one RP from a session).
+        - RemoteProcessor path: clones via ``_clone_remote_processor()``.
+        """
+        if self.session is not None:
+            return self._session_rp
+        else:
+            return self._clone_remote_processor(self.remote_processor)
+
     def _ensure_pool_for_layer(
         self, config: dict, layer: MerlinModule, pool_ctx: dict
     ) -> None:
@@ -553,8 +665,7 @@ class MerlinProcessor:
         # Build independent RPs (each with its own handler)
         rps: list[RemoteProcessor] = []
         for _ in range(pool_size):
-            # rp = self._clone_remote_processor(self.remote_processor)
-            rp = self.session.build_remote_processor()
+            rp = self._create_fresh_rp()
             rp.set_circuit(config["circuit"])
             if config.get("input_state"):
                 input_state = pcvl.BasicState(config["input_state"])
@@ -580,17 +691,17 @@ class MerlinProcessor:
 
     # ---------------- Utilities & mapping ----------------
 
-    # def _clone_remote_processor(self, rp: RemoteProcessor) -> RemoteProcessor:
-    #     """Create a sibling RemoteProcessor sharing auth/endpoint, with its OWN handler (avoid cross-thread sharing)."""
-    #     # IMPORTANT: do NOT pass rpc_handler=... (avoid sharing handler across threads)
-    #     return RemoteProcessor(
-    #         name=rp.name,
-    #         token=None,  # RemoteConfig pulls token from cache
-    #         url=rp.get_rpc_handler().url
-    #         if hasattr(rp.get_rpc_handler(), "url")
-    #         else None,
-    #         proxies=rp.proxies,
-    #     )
+    def _clone_remote_processor(self, rp: RemoteProcessor) -> RemoteProcessor:
+        """Create a sibling RemoteProcessor sharing auth/endpoint, with its OWN handler (avoid cross-thread sharing)."""
+        # IMPORTANT: do NOT pass rpc_handler=... (avoid sharing handler across threads)
+        return RemoteProcessor(
+            name=rp.name,
+            token=None,  # RemoteConfig pulls token from cache
+            url=rp.get_rpc_handler().url
+            if hasattr(rp.get_rpc_handler(), "url")
+            else None,
+            proxies=rp.proxies,
+        )
 
     def _iter_layers_in_order(self, module: nn.Module) -> Iterable[nn.Module]:
         """
@@ -635,6 +746,14 @@ class MerlinProcessor:
         layer: MerlinModule,
         nsample: int | None = None,
     ) -> torch.Tensor:
+        # Defensive: handle None results
+        if raw_results is None:
+            raise RuntimeError(
+                "Remote job returned no results. This may indicate a job "
+                "execution failure or an issue with the remote platform. "
+                "Check job status and platform availability."
+            )
+
         dist_size, state_to_index, valid_states = self._get_state_mapping(layer)
         output_tensors: list[torch.Tensor] = []
 
@@ -753,7 +872,6 @@ class MerlinProcessor:
             return dist_size, state_to_index, valid_states
 
         # Secondary path: a layer with direct circuit + input_state attributes
-        # Secondary path: a layer with direct circuit + input_state attributes
         if hasattr(layer, "circuit") and hasattr(layer, "input_state"):
             circuit = cast(Any, layer.circuit)
             input_state = cast(Any, layer.input_state)
@@ -833,8 +951,7 @@ class MerlinProcessor:
 
         # Prepare a child RemoteProcessor mirroring user's processor (token/proxies)
         config = cast(Any, layer).export_config()
-        # child_rp = self._clone_remote_processor(self.remote_processor)
-        child_rp = self.session.build_remote_processor()
+        child_rp = self._create_fresh_rp()
         child_rp.set_circuit(config["circuit"])
 
         # Mirror input_state & min_detected_photons if present in the exported config
