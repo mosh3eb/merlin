@@ -25,104 +25,120 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from merlin.core.computation_space import ComputationSpace
-from merlin.measurement.strategies import MeasurementStrategyV3, MeasurementType
+from merlin.measurement.strategies import MeasurementKind, MeasurementStrategy
 
 
-class TestMeasurementStrategyV3:
+class TestMeasurementStrategy:
+    @pytest.mark.parametrize(
+        ("factory", "expected_kind", "expected_space"),
+        [
+            (
+                lambda: MeasurementStrategy.probs(ComputationSpace.FOCK),
+                MeasurementKind.PROBABILITIES,
+                ComputationSpace.FOCK,
+            ),
+            (
+                lambda: MeasurementStrategy.mode_expectations(
+                    ComputationSpace.DUAL_RAIL
+                ),
+                MeasurementKind.MODE_EXPECTATIONS,
+                ComputationSpace.DUAL_RAIL,
+            ),
+            (
+                MeasurementStrategy.amplitudes,
+                MeasurementKind.AMPLITUDES,
+                ComputationSpace.UNBUNCHED,
+            ),
+        ],
+    )
+    def test_factory_creates_correct_instance(
+        self, factory, expected_kind, expected_space
+    ):
+        strategy = factory()
+        assert strategy.type == expected_kind
+        assert strategy.computation_space == expected_space
+
+    def test_factory_equality(self):
+        s1 = MeasurementStrategy.probs(ComputationSpace.FOCK)
+        s2 = MeasurementStrategy.probs(ComputationSpace.FOCK)
+        assert s1 == s2
+
     def test_partial_factory_creation_noncontiguous_modes(self):
         """Ensure factory wires fields without reordering sparse modes."""
-        strategy = MeasurementStrategyV3.partial(
+        strategy = MeasurementStrategy.partial(
             modes=[0, 2, 5],
             computation_space=ComputationSpace.DUAL_RAIL,
             grouping=None,
         )
-        assert strategy.type == MeasurementType.PARTIAL
+        assert strategy.type == MeasurementKind.PARTIAL
         assert strategy.measured_modes == (0, 2, 5)
         assert strategy.computation_space == ComputationSpace.DUAL_RAIL
         assert strategy.grouping is None
 
-    def test_partial_empty_modes(self):
+    @pytest.mark.parametrize(
+        "computation_space",
+        [
+            ComputationSpace.FOCK,
+            ComputationSpace.UNBUNCHED,
+            ComputationSpace.DUAL_RAIL,
+        ],
+    )
+    def test_partial_empty_modes(self, computation_space):
         with pytest.raises(ValueError, match="modes cannot be empty"):
-            MeasurementStrategyV3.partial(
+            MeasurementStrategy.partial(
                 modes=[],
-                computation_space=ComputationSpace.FOCK,
-            )
-        with pytest.raises(ValueError, match="modes cannot be empty"):
-            MeasurementStrategyV3.partial(
-                modes=[],
-                computation_space=ComputationSpace.UNBUNCHED,
-            )
-        with pytest.raises(ValueError, match="modes cannot be empty"):
-            MeasurementStrategyV3.partial(
-                modes=[],
-                computation_space=ComputationSpace.DUAL_RAIL,
+                computation_space=computation_space,
             )
 
-    def test_partial_duplicate_modes(self):
+    @pytest.mark.parametrize(
+        ("modes", "computation_space"),
+        [
+            ([0, 1, 1], ComputationSpace.FOCK),
+            ([2, 2, 3], ComputationSpace.UNBUNCHED),
+            ([0, 0], ComputationSpace.DUAL_RAIL),
+        ],
+    )
+    def test_partial_duplicate_modes(self, modes, computation_space):
         with pytest.raises(ValueError, match="Duplicate mode indices"):
-            MeasurementStrategyV3.partial(
-                modes=[0, 1, 1],
-                computation_space=ComputationSpace.FOCK,
-            )
-        with pytest.raises(ValueError, match="Duplicate mode indices"):
-            MeasurementStrategyV3.partial(
-                modes=[2, 2, 3],
-                computation_space=ComputationSpace.UNBUNCHED,
-            )
-        with pytest.raises(ValueError, match="Duplicate mode indices"):
-            MeasurementStrategyV3.partial(
-                modes=[0, 0],
-                computation_space=ComputationSpace.DUAL_RAIL,
+            MeasurementStrategy.partial(
+                modes=modes,
+                computation_space=computation_space,
             )
 
-    def test_partial_negative_mode_index(self):
+    @pytest.mark.parametrize(
+        ("modes", "computation_space"),
+        [
+            ([0, -1, 2], ComputationSpace.FOCK),
+            ([2, 1, -3], ComputationSpace.UNBUNCHED),
+            ([-1], ComputationSpace.DUAL_RAIL),
+        ],
+    )
+    def test_partial_negative_mode_index(self, modes, computation_space):
         with pytest.raises(ValueError, match="Negative mode index"):
-            MeasurementStrategyV3.partial(
-                modes=[0, -1, 2],
-                computation_space=ComputationSpace.FOCK,
-            )
-        with pytest.raises(ValueError, match="Negative mode index"):
-            MeasurementStrategyV3.partial(
-                modes=[2, 1, -3],
-                computation_space=ComputationSpace.UNBUNCHED,
-            )
-        with pytest.raises(ValueError, match="Negative mode index"):
-            MeasurementStrategyV3.partial(
-                modes=[-1],
-                computation_space=ComputationSpace.DUAL_RAIL,
+            MeasurementStrategy.partial(
+                modes=modes,
+                computation_space=computation_space,
             )
 
-    def test_validate_modes_out_of_bounds(self):
-        strategy = MeasurementStrategyV3.partial(
-            modes=[0, 2],
-            computation_space=ComputationSpace.FOCK,
+    @pytest.mark.parametrize(
+        ("modes", "computation_space", "n_modes"),
+        [
+            ([0, 2], ComputationSpace.FOCK, 2),
+            ([1, 10], ComputationSpace.UNBUNCHED, 3),
+            ([0, 4], ComputationSpace.DUAL_RAIL, 4),
+        ],
+    )
+    def test_validate_modes_out_of_bounds(self, modes, computation_space, n_modes):
+        strategy = MeasurementStrategy.partial(
+            modes=modes,
+            computation_space=computation_space,
         )
         with pytest.raises(ValueError, match="Invalid mode indices"):
-            strategy.validate_modes(
-                n_modes=2
-            )  # mode index 2 is out of bounds for n_modes=2
-
-        strategy = MeasurementStrategyV3.partial(
-            modes=[1, 10],
-            computation_space=ComputationSpace.UNBUNCHED,
-        )
-        with pytest.raises(ValueError, match="Invalid mode indices"):
-            strategy.validate_modes(
-                n_modes=3
-            )  # mode index 10 is out of bounds for n_modes=3
-
-        strategy = MeasurementStrategyV3.partial(
-            modes=[0, 4],
-            computation_space=ComputationSpace.DUAL_RAIL,
-        )
-        with pytest.raises(ValueError, match="Invalid mode indices"):
-            strategy.validate_modes(
-                n_modes=4
-            )  # mode index 4 is out of bounds for n_modes=4
+            strategy.validate_modes(n_modes=n_modes)
 
     def test_partial_returns_immutable_object(self):
         """The strategy dataclass is frozen to avoid mutation after construction."""
-        strategy = MeasurementStrategyV3.partial(
+        strategy = MeasurementStrategy.partial(
             modes=[0, 2],
             computation_space=ComputationSpace.FOCK,
         )
@@ -132,7 +148,7 @@ class TestMeasurementStrategyV3:
 
     def test_get_unmeasured_modes(self):
         """Unmeasured modes should be the complement of measured modes."""
-        strategy = MeasurementStrategyV3.partial(
+        strategy = MeasurementStrategy.partial(
             modes=[0, 2, 4],
             computation_space=ComputationSpace.FOCK,
         )
@@ -141,19 +157,19 @@ class TestMeasurementStrategyV3:
 
     def test_all_modes_measured_warning(self):
         """Both helpers surface the warning when the selection covers all modes."""
-        strategy = MeasurementStrategyV3.partial(
+        strategy = MeasurementStrategy.partial(
             modes=[0, 1, 2],
             computation_space=ComputationSpace.FOCK,
         )
 
-        with pytest.raises(
-            Warning,
+        with pytest.warns(
+            UserWarning,
             match="All modes are measured",
         ):
             strategy.validate_modes(n_modes=3)
 
-        with pytest.raises(
-            Warning,
+        with pytest.warns(
+            UserWarning,
             match="All modes are measured",
         ):
-            strategy.get_unmeasured_modes(n_modes=3)
+            _ = strategy.get_unmeasured_modes(n_modes=3)

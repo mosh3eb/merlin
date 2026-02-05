@@ -122,9 +122,8 @@ def test_prepare_input_state_default_generation():
         circuit_m=4,
         amplitude_encoding=False,
     )
-    assert state == ML.StateGenerator.generate_state(
-        4, 2, ML.StatePattern.SPACED
-    )
+    assert state == ML.StateGenerator.generate_state(4, 2, ML.StatePattern.SPACED)
+
 
 def test_validate_and_resolve_circuit_source_builder_conflict():
     builder = ML.CircuitBuilder(n_modes=2)
@@ -186,12 +185,14 @@ def test_setup_noise_and_detectors_amplitudes_rejects_detectors():
     result = validate_and_resolve_circuit_source(None, None, experiment, None, None)
     resolved = resolve_circuit(result, pcvl)
 
-    with pytest.raises(RuntimeError, match="does not support experiments with detectors"):
+    with pytest.raises(
+        RuntimeError, match="does not support experiments with detectors"
+    ):
         setup_noise_and_detectors(
             resolved.experiment,
             resolved.circuit,
             ComputationSpace.FOCK,
-            MeasurementStrategy.AMPLITUDES,
+            MeasurementStrategy.amplitudes(computation_space=ComputationSpace.FOCK),
         )
 
 
@@ -205,7 +206,7 @@ def test_setup_noise_and_detectors_computation_space_overrides():
         resolved.experiment,
         resolved.circuit,
         ComputationSpace.UNBUNCHED,
-        MeasurementStrategy.PROBABILITIES,
+        MeasurementStrategy.probs(computation_space=ComputationSpace.UNBUNCHED),
     )
     assert config.has_custom_detectors is True
     assert len(config.detectors) == 2

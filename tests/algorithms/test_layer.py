@@ -30,9 +30,16 @@ import numpy as np
 import perceval as pcvl
 import pytest
 import torch
+import torch.nn as nn
 from perceval import FFCircuitProvider
 
 import merlin as ML
+from merlin.core.computation_space import ComputationSpace
+from merlin.core.partial_measurement import (
+    PartialMeasurement,
+)
+from merlin.core.probability_distribution import ProbabilityDistribution
+from merlin.core.state_vector import StateVector
 
 
 class TestQuantumLayer:
@@ -98,7 +105,7 @@ class TestQuantumLayer:
             experiment=experiment,
             input_state=[1, 0],
             trainable_parameters=["phi"],
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         expected = pcvl.Circuit(2)
@@ -132,7 +139,7 @@ class TestQuantumLayer:
                 input_size=0,
                 experiment=experiment,
                 input_state=[1, 0],
-                measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+                measurement_strategy=ML.MeasurementStrategy.probs(),
             )
 
     def test_amplitude_encoding_rejects_input_size(self):
@@ -210,8 +217,9 @@ class TestQuantumLayer:
                 input_size=0,
                 experiment=experiment,
                 input_state=[1, 0],
-                computation_space=ML.ComputationSpace.FOCK,
-                measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+                measurement_strategy=ML.MeasurementStrategy.amplitudes(
+                    computation_space=ML.ComputationSpace.FOCK
+                ),
             )
 
     def test_builder_based_layer_creation(self):
@@ -225,7 +233,7 @@ class TestQuantumLayer:
             input_size=3,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
         assert layer.input_size == 3
         assert layer.thetas[0].shape[0] == 2 * 4 * (
@@ -242,7 +250,7 @@ class TestQuantumLayer:
             input_size=5,
             input_state=[1, 0, 0, 0, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
         pcvl.pdisplay(layer.circuit, output_format=pcvl.Format.TEXT)
 
@@ -265,7 +273,7 @@ class TestQuantumLayer:
             input_size=2,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 3))
@@ -284,7 +292,7 @@ class TestQuantumLayer:
             circuit=circuit,
             n_photons=1,
             amplitude_encoding=True,
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=ML.MeasurementStrategy.NONE,
             trainable_parameters=[],
             input_parameters=[],
         )
@@ -318,7 +326,7 @@ class TestQuantumLayer:
             input_size=4,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         with pytest.raises(ValueError, match="Inconsistent batch dimensions"):
@@ -335,7 +343,7 @@ class TestQuantumLayer:
             input_size=4,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         params, batch_dim = layer._prepare_classical_parameters([
@@ -360,7 +368,7 @@ class TestQuantumLayer:
                 amplitude_encoding=True,
                 input_parameters=["px"],
                 trainable_parameters=[],
-                measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+                measurement_strategy=ML.MeasurementStrategy.NONE,
             )
 
     def test_amplitude_encoding_requires_amplitude_input(self):
@@ -370,7 +378,7 @@ class TestQuantumLayer:
             circuit=circuit,
             n_photons=1,
             amplitude_encoding=True,
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=ML.MeasurementStrategy.NONE,
             trainable_parameters=[],
             input_parameters=[],
         )
@@ -389,7 +397,7 @@ class TestQuantumLayer:
             input_size=4,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         input_a = torch.rand(2, 2)
@@ -414,7 +422,7 @@ class TestQuantumLayer:
         layer = ML.QuantumLayer(
             builder=builder,
             input_state=[1, 0, 0],
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         assert layer.input_size == 2
@@ -427,8 +435,9 @@ class TestQuantumLayer:
         layer = ML.QuantumLayer(
             circuit=circuit,
             input_state=[1, 0],
-            computation_space=ML.ComputationSpace.UNBUNCHED,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(
+                computation_space=ML.ComputationSpace.UNBUNCHED
+            ),
         )
 
         amplitudes = torch.tensor([[2.0 + 0j, 0.0 + 0j]], dtype=torch.cfloat)
@@ -447,8 +456,9 @@ class TestQuantumLayer:
         layer = ML.QuantumLayer(
             circuit=circuit,
             input_state=[1, 0],
-            computation_space=ML.ComputationSpace.FOCK,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(
+                computation_space=ML.ComputationSpace.FOCK
+            ),
         )
 
         amplitudes = torch.tensor([[2.0 + 0j, 0.0 + 0j]], dtype=torch.cfloat)
@@ -470,7 +480,7 @@ class TestQuantumLayer:
             input_size=2,
             input_state=[1, 0, 0, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 3))
@@ -490,7 +500,7 @@ class TestQuantumLayer:
             input_size=0,
             circuit=circuit,
             n_photons=2,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         expected_state = ML.StateGenerator.generate_state(
@@ -510,7 +520,7 @@ class TestQuantumLayer:
             input_size=2,
             input_state=[1, 1, 0, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 3))
@@ -544,7 +554,7 @@ class TestQuantumLayer:
             input_size=2,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         # Compose with a linear head (as in the old test)
@@ -610,7 +620,7 @@ class TestQuantumLayer:
             input_size=2,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
         model_normal = torch.nn.Sequential(
             layer_normal, torch.nn.Linear(layer_normal.output_size, 3)
@@ -620,7 +630,7 @@ class TestQuantumLayer:
             input_size=2,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
         model_reservoir = torch.nn.Sequential(
             layer_reservoir, torch.nn.Linear(layer_reservoir.output_size, 3)
@@ -656,15 +666,15 @@ class TestQuantumLayer:
 
         configs = [
             {
-                "measurement_strategy": ML.MeasurementStrategy.PROBABILITIES,
+                "measurement_strategy": ML.MeasurementStrategy.probs(),
                 "grouping_policy": None,
             },
             {
-                "measurement_strategy": ML.MeasurementStrategy.PROBABILITIES,
+                "measurement_strategy": ML.MeasurementStrategy.probs(),
                 "grouping_policy": ML.LexGrouping,
             },
             {
-                "measurement_strategy": ML.MeasurementStrategy.PROBABILITIES,
+                "measurement_strategy": ML.MeasurementStrategy.probs(),
                 "grouping_policy": ML.ModGrouping,
             },
         ]
@@ -704,6 +714,28 @@ class TestQuantumLayer:
                 assert output.shape == (3, 4)
                 assert torch.all(torch.isfinite(output))
 
+    def test_probabilities_grouping_return_object(self):
+        """Grouped probabilities with return_object should yield ProbabilityDistribution of grouped size."""
+        builder = ML.CircuitBuilder(n_modes=4)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        layer = ML.QuantumLayer(
+            input_size=2,
+            input_state=[1, 0, 1, 0],
+            builder=builder,
+            measurement_strategy=ML.MeasurementStrategy.probs(
+                ComputationSpace.UNBUNCHED, grouping=ML.ModGrouping(6, 4)
+            ),
+            return_object=True,
+        )
+        assert layer.output_size == 6
+        x = torch.rand(3, 2)
+        output = layer(x)
+        assert isinstance(output, ProbabilityDistribution)
+        assert output.tensor.shape == (3, 4)
+
     def test_string_representation(self):
         """Test string representation of the layer."""
         builder = ML.CircuitBuilder(n_modes=4)
@@ -715,7 +747,7 @@ class TestQuantumLayer:
             input_size=3,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         layer_str = str(layer)
@@ -748,7 +780,7 @@ class TestQuantumLayer:
                 input_size=3,
                 input_state=[1, 0, 1, 0],
                 builder=builder,
-                measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+                measurement_strategy=ML.MeasurementStrategy.probs(),
             )
 
         with pytest.raises(ValueError):
@@ -756,11 +788,11 @@ class TestQuantumLayer:
                 input_size=2,
                 n_photons=5,  # more photons than modes
                 builder=builder,
-                measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+                measurement_strategy=ML.MeasurementStrategy.probs(),
             )
 
-        with pytest.raises(TypeError):
-            ML.QuantumLayer.simple(n_params=0)
+        with pytest.raises(ValueError):
+            ML.QuantumLayer.simple(input_size=21)
 
     def test_subset_combinations_respected(self):
         """Ensure subset combinations expose more parameters without breaking input size checks."""
@@ -775,7 +807,7 @@ class TestQuantumLayer:
             input_size=3,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         assert layer.input_size == 3
@@ -791,7 +823,7 @@ class TestQuantumLayer:
             input_size=2,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=ML.MeasurementStrategy.NONE,
         )
 
         # Get actual distribution size
@@ -804,7 +836,7 @@ class TestQuantumLayer:
             input_size=2,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=ML.MeasurementStrategy.NONE,
         )
 
         x = torch.rand(2, 2)
@@ -836,7 +868,7 @@ class TestQuantumLayer:
             input_state=input_state,
             trainable_parameters=["phi"],  # Parameters to train (by prefix)
             input_parameters=[],  # No input parameters
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         output_size = math.comb(3, sum(input_state))  # Calculate output size
@@ -850,7 +882,7 @@ class TestQuantumLayer:
                 input_state=input_state,
                 trainable_parameters=["phi"],  # Parameters to train (by prefix)
                 input_parameters=None,  # No input parameters
-                measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+                measurement_strategy=ML.MeasurementStrategy.probs(),
             )
 
         # Test layer properties
@@ -895,7 +927,7 @@ class TestQuantumLayer:
             input_state=input_state,
             trainable_parameters=[],  # No trainable parameters
             input_parameters=["phi"],  # No input parameters
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
         model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 3))
 
@@ -952,8 +984,9 @@ class TestQuantumLayer:
             n_photons=n,
             circuit=circuit,
             input_parameters=["phi"],  # No input parameters
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
-            computation_space=computation_space,
+            measurement_strategy=ML.MeasurementStrategy.amplitudes(
+                computation_space=computation_space
+            ),
         )
 
         o = layer.forward(torch.rand(batch_size, m))
@@ -977,3 +1010,377 @@ class TestQuantumLayer:
                 computation_space=ML.ComputationSpace.FOCK,
                 input_state=bs_annot,
             )
+
+    # TODO Change the default returns when the default measurement strategy will be changed. Also, uncomment the partial_measurment tests when it is ready
+    def test_forward_output_objects(self):
+        # MS:None, ro:false
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+        )
+        res_no_obj = qlayer()
+
+        assert isinstance(res_no_obj, torch.Tensor)
+
+        # MS:None, ro:true
+        qlayer.return_object = True
+        res_obj = qlayer()
+        assert isinstance(res_obj, ProbabilityDistribution)
+        assert isinstance(res_obj.tensor, torch.Tensor)
+        assert np.allclose(res_no_obj.detach().numpy(), res_obj.tensor.detach().numpy())
+
+        # -------------------------------------------------------------------------------#
+
+        # MS:amplitudes, ro:false
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+            measurement_strategy=ML.MeasurementStrategy.NONE,
+        )
+
+        res_no_obj = qlayer()
+
+        assert isinstance(qlayer(), torch.Tensor)
+
+        # MS:amplitudes, ro:true
+        qlayer.return_object = True
+        res_obj = qlayer()
+
+        assert isinstance(qlayer(), StateVector)
+        assert isinstance(res_obj.tensor, torch.Tensor)
+        assert np.allclose(res_no_obj.detach().numpy(), res_obj.tensor.detach().numpy())
+
+        # -------------------------------------------------------------------------------#
+
+        # MS:probs, ro:false
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+            measurement_strategy=ML.MeasurementStrategy.probs(),
+        )
+        res_no_obj = qlayer()
+
+        assert isinstance(res_no_obj, torch.Tensor)
+
+        # MS:probs, ro:true
+        qlayer.return_object = True
+        res_obj = qlayer()
+
+        assert isinstance(res_obj, ProbabilityDistribution)
+        assert isinstance(res_obj.tensor, torch.Tensor)
+        assert np.allclose(res_no_obj.detach().numpy(), res_obj.tensor.detach().numpy())
+
+        # -------------------------------------------------------------------------------#
+
+        # MS:mode_expectation, ro:false
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+            measurement_strategy=ML.MeasurementStrategy.mode_expectations(
+                ComputationSpace.UNBUNCHED
+            ),
+        )
+
+        res_no_obj = qlayer()
+
+        assert isinstance(res_no_obj, torch.Tensor)
+
+        # MS:mode_expectation, ro:true
+        qlayer.return_object = True
+        res_obj = qlayer()
+
+        assert isinstance(res_obj, torch.Tensor)
+        assert np.allclose(res_obj.detach().numpy(), res_obj.detach().numpy())
+
+        # -------------------------------------------------------------------------------#
+
+        # TODO uncomment when partial is ready
+        # MS:partial, ro:false
+        builder = ML.CircuitBuilder(5)
+        builder.add_entangling_layer()
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=[0, 1, 0, 1, 0],
+            measurement_strategy=ML.MeasurementStrategy.partial(
+                modes=[0, 1],
+            ),
+        )
+
+        res_no_obj = qlayer()
+        assert isinstance(res_no_obj, PartialMeasurement)
+
+        # MS:partial, ro:true
+        qlayer.return_object = True
+
+        res_obj = qlayer()
+        assert isinstance(res_obj, PartialMeasurement)
+        assert isinstance(res_obj.tensor, torch.Tensor)
+        assert np.allclose(
+            res_no_obj.tensor.detach().numpy(), res_obj.tensor.detach().numpy()
+        )
+
+    def test_forward_output_objects_new_api(self):
+        builder = ML.CircuitBuilder(4)
+        builder.add_entangling_layer()
+        input_state = [0, 1, 0, 1]
+
+        # PROBABILITIES, return_object=False
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=input_state,
+            measurement_strategy=ML.MeasurementStrategy.probs(
+                ComputationSpace.UNBUNCHED
+            ),
+        )
+        res_no_obj = qlayer()
+        assert isinstance(res_no_obj, torch.Tensor)
+
+        # PROBABILITIES, return_object=True
+        qlayer.return_object = True
+        res_obj = qlayer()
+        assert isinstance(res_obj, ProbabilityDistribution)
+        assert isinstance(res_obj.tensor, torch.Tensor)
+        assert np.allclose(res_no_obj.detach().numpy(), res_obj.tensor.detach().numpy())
+
+        # AMPLITUDES, return_object=False
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=input_state,
+            measurement_strategy=ML.MeasurementStrategy.amplitudes(),
+        )
+        res_no_obj = qlayer()
+        assert isinstance(res_no_obj, torch.Tensor)
+
+        # AMPLITUDES, return_object=True
+        qlayer.return_object = True
+        res_obj = qlayer()
+        assert isinstance(res_obj, StateVector)
+        assert isinstance(res_obj.tensor, torch.Tensor)
+        assert np.allclose(res_no_obj.detach().numpy(), res_obj.tensor.detach().numpy())
+
+        # MODE_EXPECTATIONS, return_object=False
+        qlayer = ML.QuantumLayer(
+            input_size=0,
+            builder=builder,
+            input_state=input_state,
+            measurement_strategy=ML.MeasurementStrategy.mode_expectations(
+                ComputationSpace.UNBUNCHED
+            ),
+        )
+        res_no_obj = qlayer()
+        assert isinstance(res_no_obj, torch.Tensor)
+
+        # MODE_EXPECTATIONS, return_object=True (still a tensor)
+        qlayer.return_object = True
+        res_obj = qlayer()
+        assert isinstance(res_obj, torch.Tensor)
+        assert np.allclose(res_no_obj.detach().numpy(), res_obj.detach().numpy())
+
+    def test_gradient_through_typed_objects_ProbabilityDistribution(self):
+        """Test that gradients flow through the layer."""
+
+        builder = ML.CircuitBuilder(n_modes=4)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        class custom_layer(nn.Module):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.qlayer = ML.QuantumLayer(
+                    input_size=2,
+                    input_state=[1, 1, 0, 0],
+                    builder=builder,
+                    measurement_strategy=ML.MeasurementStrategy.probs(),
+                    return_object=True,
+                )
+                self.clayer = torch.nn.Linear(
+                    self.qlayer.output_size,
+                    3,
+                )
+
+            def forward(self, x):
+                output_q = self.qlayer(x)
+                return self.clayer(output_q.tensor)
+
+        model = custom_layer()
+        x = torch.rand(5, 2, requires_grad=True)
+        output = model(x)
+        loss = output.sum()
+        loss.backward()
+
+        # Check that input gradients exist
+        assert x.grad is not None
+
+        # Check that layer parameters have gradients
+        has_trainable_params = False
+        for param in model.parameters():
+            if param.requires_grad:
+                has_trainable_params = True
+                assert param.grad is not None
+
+        assert has_trainable_params, "Model should have trainable parameters"
+
+    def test_gradient_through_typed_objects_StateVector(self):
+        """Test that gradients flow through the layer."""
+
+        builder = ML.CircuitBuilder(n_modes=4)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        class custom_layer(nn.Module):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.qlayer = ML.QuantumLayer(
+                    input_size=2,
+                    input_state=[1, 1, 0, 0],
+                    builder=builder,
+                    measurement_strategy=ML.MeasurementStrategy.NONE,
+                    return_object=True,
+                )
+                self.clayer = torch.nn.Linear(
+                    self.qlayer.output_size,
+                    3,
+                )
+
+            def forward(self, x):
+                output_q = self.qlayer(x)
+                return self.clayer(output_q.tensor.abs())
+
+        model = custom_layer()
+        x = torch.rand(5, 2, requires_grad=True)
+        output = model(x)
+        loss = output.sum()
+        loss.backward()
+
+        # Check that input gradients exist
+        assert x.grad is not None
+
+        # Check that layer parameters have gradients
+        has_trainable_params = False
+        for param in model.parameters():
+            if param.requires_grad:
+                has_trainable_params = True
+                assert param.grad is not None
+
+        assert has_trainable_params, "Model should have trainable parameters"
+
+    # TODO Define test_gradient_through_typed_objects_PartialMeasurement when MeasurementStrategy is completed.
+
+    def test_gradient_through_typed_objects_outputs_tensor(self):
+        """Test that gradients flow through the layer."""
+
+        builder = ML.CircuitBuilder(n_modes=4)
+        builder.add_entangling_layer(trainable=True, name="U1")
+        builder.add_angle_encoding(modes=[0, 1], name="input")
+        builder.add_entangling_layer(trainable=True, name="U2")
+
+        to_test = [
+            [
+                ML.MeasurementStrategy.mode_expectations(ComputationSpace.UNBUNCHED),
+                False,
+            ],
+            [
+                ML.MeasurementStrategy.mode_expectations(ComputationSpace.UNBUNCHED),
+                True,
+            ],
+            [ML.MeasurementStrategy.probs(), False],
+            [ML.MeasurementStrategy.NONE, False],
+        ]
+        for strategy, typed_object in to_test:
+
+            class custom_layer(nn.Module):
+                def __init__(
+                    self,
+                    *args,
+                    _strategy=strategy,
+                    _typed_object=typed_object,
+                    **kwargs,
+                ):
+                    super().__init__(*args, **kwargs)
+                    self.qlayer = ML.QuantumLayer(
+                        input_size=2,
+                        input_state=[1, 1, 0, 0],
+                        builder=builder,
+                        measurement_strategy=_strategy,
+                        return_object=_typed_object,
+                    )
+                    self.clayer = torch.nn.Linear(
+                        self.qlayer.output_size,
+                        3,
+                    )
+
+                def forward(self, x):
+                    output_q = self.qlayer(x)
+                    return self.clayer(output_q.abs())
+
+            model = custom_layer()
+            x = torch.rand(5, 2, requires_grad=True)
+            output = model(x)
+            loss = output.sum()
+            loss.backward()
+
+            # Check that input gradients exist
+            assert x.grad is not None
+
+            # Check that layer parameters have gradients
+            has_trainable_params = False
+            for param in model.parameters():
+                if param.requires_grad:
+                    has_trainable_params = True
+                    assert param.grad is not None
+
+            assert has_trainable_params, "Model should have trainable parameters"
+
+
+def test_simple_num_photons_modes_and_input_state():
+    for i in range(1, 15):
+        ql = ML.QuantumLayer.simple(input_size=i)
+        if i < 2:
+            assert ql.quantum_layer.n_photons == 1
+            assert ql.quantum_layer.input_state == [0, 1]
+        else:
+            assert ql.quantum_layer.n_photons == (i) // 2
+            assert np.sum(ql.quantum_layer.input_state) == (i) // 2
+            assert len(ql.quantum_layer.input_state) == i
+
+            input_state = [0] * (i)
+            for j in range(len(input_state)):
+                if j % 2 == 1:
+                    input_state[j] = 1
+            assert ql.quantum_layer.input_state == input_state
+
+
+def test_simple_parameters():
+    for i in range(1, 15):
+        ql = ML.QuantumLayer.simple(input_size=i)
+        params = list(ql.quantum_layer.parameters())
+        named_params = [k[0] for k in ql.quantum_layer.named_parameters()]
+        if i < 2:
+            assert params[0].numel() == 2
+            assert params[0].numel() == 2
+            assert len(params) == 2
+            assert "LI_simple" in named_params
+            assert "RI_simple" in named_params
+        else:
+            assert params[0].numel() == i * (i - 1)
+            assert params[1].numel() == i * (i - 1)
+            assert len(params) == 2
+            assert "LI_simple" in named_params
+            assert "RI_simple" in named_params

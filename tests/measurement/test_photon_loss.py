@@ -117,20 +117,22 @@ class TestPhotonLossWithQuantumLayer:
                 input_size=0,
                 experiment=experiment,
                 input_state=[1, 0],
-                measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+                measurement_strategy=ML.MeasurementStrategy.NONE,
             )
 
         prob_layer = ML.QuantumLayer(
             input_size=0,
             experiment=experiment,
             input_state=[1, 0],
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
         expectation_layer = ML.QuantumLayer(
             input_size=0,
             experiment=experiment,
             input_state=[1, 0],
-            measurement_strategy=ML.MeasurementStrategy.MODE_EXPECTATIONS,
+            measurement_strategy=ML.MeasurementStrategy.mode_expectations(
+                computation_space=ComputationSpace.UNBUNCHED
+            ),
         )
         prob_output = prob_layer()
         expectation_output = expectation_layer()
@@ -145,7 +147,7 @@ class TestPhotonLossWithQuantumLayer:
             input_size=0,
             experiment=experiment_no_noise,
             input_state=[1, 0],
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=ML.MeasurementStrategy.NONE,
         )
 
         keys_amplitudes = amplitude_layer.output_keys
@@ -619,8 +621,6 @@ class TestPhotonLossWithFidelityKernel:
         feature_map = ML.FeatureMap.simple(
             input_size=1,
             n_modes=3,
-            n_photons=3,
-            trainable=False,
         )
         input_state = [1, 1, 1]
 
@@ -632,8 +632,6 @@ class TestPhotonLossWithFidelityKernel:
         feature_map_noise = ML.FeatureMap.simple(
             input_size=1,
             n_modes=3,
-            n_photons=3,
-            trainable=False,
         )
         experiment_noise = feature_map_noise.experiment
         experiment_noise.noise = pcvl.NoiseModel(brightness=0.8, transmittance=1.0)

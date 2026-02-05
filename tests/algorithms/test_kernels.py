@@ -306,8 +306,7 @@ class TestFidelityKernel:
         )
 
         feature_forward = (
-            feature_map
-            .compute_unitary(torch.as_tensor(X1, dtype=feature_map.dtype))
+            feature_map.compute_unitary(torch.as_tensor(X1, dtype=feature_map.dtype))
             .detach()
             .cpu()
             .numpy()
@@ -322,8 +321,7 @@ class TestFidelityKernel:
         )
 
         feature_backward = (
-            feature_map
-            .compute_unitary(torch.as_tensor(X2, dtype=feature_map.dtype))
+            feature_map.compute_unitary(torch.as_tensor(X2, dtype=feature_map.dtype))
             .detach()
             .cpu()
             .numpy()
@@ -495,12 +493,13 @@ class TestFeatureMapFactoryMethods:
 
     def test_simple_factory_method(self):
         """Test the simple FeatureMap factory method."""
-        feature_map = FeatureMap.simple(input_size=2, n_modes=6, n_photons=2)
+        feature_map = FeatureMap.simple(input_size=2, n_modes=6)
 
         assert feature_map.input_size == 2
         assert feature_map.circuit.m == 6
         assert feature_map.is_trainable
-        assert "phi" in feature_map.trainable_parameters
+        assert "LI_simple" in feature_map.trainable_parameters
+        assert "RI_simple" in feature_map.trainable_parameters
 
     def test_simple_factory_default_photons(self):
         """Test simple factory with default n_photons (should equal input_size)."""
@@ -509,18 +508,36 @@ class TestFeatureMapFactoryMethods:
         assert feature_map.input_size == 3
         # Should default to a 3-photon configuration
 
-    def test_simple_factory_can_disable_training(self):
-        """Simple factory can build static feature maps when requested."""
-        feature_map = FeatureMap.simple(input_size=2, n_modes=4, trainable=False)
-
-        assert feature_map.input_size == 2
-        assert not feature_map.is_trainable
-
     def test_simple_factory_raises_when_input_exceeds_modes(self):
         with pytest.raises(
             ValueError, match="You cannot encore more features than mode with Builder"
         ):
             FeatureMap.simple(input_size=5, n_modes=4)
+
+    def test_simple_factory_raises_when_input_or_modes_exceeds_20(self):
+        with pytest.raises(ValueError):
+            FeatureMap.simple(input_size=21, n_modes=21)
+        with pytest.raises(ValueError):
+            FeatureMap.simple(input_size=21)
+
+    def test_simple_num_photons_modes_and_input_state(self):
+        for i in range(1, 15):
+            kernel = FeatureMap.simple(input_size=i)
+            if i == 1:
+                assert kernel.circuit.m == 2
+            else:
+                assert kernel.circuit.m == i
+        for i in range(1, 15):
+            kernel = FeatureMap.simple(input_size=1, n_modes=i)
+            if i == 1:
+                assert kernel.circuit.m == 2
+            else:
+                assert kernel.circuit.m == i
+
+    def test_simple_trainable(self):
+        for i in range(1, 21):
+            kernel = FeatureMap.simple(input_size=i)
+            assert kernel.is_trainable
 
 
 class TestFidelityKernelFactoryMethods:
@@ -573,13 +590,13 @@ class TestFidelityKernelFactoryMethods:
 
     def test_simple_factory_method(self):
         """Test the simple FidelityKernel factory method."""
-        kernel = FidelityKernel.simple(input_size=2, n_modes=4, n_photons=2)
+        kernel = FidelityKernel.simple(input_size=2, n_modes=4)
 
         assert kernel.input_size == 2
         assert kernel.feature_map.circuit.m == 4
         assert len(kernel.input_state) == 4
         assert sum(kernel.input_state) == 2
-        assert kernel.input_state == [1, 0, 1, 0]
+        assert kernel.input_state == [0, 1, 0, 1]
 
     def test_simple_factory_default_photons(self):
         """Test simple factory with default n_photons."""
@@ -587,16 +604,59 @@ class TestFidelityKernelFactoryMethods:
 
         assert kernel.input_size == 3
         assert sum(kernel.input_state) == 3  # Should default to input_size photons
-        assert kernel.input_state == [1, 0, 1, 0, 1, 0]
+        assert kernel.input_state == [0, 1, 0, 1, 0, 1]
 
-    def test_simple_factory_with_custom_input_state(self):
-        """Test simple factory with custom input state."""
-        custom_input_state = [1, 1, 0, 0]
-        kernel = FidelityKernel.simple(
-            input_size=2, n_modes=4, input_state=custom_input_state
-        )
+    def test_simple_num_photons_modes_and_input_state(self):
+        for i in range(1, 15):
+            kernel = FidelityKernel.simple(input_size=i)
+            if i == 1:
+                assert kernel.feature_map.circuit.m == 2
+                assert kernel.input_state == [0, 1]
+            else:
+                assert kernel.feature_map.circuit.m == i
+                assert np.sum(kernel.input_state) == (i) // 2
+                assert len(kernel.input_state) == i
 
-        assert kernel.input_state == custom_input_state
+                input_state = [0] * (i)
+                for j in range(len(input_state)):
+                    if j % 2 == 1:
+                        input_state[j] = 1
+                assert kernel.input_state == input_state
+        for i in range(1, 15):
+            kernel = FidelityKernel.simple(input_size=1, n_modes=i)
+            if i == 1:
+                assert kernel.feature_map.circuit.m == 2
+                assert kernel.input_state == [0, 1]
+            else:
+                assert kernel.feature_map.circuit.m == i
+                assert np.sum(kernel.input_state) == (i) // 2
+                assert len(kernel.input_state) == i
+
+                input_state = [0] * (i)
+                for j in range(len(input_state)):
+                    if j % 2 == 1:
+                        input_state[j] = 1
+                assert kernel.input_state == input_state
+
+    def test_simple_parameters(self):
+        for i in range(1, 15):
+            kernel = FidelityKernel.simple(input_size=i)
+            params = list(kernel.parameters())
+            named_params = [i[0] for i in kernel.named_parameters()]
+            if i == 1:
+                assert params[0].numel() == 2
+                assert params[0].numel() == 2
+                assert len(params) == 2
+                assert kernel.feature_map.is_trainable
+                assert "LI_simple" in named_params
+                assert "RI_simple" in named_params
+            else:
+                assert params[0].numel() == i * (i - 1)
+                assert params[1].numel() == i * (i - 1)
+                assert len(params) == 2
+                assert kernel.feature_map.is_trainable
+                assert "LI_simple" in named_params
+                assert "RI_simple" in named_params
 
 
 class TestKernelCircuitBuilder:
@@ -615,8 +675,7 @@ class TestKernelCircuitBuilder:
         device = torch.device("cpu")
         builder = KernelCircuitBuilder()
         feature_map = (
-            builder
-            .input_size(2)
+            builder.input_size(2)
             .n_modes(4)
             .device(device)
             .dtype(torch.float64)
@@ -637,8 +696,7 @@ class TestKernelCircuitBuilder:
         assert not feature_map.is_trainable
 
         feature_map = (
-            builder
-            .input_size(2)
+            builder.input_size(2)
             .n_modes(4)
             .trainable(True, prefix="phi_")
             .build_feature_map()
@@ -663,8 +721,7 @@ class TestKernelCircuitBuilder:
         builder = KernelCircuitBuilder()
         custom_state = [2, 0, 0, 0]
         kernel = (
-            builder
-            .input_size(2)
+            builder.input_size(2)
             .n_modes(4)
             .build_fidelity_kernel(input_state=custom_state)
         )
@@ -675,8 +732,7 @@ class TestKernelCircuitBuilder:
         """Test building FidelityKernel with sampling configuration."""
         builder = KernelCircuitBuilder()
         kernel = (
-            builder
-            .input_size(2)
+            builder.input_size(2)
             .n_modes(4)
             .build_fidelity_kernel(
                 shots=1000, sampling_method="multinomial", no_bunching=True
@@ -699,8 +755,7 @@ class TestKernelCircuitBuilder:
     def test_builder_angle_encoding_configuration(self):
         builder = KernelCircuitBuilder()
         feature_map = (
-            builder
-            .input_size(3)
+            builder.input_size(3)
             .n_modes(4)
             .angle_encoding(scale=0.5)
             .build_feature_map()
@@ -773,7 +828,7 @@ class TestKernelConstructionConsistency:
         pcvl.pdisplay(fm_manual.circuit, output_format=pcvl.Format.TEXT)
 
         # Method 2: simple factory
-        fm_simple = FeatureMap.simple(input_size=2, n_modes=3, n_photons=2)
+        fm_simple = FeatureMap.simple(input_size=2, n_modes=3)
         print("Simple factory circuit:")
         pcvl.pdisplay(fm_simple.circuit, output_format=pcvl.Format.TEXT)
 
@@ -807,15 +862,12 @@ class TestKernelConstructionConsistency:
         k_simple = FidelityKernel.simple(
             input_size=2,
             n_modes=4,
-            n_photons=2,
-            trainable=False,
         )
 
         # Builder API
         builder_api = KernelCircuitBuilder()
         k_builder = (
-            builder_api
-            .input_size(2)
+            builder_api.input_size(2)
             .n_modes(4)
             .trainable(False)
             .build_fidelity_kernel()
@@ -1256,8 +1308,7 @@ def test_iris_with_supported_constructors():
         try:
             builder = KernelCircuitBuilder()
             kernel_builder = (
-                builder
-                .input_size(4)
+                builder.input_size(4)
                 .n_modes(4)
                 .trainable(trainable_flag)
                 .build_fidelity_kernel()
@@ -1399,7 +1450,7 @@ def test_kernel_constructor_performance_comparison():
 
     # Time Method 1: Simple factory
     start = time.time()
-    kernel1 = FidelityKernel.simple(input_size=3, n_modes=4, trainable=False)
+    kernel1 = FidelityKernel.simple(input_size=3, n_modes=4)
     time1 = time.time() - start
     methods.append("FidelityKernel.simple()")
     times.append(time1)
@@ -1476,8 +1527,6 @@ def test_fidelity_kernel_gpu_execution_all_constructors(cuda_device, constructor
         kernel = FidelityKernel.simple(
             input_size=4,
             n_modes=4,
-            n_photons=2,
-            trainable=False,
         )
     elif constructor == "manual":
         params = [pcvl.P(f"x{i + 1}") for i in range(4)]
@@ -1520,8 +1569,6 @@ def test_fidelity_kernel_gpu_training_step(cuda_device):
     kernel = FidelityKernel.simple(
         input_size=4,
         n_modes=6,
-        n_photons=4,
-        trainable=True,
     ).to(device)
 
     if sum(p.numel() for p in kernel.parameters()) == 0:
