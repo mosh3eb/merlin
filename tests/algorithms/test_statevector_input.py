@@ -63,7 +63,7 @@ class TestConstructorInputTypes:
             circuit=circuit,
             input_state=sv,
             n_photons=2,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         assert layer.n_photons == 2
@@ -77,7 +77,7 @@ class TestConstructorInputTypes:
             input_size=0,
             circuit=circuit,
             input_state=pcvl_sv,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         assert layer.n_photons == 2
@@ -91,7 +91,7 @@ class TestConstructorInputTypes:
             input_size=0,
             circuit=circuit,
             input_state=basic_state,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         assert layer.input_state == [1, 0, 1]
@@ -104,7 +104,7 @@ class TestConstructorInputTypes:
             input_size=0,
             circuit=circuit,
             input_state=[1, 1, 0],
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         assert layer.input_state == [1, 1, 0]
@@ -117,7 +117,7 @@ class TestConstructorInputTypes:
             input_size=0,
             circuit=circuit,
             input_state=(1, 0, 1),
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         # Layer should work regardless of internal representation
@@ -140,7 +140,7 @@ class TestConstructorInputTypes:
                 input_state=tensor_state,
                 n_photons=1,
                 amplitude_encoding=True,
-                measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+                measurement_strategy=ML.MeasurementStrategy.NONE,
             )
 
             # Check if any DeprecationWarning was raised
@@ -173,7 +173,7 @@ class TestDeprecationWarnings:
                 circuit=circuit,
                 n_photons=1,
                 amplitude_encoding=True,
-                measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+                measurement_strategy=ML.MeasurementStrategy.NONE,
             )
 
             deprecation_warnings = [
@@ -196,7 +196,7 @@ class TestDeprecationWarnings:
                 circuit=circuit,
                 n_photons=1,
                 amplitude_encoding=True,
-                measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+                measurement_strategy=ML.MeasurementStrategy.NONE,
             )
 
             deprecation_warnings = [
@@ -227,7 +227,7 @@ class TestForwardDispatch:
             input_size=2,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
     @pytest.fixture
@@ -241,8 +241,9 @@ class TestForwardDispatch:
         return ML.QuantumLayer(
             circuit=circuit,
             n_photons=2,
-            computation_space=ML.ComputationSpace.FOCK,
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=ML.MeasurementStrategy.amplitudes(
+                computation_space=ML.ComputationSpace.FOCK
+            ),
         )
 
     def test_forward_float_tensor_uses_angle_encoding(self, angle_encoding_layer):
@@ -367,7 +368,7 @@ class TestNNSequentialCompatibility:
             input_size=2,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         model = torch.nn.Sequential(
@@ -394,7 +395,7 @@ class TestNNSequentialCompatibility:
             input_size=2,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         model = torch.nn.Sequential(
@@ -429,7 +430,7 @@ class TestLegacyAmplitudeEncodingCompatibility:
                 circuit=circuit,
                 n_photons=2,
                 amplitude_encoding=True,
-                measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+                measurement_strategy=ML.MeasurementStrategy.NONE,
             )
 
         # Create amplitude input matching layer's output_size
@@ -454,7 +455,7 @@ class TestLegacyAmplitudeEncodingCompatibility:
                 circuit=circuit,
                 n_photons=1,
                 amplitude_encoding=True,
-                measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+                measurement_strategy=ML.MeasurementStrategy.NONE,
             )
 
         with pytest.raises(ValueError, match="expects an amplitude tensor input"):
@@ -475,7 +476,7 @@ class TestAngleEncodingBackwardCompatibility:
             input_size=2,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         # Standard usage pattern
@@ -497,7 +498,7 @@ class TestAngleEncodingBackwardCompatibility:
             input_size=3,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         # Test various batch sizes
@@ -516,7 +517,7 @@ class TestAngleEncodingBackwardCompatibility:
             input_size=4,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         # Single combined input
@@ -543,8 +544,9 @@ class TestStateVectorForwardPath:
         layer = ML.QuantumLayer(
             circuit=circuit,
             n_photons=2,
-            computation_space=ML.ComputationSpace.FOCK,
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=ML.MeasurementStrategy.amplitudes(
+                computation_space=ML.ComputationSpace.FOCK
+            ),
         )
 
         sv = StateVector.from_basic_state(
@@ -570,8 +572,9 @@ class TestStateVectorForwardPath:
         layer = ML.QuantumLayer(
             circuit=circuit,
             n_photons=2,
-            computation_space=ML.ComputationSpace.FOCK,
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=ML.MeasurementStrategy.amplitudes(
+                computation_space=ML.ComputationSpace.FOCK
+            ),
         )
 
         # Create a superposition state
@@ -593,8 +596,9 @@ class TestStateVectorForwardPath:
         layer = ML.QuantumLayer(
             circuit=circuit,
             n_photons=2,
-            computation_space=ML.ComputationSpace.FOCK,
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=ML.MeasurementStrategy.amplitudes(
+                computation_space=ML.ComputationSpace.FOCK
+            ),
             dtype=torch.float64,
         )
 
@@ -623,8 +627,9 @@ class TestComplexTensorForwardPath:
         layer = ML.QuantumLayer(
             circuit=circuit,
             n_photons=2,
-            computation_space=ML.ComputationSpace.FOCK,
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=ML.MeasurementStrategy.amplitudes(
+                computation_space=ML.ComputationSpace.FOCK
+            ),
         )
 
         n_states = layer.output_size
@@ -644,8 +649,9 @@ class TestComplexTensorForwardPath:
         layer = ML.QuantumLayer(
             circuit=circuit,
             n_photons=2,
-            computation_space=ML.ComputationSpace.FOCK,
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=ML.MeasurementStrategy.amplitudes(
+                computation_space=ML.ComputationSpace.FOCK
+            ),
         )
 
         batch_size = 5
@@ -678,7 +684,7 @@ class TestErrorHandling:
             input_size=2,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         try:
@@ -699,7 +705,7 @@ class TestErrorHandling:
             input_size=2,
             input_state=[1, 0, 1, 0],
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
         tensor = torch.rand(2, 2)
@@ -727,7 +733,7 @@ class TestAmplitudeEncodingRealInputDeprecation:
                 circuit=circuit,
                 n_photons=2,
                 amplitude_encoding=True,
-                measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+                measurement_strategy=ML.MeasurementStrategy.NONE,
             )
 
         # Create real-valued amplitude input (not complex)
