@@ -28,12 +28,12 @@ import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, ClassVar, TypeAlias, cast
+from typing import TYPE_CHECKING, ClassVar, TypeAlias
 
 import torch
 
 from merlin.core.computation_space import ComputationSpace
-from merlin.core.partial_measurement import DetectorTransformOutput, PartialMeasurement
+from merlin.core.partial_measurement import PartialMeasurement
 from merlin.measurement.process import partial_measurement
 from merlin.utils.deprecations import warn_deprecated_enum_access
 from merlin.utils.grouping import LexGrouping, ModGrouping
@@ -169,9 +169,10 @@ class PartialMeasurementStrategy(BaseMeasurementStrategy):
             raise TypeError(
                 "Partial measurement expects detector output in partial_measurement mode."
             )
-        return partial_measurement(
-            cast(DetectorTransformOutput, detector_output), grouping=grouping
+        partial_measurement_result = partial_measurement(
+            detector_output, grouping=grouping
         )
+        return partial_measurement_result
 
 
 class MeasurementKind(Enum):
@@ -258,9 +259,10 @@ class MeasurementStrategy(metaclass=_MeasurementStrategyMeta):
         computation_space: ComputationSpace = ComputationSpace.UNBUNCHED,
         grouping: LexGrouping | ModGrouping | None = None,
     ) -> MeasurementStrategy:
-        """Create a partial measurement on the given mode indices."""
-        # TODO: the partial implementation is not end-to-end yet - to be completed in PML-146
-        # TODO: this implementation is partially tested (for instance, lack of backprop testing)
+        """
+        Create a partial measurement on the given mode indices.
+        Note that the specified grouping only applies on the resulting probabilities, not on the amplitudes.
+        """
 
         if len(modes) == 0:
             raise ValueError("modes cannot be empty")
