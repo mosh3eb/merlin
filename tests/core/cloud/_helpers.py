@@ -22,7 +22,7 @@ def make_layer(
     n: int,
     input_size: int,
     *,
-    no_bunching: bool = True,
+    computation_space: ComputationSpace = ComputationSpace.UNBUNCHED,
     trainable: bool = True,
 ) -> QuantumLayer:
     b = CircuitBuilder(n_modes=m)
@@ -35,5 +35,5 @@ def make_layer(
         input_size=input_size,
         builder=b,
         n_photons=n,
-        computation_space=ComputationSpace.default(no_bunching=no_bunching),
+        computation_space=computation_space,
     ).eval()
