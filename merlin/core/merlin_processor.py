@@ -6,7 +6,6 @@ import warnings
 import zlib
 from collections.abc import Iterable
 from contextlib import suppress
-from math import comb
 from typing import Any, cast
 
 import numpy as np
@@ -492,7 +491,7 @@ class MerlinProcessor:
                 input_state = pcvl.BasicState(config["input_state"])
                 rp.with_input(input_state)
                 n_photons = sum(config["input_state"])
-                rp.min_detected_photons_filter(n_photons if self._is_unbunched(layer) else 1)
+                rp.min_detected_photons_filter(n_photons)
 
             max_shots_arg = self.DEFAULT_SHOTS_PER_CALL if self.max_shots_per_call is None else int(self.max_shots_per_call)
             sampler = Sampler(rp, max_shots_per_call=max_shots_arg)
@@ -734,10 +733,16 @@ class MerlinProcessor:
 
                         for state_str, value in state_counts.items():
                             state_tuple = self._parse_perceval_state(state_str)
-                            if state_to_index and state_tuple in state_to_index:
+                            if not state_tuple:
+                                continue
+                            if state_to_index is not None:
+                                if state_tuple not in state_to_index:
+                                    continue
                                 idx = state_to_index[state_tuple]
-                                if idx < dist_size:
-                                    probs[idx] = value if is_probability else (value / total if total > 0 else 0)
+                            else:
+                                continue
+                            if idx < dist_size:
+                                probs[idx] = value if is_probability else (value / total if total > 0 else 0)
 
                         prob_sum = probs.sum()
                         if prob_sum > 0 and abs(float(prob_sum) - 1.0) > 1e-6:
@@ -783,14 +788,11 @@ class MerlinProcessor:
             else:
                 n_photons = int(graph.n_photons)  # type: ignore[arg-type]
 
-            if self._is_unbunched(layer):
-                dist_size = comb(n_modes, n_photons)
-                valid_states = set(self._generate_no_bunching_states(n_modes, n_photons))
-                state_to_index = {state: idx for idx, state in enumerate(sorted(valid_states))}
-            else:
-                dist_size = comb(n_modes + n_photons - 1, n_photons)
-                state_to_index = None
-                valid_states = None
+            unbunched = self._is_unbunched(layer)
+            keys = self._generate_slos_state_ordering(n_modes, n_photons, unbunched)
+            dist_size = len(keys)
+            state_to_index = {state: idx for idx, state in enumerate(keys)}
+            valid_states = set(keys) if unbunched else None
 
             return dist_size, state_to_index, valid_states
 
@@ -801,14 +803,11 @@ class MerlinProcessor:
             n_modes = int(circuit.m)
             n_photons = int(sum(input_state))
 
-            if self._is_unbunched(layer):
-                dist_size = comb(n_modes, n_photons)
-                valid_states = set(self._generate_no_bunching_states(n_modes, n_photons))
-                state_to_index = {state: idx for idx, state in enumerate(sorted(valid_states))}
-            else:
-                dist_size = comb(n_modes + n_photons - 1, n_photons)
-                state_to_index = None
-                valid_states = None
+            unbunched = self._is_unbunched(layer)
+            keys = self._generate_slos_state_ordering(n_modes, n_photons, unbunched)
+            dist_size = len(keys)
+            state_to_index = {state: idx for idx, state in enumerate(keys)}
+            valid_states = set(keys) if unbunched else None
 
             return dist_size, state_to_index, valid_states
 
@@ -818,21 +817,48 @@ class MerlinProcessor:
             "or 'circuit' and 'input_state' attributes."
         )
 
-    def _generate_no_bunching_states(self, n_modes: int, n_photons: int) -> list[tuple[int, ...]]:
-        valid_states: list[tuple[int, ...]] = []
+    @staticmethod
+    def _generate_slos_state_ordering(
+        n_modes: int,
+        n_photons: int,
+        unbunched: bool,
+    ) -> list[tuple[int, ...]]:
+        """Reproduce the SLOS graph construction order for output states.
 
-        def generate_states(current: list[int], remaining: int, start: int):
-            if remaining == 0:
-                valid_states.append(tuple(current))
-                return
-            for i in range(start, n_modes):
-                if current[i] == 0:
-                    current[i] = 1
-                    generate_states(current, remaining - 1, i + 1)
-                    current[i] = 0
+        This mirrors ``SLOSComputeGraph._build_graph_structure`` from the local
+        backend so that the probability tensor indices match exactly.  States
+        are discovered by iterating — for each photon layer — over existing
+        parent states and trying to place a photon in modes 0 … m-1. The
+        first time a new state is encountered it receives the next available
+        index.
 
-        generate_states([0] * n_modes, n_photons, 0)
-        return sorted(valid_states)
+        Args:
+            n_modes:   Number of optical modes (*m*).
+            n_photons: Total photon number (*n*).
+            unbunched: If ``True``, at most one photon per mode is allowed
+                       (UNBUNCHED / DUAL_RAIL spaces).
+
+        Returns:
+            Final-layer states in SLOS discovery order.
+        """
+        # Each entry maps state → index (insertion order)
+        last_layer: dict[tuple[int, ...], int] = {tuple([0] * n_modes): 0}
+
+        for _ in range(n_photons):
+            next_layer: dict[tuple[int, ...], int] = {}
+            for state in last_layer:
+                nstate = list(state)
+                for mode in range(n_modes):
+                    if unbunched and nstate[mode]:
+                        continue
+                    nstate[mode] += 1
+                    nstate_t = tuple(nstate)
+                    if nstate_t not in next_layer:
+                        next_layer[nstate_t] = len(next_layer)
+                    nstate[mode] -= 1
+            last_layer = next_layer
+
+        return list(last_layer.keys())
 
     # ---- Shot estimation (no remote jobs submitted) ----
 
@@ -860,7 +886,7 @@ class MerlinProcessor:
             input_state = pcvl.BasicState(config["input_state"])
             child_rp.with_input(input_state)
             n_photons = sum(config["input_state"])
-            child_rp.min_detected_photons_filter(n_photons if self._is_unbunched(layer) else 1)
+            child_rp.min_detected_photons_filter(n_photons)
 
         input_param_names = self._extract_input_params(config)
 
