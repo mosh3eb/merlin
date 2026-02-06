@@ -19,3 +19,22 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+
+import torch
+from perceval.components import BS
+
+from merlin.pcvl_pytorch.slos_torchscript import build_slos_distribution_computegraph
+
+
+def test_slos_compute_probs_from_amplitudes_normalizes():
+    unitary = torch.tensor(BS().compute_unitary()).unsqueeze(0)
+    unitary = unitary.to(torch.complex64)
+
+    graph = build_slos_distribution_computegraph(m=2, n_photons=2, dtype=torch.float)
+
+    _, amplitudes = graph.compute(unitary, [1, 1])
+    _, probabilities = graph.compute_probs_from_amplitudes(amplitudes)
+
+    assert torch.allclose(
+        probabilities.sum(), torch.tensor(1.0, dtype=probabilities.dtype), atol=1e-6
+    )
