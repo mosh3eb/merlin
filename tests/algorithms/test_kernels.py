@@ -10,6 +10,7 @@ from sklearn.svm import SVC
 from merlin.algorithms.kernels import FeatureMap, FidelityKernel, KernelCircuitBuilder
 from merlin.algorithms.loss import NKernelAlignment
 from merlin.builder import CircuitBuilder
+from merlin.core.computation_space import ComputationSpace
 
 
 class TestFeatureMap:
@@ -106,14 +107,14 @@ class TestFidelityKernel:
         self.quantum_kernel = FidelityKernel(
             feature_map=self.feature_map,
             input_state=[2, 0],
-            no_bunching=False,
+            computation_space=ComputationSpace.FOCK,
         )
 
     def test_fidelity_kernel_initialization(self):
         assert self.quantum_kernel.input_state == [2, 0]
         assert self.quantum_kernel.shots == 0
         assert self.quantum_kernel.sampling_method == "multinomial"
-        assert not self.quantum_kernel.no_bunching
+        assert self.quantum_kernel.computation_space is ComputationSpace.FOCK
         assert self.quantum_kernel.force_psd
         assert not self.quantum_kernel.is_trainable
 
@@ -138,11 +139,32 @@ class TestFidelityKernel:
         kernel = FidelityKernel(
             feature_map=feature_map,
             input_state=[1, 0],
-            no_bunching=False,
+            computation_space=ComputationSpace.FOCK,
         )
 
         assert kernel.is_trainable
         assert "theta" in dict(kernel.named_parameters())
+
+    def test_kernel_rejects_no_bunching(self):
+        with pytest.warns(DeprecationWarning):
+            with pytest.raises(ValueError) as exc_info:
+                FidelityKernel(
+                    feature_map=self.feature_map,
+                    input_state=[2, 0],
+                    no_bunching=True,
+                )
+        assert "no_bunching" in str(exc_info.value)
+
+        with pytest.warns(DeprecationWarning):
+            with pytest.raises(ValueError) as exc_info:
+                FidelityKernel.simple(input_size=2, no_bunching=True)
+        assert "no_bunching" in str(exc_info.value)
+
+        builder = KernelCircuitBuilder().input_size(2).n_modes(4)
+        with pytest.warns(DeprecationWarning):
+            with pytest.raises(ValueError) as exc_info:
+                builder.build_fidelity_kernel(no_bunching=True)
+        assert "no_bunching" in str(exc_info.value)
 
     def test_kernel_scalar_computation(self):
         x1 = torch.tensor([0.5, 1.0])
@@ -197,12 +219,16 @@ class TestFidelityKernel:
     def test_no_bunching_validation(self):
         with pytest.raises(ValueError, match="Bunching must be enabled"):
             FidelityKernel(
-                feature_map=self.feature_map, input_state=[2, 0], no_bunching=True
+                feature_map=self.feature_map,
+                input_state=[2, 0],
+                computation_space=ComputationSpace.UNBUNCHED,
             )
 
         with pytest.raises(ValueError, match="kernel value will always be 1"):
             FidelityKernel(
-                feature_map=self.feature_map, input_state=[1, 1], no_bunching=True
+                feature_map=self.feature_map,
+                input_state=[1, 1],
+                computation_space=ComputationSpace.UNBUNCHED,
             )
 
     def test_input_state_circuit_size_mismatch(self):
@@ -220,7 +246,7 @@ class TestFidelityKernel:
             FidelityKernel(
                 feature_map=feature_map,
                 input_state=[2, 0],  # Only 2 modes
-                no_bunching=False,
+                computation_space=ComputationSpace.FOCK,
             )
 
     def test_psd_projection(self):
@@ -279,13 +305,13 @@ class TestFidelityKernel:
         unbunching_kernel = FidelityKernel(
             feature_map,
             input_state,
-            no_bunching=True,
+            computation_space=ComputationSpace.UNBUNCHED,
             force_psd=False,
         )
         quantum_kernel = FidelityKernel(
             feature_map,
             input_state,
-            no_bunching=False,
+            computation_space=ComputationSpace.FOCK,
         )
 
         rng = np.random.default_rng(42)
@@ -306,8 +332,7 @@ class TestFidelityKernel:
         )
 
         feature_forward = (
-            feature_map
-            .compute_unitary(torch.as_tensor(X1, dtype=feature_map.dtype))
+            feature_map.compute_unitary(torch.as_tensor(X1, dtype=feature_map.dtype))
             .detach()
             .cpu()
             .numpy()
@@ -322,8 +347,7 @@ class TestFidelityKernel:
         )
 
         feature_backward = (
-            feature_map
-            .compute_unitary(torch.as_tensor(X2, dtype=feature_map.dtype))
+            feature_map.compute_unitary(torch.as_tensor(X2, dtype=feature_map.dtype))
             .detach()
             .cpu()
             .numpy()
@@ -677,8 +701,7 @@ class TestKernelCircuitBuilder:
         device = torch.device("cpu")
         builder = KernelCircuitBuilder()
         feature_map = (
-            builder
-            .input_size(2)
+            builder.input_size(2)
             .n_modes(4)
             .device(device)
             .dtype(torch.float64)
@@ -699,8 +722,7 @@ class TestKernelCircuitBuilder:
         assert not feature_map.is_trainable
 
         feature_map = (
-            builder
-            .input_size(2)
+            builder.input_size(2)
             .n_modes(4)
             .trainable(True, prefix="phi_")
             .build_feature_map()
@@ -725,8 +747,7 @@ class TestKernelCircuitBuilder:
         builder = KernelCircuitBuilder()
         custom_state = [2, 0, 0, 0]
         kernel = (
-            builder
-            .input_size(2)
+            builder.input_size(2)
             .n_modes(4)
             .build_fidelity_kernel(input_state=custom_state)
         )
@@ -737,17 +758,18 @@ class TestKernelCircuitBuilder:
         """Test building FidelityKernel with sampling configuration."""
         builder = KernelCircuitBuilder()
         kernel = (
-            builder
-            .input_size(2)
+            builder.input_size(2)
             .n_modes(4)
             .build_fidelity_kernel(
-                shots=1000, sampling_method="multinomial", no_bunching=True
+                shots=1000,
+                sampling_method="multinomial",
+                computation_space=ComputationSpace.UNBUNCHED,
             )
         )
 
         assert kernel.shots == 1000
         assert kernel.sampling_method == "multinomial"
-        assert kernel.no_bunching
+        assert kernel.computation_space is ComputationSpace.UNBUNCHED
 
     def test_builder_default_values(self):
         """Test builder with default values for optional parameters."""
@@ -761,8 +783,7 @@ class TestKernelCircuitBuilder:
     def test_builder_angle_encoding_configuration(self):
         builder = KernelCircuitBuilder()
         feature_map = (
-            builder
-            .input_size(3)
+            builder.input_size(3)
             .n_modes(4)
             .angle_encoding(scale=0.5)
             .build_feature_map()
@@ -874,8 +895,7 @@ class TestKernelConstructionConsistency:
         # Builder API
         builder_api = KernelCircuitBuilder()
         k_builder = (
-            builder_api
-            .input_size(2)
+            builder_api.input_size(2)
             .n_modes(4)
             .trainable(False)
             .build_fidelity_kernel()
@@ -926,7 +946,7 @@ class TestKernelIntegration:
         quantum_kernel = FidelityKernel(
             feature_map=feature_map,
             input_state=[2, 0],
-            no_bunching=False,
+            computation_space=ComputationSpace.FOCK,
         )
 
         # Compute kernel matrices
@@ -966,7 +986,7 @@ class TestKernelIntegration:
         quantum_kernel = FidelityKernel(
             feature_map=feature_map,
             input_state=[2, 0],
-            no_bunching=False,
+            computation_space=ComputationSpace.FOCK,
         )
 
         optimizer = torch.optim.Adam(quantum_kernel.parameters(), lr=0.1)
@@ -1032,7 +1052,12 @@ def create_quantum_circuit(m, size=400):
     return c
 
 
-def get_quantum_kernel(modes=10, input_size=10, photons=4, no_bunching=False):
+def get_quantum_kernel(
+    modes=10,
+    input_size=10,
+    photons=4,
+    computation_space=ComputationSpace.FOCK,
+):
     circuit = create_quantum_circuit(m=modes, size=input_size)
     feature_map = FeatureMap(
         circuit=circuit,
@@ -1047,7 +1072,7 @@ def get_quantum_kernel(modes=10, input_size=10, photons=4, no_bunching=False):
     quantum_kernel = FidelityKernel(
         feature_map=feature_map,
         input_state=input_state,
-        no_bunching=no_bunching,
+        computation_space=computation_space,
     )
     return quantum_kernel
 
@@ -1316,8 +1341,7 @@ def test_iris_with_supported_constructors():
         try:
             builder = KernelCircuitBuilder()
             kernel_builder = (
-                builder
-                .input_size(4)
+                builder.input_size(4)
                 .n_modes(4)
                 .trainable(trainable_flag)
                 .build_fidelity_kernel()
@@ -1536,8 +1560,6 @@ def test_fidelity_kernel_gpu_execution_all_constructors(cuda_device, constructor
         kernel = FidelityKernel.simple(
             input_size=4,
             n_modes=4,
-            n_photons=2,
-            trainable=False,
         )
     elif constructor == "manual":
         params = [pcvl.P(f"x{i + 1}") for i in range(4)]
@@ -1580,8 +1602,6 @@ def test_fidelity_kernel_gpu_training_step(cuda_device):
     kernel = FidelityKernel.simple(
         input_size=4,
         n_modes=6,
-        n_photons=4,
-        trainable=True,
     ).to(device)
 
     if sum(p.numel() for p in kernel.parameters()) == 0:

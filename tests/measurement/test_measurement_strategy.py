@@ -103,7 +103,7 @@ class TestQuantumLayerMeasurementStrategy:
             input_size=2,
             n_photons=1,
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
         x = torch.rand(2, 2, requires_grad=True)
         output = layer(x)
@@ -131,7 +131,7 @@ class TestQuantumLayerMeasurementStrategy:
             input_size=2,
             n_photons=1,
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=ML.MeasurementStrategy.probs(),
         )
         x = torch.rand(2, 2, requires_grad=True)
         output = layer(x)
@@ -148,7 +148,7 @@ class TestQuantumLayerMeasurementStrategy:
             input_state=input_state,
             trainable_parameters=[],
             input_parameters=["px"],
-            measurement_strategy=MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=MeasurementStrategy.probs(),
         )
         x = torch.rand(2, 2, requires_grad=True)
         output = layer(x)
@@ -167,7 +167,7 @@ class TestQuantumLayerMeasurementStrategy:
             input_state=input_state,
             trainable_parameters=[],
             input_parameters=["px"],
-            measurement_strategy=MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=MeasurementStrategy.probs(),
         )
 
         assert layer.input_size == 2
@@ -188,7 +188,7 @@ class TestQuantumLayerMeasurementStrategy:
             input_state=input_state,
             trainable_parameters=[],
             input_parameters=["px"],
-            measurement_strategy=MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=MeasurementStrategy.probs(),
         )
 
         assert layer.input_size == 2
@@ -209,84 +209,8 @@ class TestQuantumLayerMeasurementStrategy:
                 output_size=5,  # cannot specify output_size
                 n_photons=1,
                 builder=builder,
-                measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
+                measurement_strategy=ML.MeasurementStrategy.probs(),
             )
-
-    def test_linear_equivalent(self):
-        # OutputMappingStrategy.LINEAR is equivalent to Probabilities + torch.nn.Linear
-        builder = ML.CircuitBuilder(n_modes=3)
-        builder.add_entangling_layer(trainable=True, name="U1")
-        builder.add_angle_encoding(modes=[0, 1], name="input")
-        builder.add_entangling_layer(trainable=True, name="U2")
-
-        layer = ML.QuantumLayer(
-            input_size=2,
-            n_photons=1,
-            builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.PROBABILITIES,
-        )
-        linear = torch.nn.Linear(layer.output_size, 2)
-        x = torch.rand(5, 2, requires_grad=True)
-        output = linear(layer(x))
-
-        # Good output shape
-        assert output.shape == (5, 2)
-
-        # Ensure finite values
-        assert torch.all(torch.isfinite(output))
-
-        # Backprop compatibility
-        output.sum().backward()
-        assert x.grad is not None
-
-        # Works with full QuantumLayer API
-        circuit = pcvl.Circuit(3)
-        circuit.add(0, pcvl.BS(pcvl.P("px_0")))
-        circuit.add(1, pcvl.BS(pcvl.P("px_1")))
-        input_state = [1, 1, 0]
-        layer = ML.QuantumLayer(
-            input_size=2,
-            circuit=circuit,
-            input_state=input_state,
-            trainable_parameters=[],
-            input_parameters=["px"],
-            measurement_strategy=MeasurementStrategy.PROBABILITIES,
-        )
-        model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 2))
-        x = torch.rand(2, 2, requires_grad=True)
-        output = model(x)
-        assert output.shape[-1] == 2
-        output.sum().backward()
-        assert x.grad is not None
-
-    def test_mode_expectations(self):
-        # ModeExpectations is a new strategy unlike any previous OutputMappingStrategy
-        n_modes = 3
-        n_photons = 2
-
-        builder = ML.CircuitBuilder(n_modes=n_modes)
-        builder.add_entangling_layer(trainable=True, name="U1")
-        builder.add_angle_encoding(modes=[0, 1], name="input")
-        builder.add_entangling_layer(trainable=True, name="U2")
-
-        layer = ML.QuantumLayer(
-            input_size=2,
-            n_photons=n_photons,
-            builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.MODE_EXPECTATIONS,
-        )
-        x = torch.rand(2, 2, requires_grad=True)
-        output = layer(x)
-
-        # Good output shape
-        assert output.shape == (2, n_modes)
-
-        # Ensure finite values
-        assert torch.all(torch.isfinite(output))
-
-        # Backprop compatibility
-        output.sum().backward()
-        assert x.grad is not None
 
     def test_new_api_mode_expectations_output_size(self):
         n_modes = 4
@@ -313,16 +237,18 @@ class TestQuantumLayerMeasurementStrategy:
         output.sum().backward()
         assert x.grad is not None
 
-        # By default, no_bunching=True so output values cannot surpass 1
+        # By default, UNBUNCHED computation space so output values cannot surpass 1
         assert torch.all(output <= 1.0 + 1e-6)
         assert torch.all(output >= -1e-6)  # No negative values
 
-        # ModeExpectations with explicit no_bunching=True
+        # ModeExpectations with explicit UNBUNCHED space
         layer = ML.QuantumLayer(
             input_size=2,
             n_photons=n_photons,
             builder=builder,
-            measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
+            measurement_strategy=MeasurementStrategy.mode_expectations(
+                computation_space=ComputationSpace.UNBUNCHED
+            ),
         )
         output = layer(x)
         assert output.shape == (2, n_modes)
@@ -332,7 +258,7 @@ class TestQuantumLayerMeasurementStrategy:
         assert torch.all(output <= 1.0 + 1e-6)
         assert torch.all(output >= -1e-6)  # No negative values
 
-        # ModeExpectations with no_bunching=False (has some output values > 1)
+        # ModeExpectations with FOCK space (has some output values > 1)
         builder = ML.CircuitBuilder(n_modes=n_modes)
         builder.add_superpositions((0, 1), name="BS")
         builder.add_angle_encoding(modes=[0, 1], name="input")
@@ -341,8 +267,9 @@ class TestQuantumLayerMeasurementStrategy:
             input_size=2,
             input_state=[2, 1, 0],
             builder=builder,
-            measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
-            computation_space=ComputationSpace.FOCK,
+            measurement_strategy=MeasurementStrategy.mode_expectations(
+                computation_space=ComputationSpace.FOCK
+            ),
         )
         output = layer(x)
         assert output.shape == (2, n_modes)
@@ -353,7 +280,7 @@ class TestQuantumLayerMeasurementStrategy:
         assert torch.all(
             output <= n_photons + 1e-6
         )  # Values cannot surpass the number of photons
-        # output[:, 0] and output[:, 1] should have values superior to 1 because their expected number of photons is higher than 1 with no_bunching=False
+        # output[:, 0] and output[:, 1] should have values superior to 1 because their expected number of photons is higher than 1 with FOCK space
         assert torch.all(output[:, 0] > torch.ones_like(output[:, 0]))
 
         assert torch.all(output[:, 1] > torch.ones_like(output[:, 1]))
@@ -368,7 +295,9 @@ class TestQuantumLayerMeasurementStrategy:
             input_size=2,
             n_photons=n_photons,
             builder=builder,
-            measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
+            measurement_strategy=MeasurementStrategy.mode_expectations(
+                computation_space=ComputationSpace.UNBUNCHED
+            ),
         )
         assert layer.output_size == n_modes
         output = layer(x)
@@ -388,7 +317,9 @@ class TestQuantumLayerMeasurementStrategy:
             input_state=input_state,
             trainable_parameters=[],
             input_parameters=["px"],
-            measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
+            measurement_strategy=MeasurementStrategy.mode_expectations(
+                computation_space=ComputationSpace.UNBUNCHED
+            ),
         )
         x = torch.rand(2, 2, requires_grad=True)
         output = layer(x)
@@ -396,7 +327,12 @@ class TestQuantumLayerMeasurementStrategy:
         output.sum().backward()
         assert x.grad is not None
 
-    def test_amplitude_vector(self):
+    @pytest.mark.parametrize(
+        "measurement_strategy",
+        (MeasurementStrategy.amplitudes(), MeasurementStrategy.NONE),
+        ids=("amplitudes", "none"),
+    )
+    def test_amplitude_vector(self, measurement_strategy):
         # Amplitudes is equivalent to return_amplitudes=True
         builder = ML.CircuitBuilder(n_modes=3)
         builder.add_entangling_layer(trainable=True, name="U1")
@@ -407,7 +343,7 @@ class TestQuantumLayerMeasurementStrategy:
             input_size=2,
             n_photons=1,
             builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=measurement_strategy,
         )
         x = torch.rand(2, 2, requires_grad=True)
         output = layer(x)
@@ -430,20 +366,6 @@ class TestQuantumLayerMeasurementStrategy:
             torch.sum(output.abs() ** 2, dim=-1), torch.ones(output.shape[0]), atol=1e-6
         )
 
-        # QuantumLayer's output_size is accessible and equal to the number of possible Fock states
-        layer = ML.QuantumLayer(
-            input_size=2,
-            n_photons=1,
-            builder=builder,
-            measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
-        )
-        x = torch.rand(2, 2, requires_grad=True)
-        output = layer(x)
-        assert output.shape[-1] == layer.output_size
-        assert torch.allclose(
-            torch.sum(output.abs() ** 2, dim=-1), torch.ones(output.shape[0]), atol=1e-6
-        )
-
         # Works with full QuantumLayer API
         circuit = pcvl.Circuit(3)
         circuit.add(0, pcvl.BS(pcvl.P("px_0")))
@@ -455,7 +377,7 @@ class TestQuantumLayerMeasurementStrategy:
             input_state=input_state,
             trainable_parameters=[],
             input_parameters=["px"],
-            measurement_strategy=MeasurementStrategy.AMPLITUDES,
+            measurement_strategy=measurement_strategy,
         )
         x = torch.rand(2, 2, requires_grad=True)
         output = layer(x)
@@ -520,16 +442,29 @@ class TestQuantumLayerMeasurementStrategy:
 
 
 def test_resolve_measurement_strategy():
+    with pytest.warns(DeprecationWarning):
+        assert isinstance(
+            resolve_measurement_strategy(MeasurementStrategy.PROBABILITIES),
+            ProbabilitiesStrategy,
+        )
+        assert isinstance(
+            resolve_measurement_strategy(MeasurementStrategy.MODE_EXPECTATIONS),
+            ModeExpectationsStrategy,
+        )
+        assert isinstance(
+            resolve_measurement_strategy(MeasurementStrategy.AMPLITUDES),
+            AmplitudesStrategy,
+        )
     assert isinstance(
-        resolve_measurement_strategy(MeasurementStrategy.PROBABILITIES),
+        resolve_measurement_strategy(MeasurementStrategy.probs()),
         ProbabilitiesStrategy,
     )
     assert isinstance(
-        resolve_measurement_strategy(MeasurementStrategy.MODE_EXPECTATIONS),
+        resolve_measurement_strategy(MeasurementStrategy.mode_expectations()),
         ModeExpectationsStrategy,
     )
     assert isinstance(
-        resolve_measurement_strategy(MeasurementStrategy.AMPLITUDES),
+        resolve_measurement_strategy(MeasurementStrategy.amplitudes()),
         AmplitudesStrategy,
     )
 
@@ -751,9 +686,13 @@ def test_amplitudes_strategy_returns_amplitudes_and_blocks_sampling():
         )
 
 
-def test_amplitudes_strategy_rejects_sampling_in_layer():
+@pytest.mark.parametrize(
+    "measurement_strategy",
+    (MeasurementStrategy.amplitudes(), MeasurementStrategy.NONE),
+    ids=("amplitudes", "none"),
+)
+def test_amplitudes_strategy_rejects_sampling_in_layer(measurement_strategy):
     """AMPLITUDES strategy should reject sampling at the layer level."""
-    # TODO: this test should be updated when MeasurementStrategy.AMPLITUDES will be deprecated
     builder = ML.CircuitBuilder(n_modes=3)
     builder.add_entangling_layer(trainable=True, name="U1")
     builder.add_angle_encoding(modes=[0, 1], name="input")
@@ -763,7 +702,7 @@ def test_amplitudes_strategy_rejects_sampling_in_layer():
         input_size=2,
         n_photons=1,
         builder=builder,
-        measurement_strategy=ML.MeasurementStrategy.AMPLITUDES,
+        measurement_strategy=measurement_strategy,
     )
     layer.eval()
     x = torch.rand(2, 2)
