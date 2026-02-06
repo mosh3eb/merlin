@@ -202,8 +202,7 @@ class QuantumLayer(MerlinModule):
             ``amplitude_encoding=True`` and ``input_size`` is set; if
             ``amplitude_encoding=True`` and ``n_photons`` is not provided; if
             classical ``input_parameters`` are combined with
-            ``amplitude_encoding=True``; if ``no_bunching`` conflicts with the
-            selected ``computation_space``; if an ``experiment`` is not unitary or
+            ``amplitude_encoding=True``; if an ``experiment`` is not unitary or
             uses post-selection/heralding; if neither ``input_state`` nor
             ``n_photons`` is provided when required; or if an annotated
             ``BasicState`` is passed (annotations are not supported).
@@ -925,9 +924,13 @@ class QuantumLayer(MerlinModule):
 
         if (
             self.return_object is True
-            and not self.measurement_strategy == MeasurementStrategy.MODE_EXPECTATIONS
+            and _resolve_measurement_kind(self.measurement_strategy)
+            != MeasurementKind.MODE_EXPECTATIONS
         ):
-            if self.measurement_strategy == MeasurementStrategy.PROBABILITIES:
+            if (
+                _resolve_measurement_kind(self.measurement_strategy)
+                == MeasurementKind.PROBABILITIES
+            ):
                 return ProbabilityDistribution(
                     self.measurement_mapping(results),
                     n_modes=len(self.input_state),
@@ -1319,6 +1322,11 @@ class QuantumLayer(MerlinModule):
             # Trainable entangling layer after encoding
             builder.add_entangling_layer(trainable=True, name="RI_simple")
 
+        # new API forces explicit measurement strategy definition, so we set it here to match the old default behavior of returning probabilities
+        measurement_strategy = MeasurementStrategy.probs(
+            computation_space=ComputationSpace.coerce(computation_space)
+        )
+
         quantum_layer_kwargs = {
             "input_size": input_size,
             "input_state": input_state,
@@ -1326,7 +1334,7 @@ class QuantumLayer(MerlinModule):
             "n_photons": n_photons,
             "device": device,
             "dtype": dtype,
-            "computation_space": computation_space,
+            "measurement_strategy": measurement_strategy,
         }
 
         # mypy: quantum_layer_kwargs is constructed dynamically; cast to satisfy
