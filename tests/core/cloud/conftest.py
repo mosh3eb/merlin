@@ -8,7 +8,6 @@ import perceval.providers.scaleway as scw
 import pytest
 from perceval.runtime import RemoteConfig
 
-RemoteConfig.set_token("_T_eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpZCI6Mzk1LCJleHAiOjI1Njg3OTY5NzB9.-BelBltPyAQl_Fa5lPgNQMbvXhCyLjHJqo_xo3fLI504QSlZDfk6tN_vTe374Mj8FJ6Z2vE_aVjN6ZtVn25Syg")
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Add Scaleway test option (--run-cloud-tests is defined in parent conftest)."""
     try:
@@ -136,7 +135,7 @@ def scaleway_session(scaleway_credentials):
     repeatedly creating/destroying sessions.
     """
     with scw.Session(
-        platform_name="EMU-ASCELLA-6PQ",
+        "EMU-ASCELLA-6PQ",
         project_id=scaleway_credentials["project_id"],
         token=scaleway_credentials["token"],
         deduplication_id="merlin-test-session",

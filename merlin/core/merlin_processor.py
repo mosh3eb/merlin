@@ -1,7 +1,6 @@
 import logging
 import threading
 import time
-import json
 import uuid
 import warnings
 import zlib
@@ -15,7 +14,6 @@ import perceval as pcvl
 import torch
 import torch.nn as nn
 from perceval.algorithm import Sampler
-from perceval.serialization import deserialize
 from perceval.runtime import RemoteJob, RemoteProcessor
 from perceval.runtime.session import ISession
 from torch.futures import Future
@@ -115,6 +113,13 @@ class MerlinProcessor:
                 "(concurrent result retrieval through a shared session handler is not supported)"
             )
             self.chunk_concurrency = 1
+
+        if self.chunk_concurrency > 1:
+            warnings.warn(
+                f"chunk_concurrency={self.chunk_concurrency} is experimental "
+                "and may cause unexpected behaviour. Use with caution.",
+                stacklevel=2,
+            )
 
         # Caches & global tracking
         self._layer_cache: dict[int, dict] = {}
@@ -224,13 +229,6 @@ class MerlinProcessor:
             "call_id": uuid.uuid4().hex[:8],
         }
 
-        pool_ctx = {
-            "pools": {},
-            "cursors": {},
-            "locks": {},
-            "pool_size": max(1, self.chunk_concurrency),
-        }
-
         def _cancel_remote():
             state["cancel_requested"] = True
             self.cancel_all()
@@ -282,7 +280,7 @@ class MerlinProcessor:
 
                     if should_offload:
                         x = self._offload_quantum_layer_with_chunking(
-                            layer, x, nsample, state, deadline, pool_ctx
+                            layer, x, nsample, state, deadline
                         )
                     else:
                         with torch.no_grad():
@@ -306,7 +304,6 @@ class MerlinProcessor:
         nsample: int | None,
         state: dict,
         deadline: float | None,
-        pool_ctx: dict,
     ) -> torch.Tensor:
         if input_tensor.is_cuda:
             input_tensor = input_tensor.cpu()
@@ -320,6 +317,13 @@ class MerlinProcessor:
 
         B = input_tensor.shape[0]
 
+        if B > self.microbatch_size:
+            warnings.warn(
+                f"Input batch size ({B}) exceeds microbatch_size ({self.microbatch_size}); "
+                "microbatch splitting is experimental and may cause unexpected behaviour.",
+                stacklevel=2,
+            )
+
         if self.session is not None:
             chunks = [(0, B)]
             return self._run_chunks_sequential(layer, config, input_tensor, chunks, nsample, state, deadline)
@@ -330,7 +334,7 @@ class MerlinProcessor:
                 end = min(start + self.microbatch_size, B)
                 chunks.append((start, end))
                 start = end
-            return self._run_chunks_pooled(layer, config, input_tensor, chunks, nsample, state, deadline, pool_ctx)
+            return self._run_chunks_pooled(layer, config, input_tensor, chunks, nsample, state, deadline)
 
     def _run_chunks_sequential(
         self,
@@ -347,14 +351,6 @@ class MerlinProcessor:
         state["chunks_total"] += total_chunks
         outputs: list[torch.Tensor] = []
 
-        rp = self._session_rp
-        rp.set_circuit(config["circuit"])
-        if config.get("input_state"):
-            input_state = pcvl.BasicState(config["input_state"])
-            rp.with_input(input_state)
-            n_photons = sum(config["input_state"])
-            rp.min_detected_photons_filter(n_photons if self._is_unbunched(layer) else 1)
-
         for idx, (s, e) in enumerate(chunks):
             if state.get("cancel_requested"):
                 raise self._cancelled_error()
@@ -367,7 +363,7 @@ class MerlinProcessor:
                 state["active_chunks"] = 1
 
             t = self._run_chunk(
-                layer, config, rp, input_tensor[s:e],
+                layer, config, input_tensor[s:e],
                 nsample, state, deadline,
                 job_base_label=base_label,
             )
@@ -387,26 +383,19 @@ class MerlinProcessor:
         nsample: int | None,
         state: dict,
         deadline: float | None,
-        pool_ctx: dict,
     ) -> torch.Tensor:
-        self._ensure_pool_for_layer(config, layer, pool_ctx)
-
         state["chunks_total"] += len(chunks)
         outputs: list[torch.Tensor | None] = [None] * len(chunks)
         errors: list[BaseException] = []
-
-        def _next_rp_for_layer() -> tuple[RemoteProcessor, int]:
-            return self._pool_next_rp(id(layer), pool_ctx)
 
         total_chunks = len(chunks)
         layer_name = getattr(layer, "name", layer.__class__.__name__)
 
         def _call(s: int, e: int, idx: int):
             try:
-                rp, pool_slot = _next_rp_for_layer()
-                base_label = f"mer:{layer_name}:{state['call_id']}:{idx + 1}/{total_chunks}:{pool_slot}"
+                base_label = f"mer:{layer_name}:{state['call_id']}:{idx + 1}/{total_chunks}"
                 t = self._run_chunk(
-                    layer, config, rp, input_tensor[s:e],
+                    layer, config, input_tensor[s:e],
                     nsample, state, deadline,
                     job_base_label=base_label,
                 )
@@ -448,51 +437,10 @@ class MerlinProcessor:
         return torch.cat(outputs, dim=0)  # type: ignore[arg-type]
 
 
-    def _decode_rpc_job_results(self, rpc_resp: dict) -> dict | None:
-        """
-        Best-effort decode of Quandela Cloud RPC 'get_job_results' payload.
-
-        Per Perceval semantics, RemoteJob.get_results() normally returns a dict.
-        In some deployments, the RPC may return a numeric string (e.g. "1361067")
-        in the 'results' field (or store the actual payload in 'intermediate_results').
-        This helper tries to recover a dict payload in those cases.
-        """
-        if not isinstance(rpc_resp, dict):
-            return None
-
-        def _try_parse(obj):
-            try:
-                if obj is None:
-                    return None
-                if isinstance(obj, str):
-                    obj = json.loads(obj)
-                obj = deserialize(obj, strict=False)
-                return obj if isinstance(obj, dict) else None
-            except Exception:
-                return None
-
-        parsed = _try_parse(rpc_resp.get("results"))
-        if parsed is not None:
-            return parsed
-
-        ir = rpc_resp.get("intermediate_results")
-        if isinstance(ir, list):
-            for item in reversed(ir):
-                parsed = _try_parse(item)
-                if parsed is not None:
-                    return parsed
-        else:
-            parsed = _try_parse(ir)
-            if parsed is not None:
-                return parsed
-
-        return None
-
     def _run_chunk(
         self,
         layer: MerlinModule,
         config: dict,
-        child_rp: RemoteProcessor,
         input_chunk: torch.Tensor,
         nsample: int | None,
         state: dict,
@@ -508,17 +456,16 @@ class MerlinProcessor:
                 "Please report this bug."
             )
 
-        max_shots_arg = self.DEFAULT_SHOTS_PER_CALL if self.max_shots_per_call is None else int(self.max_shots_per_call)
-        sampler = Sampler(child_rp, max_shots_per_call=max_shots_arg)
-
-        sampler.clear_iterations()
         input_param_names = self._extract_input_params(config)
         input_np = input_chunk.detach().cpu().numpy()
+
+        # Pre-compute iteration params (cheap, only done once).
+        iteration_params: list[dict[str, float]] = []
         for i in range(batch_size):
             circuit_params = {}
             for j, param_name in enumerate(input_param_names):
                 circuit_params[param_name] = float(input_np[i, j]) if j < input_chunk.shape[1] else 0.0
-            sampler.add_iteration(circuit_params=circuit_params)
+            iteration_params.append(circuit_params)
 
         def _capped_name(base: str, cmd: str) -> str:
             name = f"{base}:{cmd}"
@@ -531,49 +478,96 @@ class MerlinProcessor:
                 return h[: self._JOB_NAME_MAX]
             return name[:keep] + "~" + h
 
+        last_error: BaseException | None = None
+        for attempt in range(self._MAX_CHUNK_RETRIES):
+            if state.get("cancel_requested"):
+                raise CancelledError("Remote call was cancelled")
+            if deadline is not None and time.time() >= deadline:
+                raise TimeoutError("Remote call timed out (remote cancel issued)")
+
+            # Build a fresh RemoteProcessor and Sampler on each attempt so that
+            # a corrupted RP doesn't poison retries.
+            rp = self._create_fresh_rp()
+            rp.set_circuit(config["circuit"])
+            if config.get("input_state"):
+                input_state = pcvl.BasicState(config["input_state"])
+                rp.with_input(input_state)
+                n_photons = sum(config["input_state"])
+                rp.min_detected_photons_filter(n_photons if self._is_unbunched(layer) else 1)
+
+            max_shots_arg = self.DEFAULT_SHOTS_PER_CALL if self.max_shots_per_call is None else int(self.max_shots_per_call)
+            sampler = Sampler(rp, max_shots_per_call=max_shots_arg)
+            sampler.clear_iterations()
+            for params in iteration_params:
+                sampler.add_iteration(circuit_params=params)
+
+            job = None
+            try:
+                job = self._submit_job(sampler, nsample, job_base_label, _capped_name)
+                with self._lock:
+                    self._active_jobs.add(job)
+                    self._job_history.append(job)
+
+                return self._poll_job(job, state, deadline, batch_size, layer, nsample)
+            except (CancelledError, TimeoutError, KeyboardInterrupt):
+                raise
+            except Exception as exc:
+                last_error = exc
+                if job is not None:
+                    with self._lock:
+                        self._active_jobs.discard(job)
+                logger.warning(
+                    "Chunk attempt %d/%d failed: %s",
+                    attempt + 1, self._MAX_CHUNK_RETRIES, exc,
+                )
+                if attempt < self._MAX_CHUNK_RETRIES - 1:
+                    time.sleep(min(1.0 * (2 ** attempt), 5.0))
+
+        raise RuntimeError(
+            f"Chunk failed after {self._MAX_CHUNK_RETRIES} attempts"
+        ) from last_error
+
+    _MAX_CHUNK_RETRIES: int = 3
+
+    def _submit_job(self, sampler, nsample, job_base_label, _capped_name):
+        """Submit a single async job via the sampler."""
         if ("probs" in self.available_commands) and (nsample is None or int(nsample) <= 0):
             job = sampler.probs
             cmd = "probs"
             if job_base_label:
                 job.name = _capped_name(job_base_label, cmd)
-            job = job.execute_async()
-        elif "sample_count" in self.available_commands:
-            use_shots = self.DEFAULT_SHOTS_PER_CALL if nsample is None else int(nsample)
+            return job.execute_async()
+
+        use_shots = self.DEFAULT_SHOTS_PER_CALL if nsample is None else int(nsample)
+
+        if "sample_count" in self.available_commands:
             job = sampler.sample_count
             cmd = "sample_count"
-            if job_base_label:
-                job.name = _capped_name(job_base_label, cmd)
-            job = job.execute_async(max_samples=use_shots)
         elif "samples" in self.available_commands:
-            use_shots = self.DEFAULT_SHOTS_PER_CALL if nsample is None else int(nsample)
             job = sampler.samples
             cmd = "samples"
-            if job_base_label:
-                job.name = _capped_name(job_base_label, cmd)
-            job = job.execute_async(max_samples=use_shots)
         else:
-            use_shots = self.DEFAULT_SHOTS_PER_CALL if nsample is None else int(nsample)
             job = sampler.sample_count
             cmd = "sample_count"
-            if job_base_label:
-                job.name = _capped_name(job_base_label, cmd)
-            job = job.execute_async(max_samples=use_shots)
 
-        with self._lock:
-            self._active_jobs.add(job)
-            self._job_history.append(job)
+        if job_base_label:
+            job.name = _capped_name(job_base_label, cmd)
+        return job.execute_async(max_samples=use_shots)
 
+    def _poll_job(
+        self,
+        job: RemoteJob,
+        state: dict,
+        deadline: float | None,
+        batch_size: int,
+        layer: MerlinModule,
+        nsample: int | None,
+    ) -> torch.Tensor:
+        from concurrent.futures import CancelledError
+
+        _MAX_NON_DICT_RETRIES = 60  # 60 * 0.1s = 6s
+        non_dict_retries = 0
         sleep_ms = 50
-        # In async usage, Cloud/Perceval can sometimes report completion before
-        # a proper (dict) results payload is available. In some deployments, the
-        # results field can even be a scalar token (e.g. an int) instead of the
-        # expected dict.
-        #
-        # forward() (sync) tends not to see this because it inherently waits
-        # longer before calling get_results(). forward_async() is more exposed,
-        # so we add a bounded retry window after completion.
-        non_dict_complete_retries = 0
-        max_non_dict_complete_retries = 60  # 60 * 0.1s = 6s
         while True:
             if state.get("cancel_requested"):
                 cancel = getattr(job, "cancel", None)
@@ -606,58 +600,43 @@ class MerlinProcessor:
                     with self._lock:
                         self._active_jobs.discard(job)
                     raise CancelledError("Remote call was cancelled")
+                with self._lock:
+                    self._active_jobs.discard(job)
+                raise RuntimeError(
+                    f"Remote job failed: {msg or 'unknown error'} (job_id={job_id!r})"
+                )
 
             if getattr(job, "is_complete", False):
                 try:
                     raw = job.get_results()
                 except RuntimeError as ex:
                     msg = str(ex)
-                    # Perceval can transiently report complete before results are ready.
                     if "Results are not available" in msg:
                         time.sleep(0.05)
                         continue
-                    # Map cancel to CancelledError for consistent semantics/tests.
                     if "Cancel requested" in msg:
                         with self._lock:
                             self._active_jobs.discard(job)
                         raise CancelledError("Remote call was cancelled")
                     raise
 
-                # Normal case: Perceval returns a results dict.
                 if isinstance(raw, dict):
                     with self._lock:
                         self._active_jobs.discard(job)
                     return self._process_batch_results(raw, batch_size, layer, nsample)
 
-                # Async-only edge cases:
-                # - Some cloud deployments return a scalar token (often an int) from get_results().
-                # - Some deployments return a response where response['results'] is a JSON scalar.
-                # In these cases, attempt to recover by querying the underlying RPC handler and
-                # extracting either a proper dict from 'intermediate_results' or a JSON dict.
-                job_id = getattr(job, "id", None) or getattr(job, "job_id", None)
-                recovered: dict | None = None
-                try:
-                    get_rpc = getattr(child_rp, "get_rpc_handler", None)
-                    rpc = get_rpc() if callable(get_rpc) else None
-                    if rpc is not None and job_id is not None:
-                        rpc_resp = rpc.get_job_results(job_id)
-                        recovered = self._decode_rpc_job_results(rpc_resp)
-                except Exception:
-                    recovered = None
-
-                if isinstance(recovered, dict):
+                # The backend sometimes reports completion before the dict
+                # payload is actually available.  Re-poll the same job for a
+                # bounded window before giving up to the outer retry loop.
+                non_dict_retries += 1
+                if non_dict_retries >= _MAX_NON_DICT_RETRIES:
                     with self._lock:
                         self._active_jobs.discard(job)
-                    return self._process_batch_results(recovered, batch_size, layer, nsample)
-
-                non_dict_complete_retries += 1
-                if non_dict_complete_retries >= max_non_dict_complete_retries:
                     raise RuntimeError(
-                        "Job marked complete but results were not a dict after retries; "
+                        f"Job complete but results were not a dict after "
+                        f"{_MAX_NON_DICT_RETRIES} re-polls; "
                         f"job_id={job_id!r}, type={type(raw)}, value={raw!r}"
                     )
-
-                # Give the backend a little time and try again.
                 time.sleep(0.1)
                 continue
 
@@ -671,34 +650,6 @@ class MerlinProcessor:
             return self._session_rp
         else:
             return self._clone_remote_processor(self.remote_processor)
-
-    def _ensure_pool_for_layer(self, config: dict, layer: MerlinModule, pool_ctx: dict) -> None:
-        lid = id(layer)
-        if lid in pool_ctx["pools"]:
-            return
-        pool_size = int(pool_ctx["pool_size"])
-        rps: list[RemoteProcessor] = []
-        for _ in range(pool_size):
-            rp = self._create_fresh_rp()
-            rp.set_circuit(config["circuit"])
-            if config.get("input_state"):
-                input_state = pcvl.BasicState(config["input_state"])
-                rp.with_input(input_state)
-                n_photons = sum(config["input_state"])
-                rp.min_detected_photons_filter(n_photons if self._is_unbunched(layer) else 1)
-            rps.append(rp)
-        pool_ctx["pools"][lid] = rps
-        pool_ctx["cursors"][lid] = 0
-        pool_ctx["locks"][lid] = threading.Lock()
-
-    def _pool_next_rp(self, layer_id: int, pool_ctx: dict) -> tuple[RemoteProcessor, int]:
-        lock: threading.Lock = pool_ctx["locks"][layer_id]
-        with lock:
-            i = pool_ctx["cursors"][layer_id]
-            rps = pool_ctx["pools"][layer_id]
-            rp = rps[i]
-            pool_ctx["cursors"][layer_id] = (i + 1) % len(rps)
-            return rp, i
 
     # ---------------- Utilities & mapping ----------------
 
