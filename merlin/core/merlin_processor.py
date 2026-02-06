@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 import logging
 import threading
 import time
+import json
 import uuid
 import warnings
 import zlib
@@ -16,6 +15,7 @@ import perceval as pcvl
 import torch
 import torch.nn as nn
 from perceval.algorithm import Sampler
+from perceval.serialization import deserialize
 from perceval.runtime import RemoteJob, RemoteProcessor
 from perceval.runtime.session import ISession
 from torch.futures import Future
@@ -62,13 +62,9 @@ class MerlinProcessor:
     ):
         # ── Validate: exactly one of the two must be provided ──
         if remote_processor is not None and session is not None:
-            raise TypeError(
-                "Provide either 'remote_processor' or 'session', not both."
-            )
+            raise TypeError("Provide either 'remote_processor' or 'session', not both.")
         if remote_processor is None and session is None:
-            raise TypeError(
-                "One of 'remote_processor' or 'session' must be provided."
-            )
+            raise TypeError("One of 'remote_processor' or 'session' must be provided.")
 
         self.session: ISession | None = None
         self.remote_processor: RemoteProcessor | None = None
@@ -76,31 +72,20 @@ class MerlinProcessor:
         if session is not None:
             # ── ISession path ──
             if not isinstance(session, ISession):
-                raise TypeError(
-                    f"Expected ISession, got {type(session)}"
-                )
+                raise TypeError(f"Expected ISession, got {type(session)}")
             self.session = session
             self.backend_name = getattr(session, "platform_name", "unknown")
 
-            # Build ONE RemoteProcessor from the session.  This single RP is
-            # reused for every chunk / layer — calling build_remote_processor()
-            # multiple times creates RPs that share session internals and
-            # corrupt each other's results.
+            # Build ONE RemoteProcessor from the session.
             self._session_rp: RemoteProcessor = session.build_remote_processor()
 
             # Command detection is not supported on ISession-based platforms
-            # (e.g. Scaleway).  Leave empty so _run_chunk falls through to
-            # sample_count, which is the only primitive known to work
-            # reliably across all session-based backends.
             self.available_commands = []
-
         else:
             # ── Legacy RemoteProcessor path ──
             assert remote_processor is not None  # for type checker
             if not isinstance(remote_processor, RemoteProcessor):
-                raise TypeError(
-                    f"Expected RemoteProcessor, got {type(remote_processor)}"
-                )
+                raise TypeError(f"Expected RemoteProcessor, got {type(remote_processor)}")
             self.remote_processor = remote_processor
             self.backend_name = getattr(remote_processor, "name", "unknown")
 
@@ -116,28 +101,22 @@ class MerlinProcessor:
                 self.available_commands = []
 
         self.microbatch_size = microbatch_size
-
         self.default_timeout = float(timeout)
-        # When using RemoteProcessor, Perceval requires an explicit bound.
-        self.max_shots_per_call = (
-            None if max_shots_per_call is None else int(max_shots_per_call)
-        )
+
+        self.max_shots_per_call = None if max_shots_per_call is None else int(max_shots_per_call)
 
         # Concurrency of chunk submissions inside a single quantum leaf
         self.chunk_concurrency = max(1, int(chunk_concurrency))
 
-        # ISession-created RPs share internal session state, so concurrent
-        # result retrieval corrupts responses.  Force sequential execution.
+        # ISession-created RPs share internal session state => concurrent result retrieval corrupts responses.
         if self.session is not None and self.chunk_concurrency > 1:
             logger.info(
                 "ISession detected: clamping chunk_concurrency to 1 "
-                "(concurrent result retrieval through a shared session "
-                "handler is not supported)"
+                "(concurrent result retrieval through a shared session handler is not supported)"
             )
             self.chunk_concurrency = 1
 
         # Caches & global tracking
-        # id(layer) -> {"config": ...}  (we do NOT cache an RP anymore)
         self._layer_cache: dict[int, dict] = {}
         self._job_history: list[RemoteJob] = []
 
@@ -145,6 +124,33 @@ class MerlinProcessor:
         self._lock = threading.Lock()
         self._active_jobs: set[RemoteJob] = set()
         self._closed = False
+
+    # ---------------- Small compatibility helpers ----------------
+
+    def _is_unbunched(self, layer: MerlinModule) -> bool:
+        """
+        Backward-compatible check for "no-bunching" output spaces.
+
+        - Old API: layer.no_bunching (bool)
+        - New API: layer.computation_space == UNBUNCHED (or DUAL_RAIL)
+        """
+        if hasattr(layer, "no_bunching"):
+            try:
+                return bool(getattr(layer, "no_bunching"))
+            except Exception:
+                pass
+
+        cs = getattr(layer, "computation_space", None)
+        if cs is None:
+            return False
+
+        # Avoid hard imports here; compare by enum name / string.
+        name = getattr(cs, "name", None)
+        if isinstance(name, str):
+            return name in ("UNBUNCHED", "DUAL_RAIL")
+
+        s = str(cs)
+        return ("UNBUNCHED" in s) or ("DUAL_RAIL" in s)
 
     # ---------------- Public APIs ----------------
 
@@ -179,7 +185,6 @@ class MerlinProcessor:
         nsample: int | None = None,
         timeout: float | None = None,
     ) -> torch.Tensor:
-        """Synchronous convenience wrapper around forward_async()."""
         fut = self.forward_async(module, input, nsample=nsample, timeout=timeout)
         return fut.wait()
 
@@ -191,10 +196,6 @@ class MerlinProcessor:
         nsample: int | None = None,
         timeout: float | None = None,
     ) -> Future:
-        """
-        Asynchronous execution of a PyTorch module, offloading MerlinModule leaves
-        to the configured remote processor.
-        """
         with self._lock:
             if self._closed:
                 raise RuntimeError("MerlinProcessor is closed")
@@ -205,13 +206,8 @@ class MerlinProcessor:
                 "Call `module.eval()` before forward."
             )
 
-        # Determine deadline
         effective_timeout = self.default_timeout if timeout is None else timeout
-        deadline: float | None = (
-            None
-            if effective_timeout in (None, 0)
-            else time.time() + float(effective_timeout)
-        )
+        deadline: float | None = None if effective_timeout in (None, 0) else time.time() + float(effective_timeout)
 
         original_device = input.device
         original_dtype = input.dtype
@@ -221,56 +217,46 @@ class MerlinProcessor:
         state = {
             "cancel_requested": False,
             "current_status": None,
-            "job_ids": [],  # accumulated across all chunk jobs
+            "job_ids": [],
             "chunks_total": 0,
             "chunks_done": 0,
             "active_chunks": 0,
-            "call_id": uuid.uuid4().hex[:8],  # tag all jobs of this forward() call
+            "call_id": uuid.uuid4().hex[:8],
         }
 
-        # --- Per-call RP pool context (per layer) ---
-        # Built lazily on first use of a given layer during this forward call.
         pool_ctx = {
-            "pools": {},  # layer_id -> list[RemoteProcessor]
-            "cursors": {},  # layer_id -> int
-            "locks": {},  # layer_id -> threading.Lock (for cursor bump)
+            "pools": {},
+            "cursors": {},
+            "locks": {},
             "pool_size": max(1, self.chunk_concurrency),
         }
 
-        # ---- helpers attached to the Future ----
         def _cancel_remote():
             state["cancel_requested"] = True
-            # Also propagate to global jobs to reduce wasted credits
             self.cancel_all()
             if not fut.done():
                 try:
                     from concurrent.futures import CancelledError
                 except Exception:  # pragma: no cover
-
                     class CancelledError(RuntimeError):
                         pass
-
                 fut.set_exception(CancelledError("Remote call was cancelled"))
 
         def _status():
             js = state.get("current_status")
-            base = {
-                "state": "COMPLETE"
-                if fut.done() and not js
-                else (js.get("state") if js else "IDLE"),
+            return {
+                "state": "COMPLETE" if fut.done() and not js else (js.get("state") if js else "IDLE"),
                 "progress": js.get("progress") if js else 0.0,
                 "message": js.get("message") if js else None,
                 "chunks_total": state["chunks_total"],
                 "chunks_done": state["chunks_done"],
                 "active_chunks": state["active_chunks"],
             }
-            return base
 
         fut.cancel_remote = _cancel_remote  # type: ignore[attr-defined]
         fut.status = _status  # type: ignore[attr-defined]
         fut.job_ids = state["job_ids"]  # type: ignore[attr-defined]
 
-        # ---- background worker ----
         def _run_pipeline():
             try:
                 x = input
@@ -278,14 +264,14 @@ class MerlinProcessor:
                     # Policy: offload MerlinModule leaves; else run locally
                     if isinstance(layer, MerlinModule):
                         try:
-                            if self.session is not None:
-                                should_offload = bool(layer.should_offload())
-                            else:
-                                should_offload = bool(
-                                    layer.should_offload(
-                                        self.remote_processor, nsample
-                                    )
-                                )
+                            # Preferred (new) signature
+                            should_offload = bool(layer.should_offload())
+                        except TypeError:
+                            # Backward compat: older signature variants
+                            try:
+                                should_offload = bool(layer.should_offload(self.remote_processor, nsample))
+                            except Exception:
+                                should_offload = False
                         except Exception:
                             should_offload = False
                     else:
@@ -322,16 +308,9 @@ class MerlinProcessor:
         deadline: float | None,
         pool_ctx: dict,
     ) -> torch.Tensor:
-        """
-        Split the batch into chunks and submit jobs.
-
-        - ISession path:  single job on the single session RP (no chunking).
-        - RemoteProcessor path:  pooled RPs with threaded concurrency.
-        """
         if input_tensor.is_cuda:
             input_tensor = input_tensor.cpu()
 
-        # Ensure we have (and cache) layer config
         cache = self._layer_cache.get(id(layer))
         if cache is None:
             config = cast(Any, layer).export_config()
@@ -342,27 +321,16 @@ class MerlinProcessor:
         B = input_tensor.shape[0]
 
         if self.session is not None:
-            # ── ISession: single job, no chunking ──
-            # Chunking is not supported for session-based backends;
-            # the entire batch is submitted as one job on the single RP.
             chunks = [(0, B)]
-            return self._run_chunks_sequential(
-                layer, config, input_tensor, chunks, nsample, state, deadline
-            )
+            return self._run_chunks_sequential(layer, config, input_tensor, chunks, nsample, state, deadline)
         else:
-            # ── Legacy RP: chunk by microbatch_size, pool + concurrency ──
             chunks: list[tuple[int, int]] = []
             start = 0
             while start < B:
                 end = min(start + self.microbatch_size, B)
                 chunks.append((start, end))
                 start = end
-            return self._run_chunks_pooled(
-                layer, config, input_tensor, chunks, nsample, state, deadline,
-                pool_ctx
-            )
-
-    # ---- ISession sequential path ----
+            return self._run_chunks_pooled(layer, config, input_tensor, chunks, nsample, state, deadline, pool_ctx)
 
     def _run_chunks_sequential(
         self,
@@ -374,23 +342,18 @@ class MerlinProcessor:
         state: dict,
         deadline: float | None,
     ) -> torch.Tensor:
-        """
-        Process chunks one at a time on the single session RP.
-        No pooling, no threads, no extra ``build_remote_processor()`` calls.
-        """
         total_chunks = len(chunks)
         layer_name = getattr(layer, "name", layer.__class__.__name__)
         state["chunks_total"] += total_chunks
         outputs: list[torch.Tensor] = []
 
-        # Configure the single session RP for this layer
         rp = self._session_rp
         rp.set_circuit(config["circuit"])
         if config.get("input_state"):
             input_state = pcvl.BasicState(config["input_state"])
             rp.with_input(input_state)
             n_photons = sum(config["input_state"])
-            rp.min_detected_photons_filter(n_photons)
+            rp.min_detected_photons_filter(n_photons if self._is_unbunched(layer) else 1)
 
         for idx, (s, e) in enumerate(chunks):
             if state.get("cancel_requested"):
@@ -399,9 +362,7 @@ class MerlinProcessor:
                 self.cancel_all()
                 raise TimeoutError("Remote call timed out (remote cancel issued)")
 
-            base_label = (
-                f"mer:{layer_name}:{state['call_id']}:{idx + 1}/{total_chunks}"
-            )
+            base_label = f"mer:{layer_name}:{state['call_id']}:{idx + 1}/{total_chunks}"
             with self._lock:
                 state["active_chunks"] = 1
 
@@ -417,8 +378,6 @@ class MerlinProcessor:
 
         return torch.cat(outputs, dim=0)
 
-    # ---- Legacy RP pooled/concurrent path ----
-
     def _run_chunks_pooled(
         self,
         layer: MerlinModule,
@@ -430,11 +389,6 @@ class MerlinProcessor:
         deadline: float | None,
         pool_ctx: dict,
     ) -> torch.Tensor:
-        """
-        Process chunks with a thread pool of cloned RemoteProcessors.
-        Only used for the legacy RemoteProcessor path.
-        """
-        # Ensure a per-call pool exists for this layer
         self._ensure_pool_for_layer(config, layer, pool_ctx)
 
         state["chunks_total"] += len(chunks)
@@ -452,25 +406,18 @@ class MerlinProcessor:
                 rp, pool_slot = _next_rp_for_layer()
                 base_label = f"mer:{layer_name}:{state['call_id']}:{idx + 1}/{total_chunks}:{pool_slot}"
                 t = self._run_chunk(
-                    layer,
-                    config,
-                    rp,
-                    input_tensor[s:e],
-                    nsample,
-                    state,
-                    deadline,
+                    layer, config, rp, input_tensor[s:e],
+                    nsample, state, deadline,
                     job_base_label=base_label,
                 )
                 outputs[idx] = t
             except BaseException as ex:
                 errors.append(ex)
 
-        # Submit with limited concurrency
         in_flight = 0
         idx = 0
         futures: list[threading.Thread] = []
         while idx < len(chunks) or in_flight > 0:
-            # Launch up to concurrency limit
             while idx < len(chunks) and in_flight < self.chunk_concurrency:
                 s, e = chunks[idx]
                 with self._lock:
@@ -481,7 +428,6 @@ class MerlinProcessor:
                 idx += 1
                 in_flight += 1
 
-            # Wait for any thread to finish
             for th in list(futures):
                 if not th.is_alive():
                     futures.remove(th)
@@ -501,6 +447,47 @@ class MerlinProcessor:
 
         return torch.cat(outputs, dim=0)  # type: ignore[arg-type]
 
+
+    def _decode_rpc_job_results(self, rpc_resp: dict) -> dict | None:
+        """
+        Best-effort decode of Quandela Cloud RPC 'get_job_results' payload.
+
+        Per Perceval semantics, RemoteJob.get_results() normally returns a dict.
+        In some deployments, the RPC may return a numeric string (e.g. "1361067")
+        in the 'results' field (or store the actual payload in 'intermediate_results').
+        This helper tries to recover a dict payload in those cases.
+        """
+        if not isinstance(rpc_resp, dict):
+            return None
+
+        def _try_parse(obj):
+            try:
+                if obj is None:
+                    return None
+                if isinstance(obj, str):
+                    obj = json.loads(obj)
+                obj = deserialize(obj, strict=False)
+                return obj if isinstance(obj, dict) else None
+            except Exception:
+                return None
+
+        parsed = _try_parse(rpc_resp.get("results"))
+        if parsed is not None:
+            return parsed
+
+        ir = rpc_resp.get("intermediate_results")
+        if isinstance(ir, list):
+            for item in reversed(ir):
+                parsed = _try_parse(item)
+                if parsed is not None:
+                    return parsed
+        else:
+            parsed = _try_parse(ir)
+            if parsed is not None:
+                return parsed
+
+        return None
+
     def _run_chunk(
         self,
         layer: MerlinModule,
@@ -512,56 +499,40 @@ class MerlinProcessor:
         deadline: float | None,
         job_base_label: str | None = None,
     ) -> torch.Tensor:
-        """Submit a single chunk job for the given layer and return mapped tensor."""
-        from concurrent.futures import CancelledError  # used for cancellation mapping
+        from concurrent.futures import CancelledError
 
         batch_size = input_chunk.shape[0]
-        # ISession sends the entire batch as a single job (no chunking),
-        # so the microbatch_size guard only applies to the legacy RP path.
         if self.session is None and batch_size > self.microbatch_size:
             raise ValueError(
                 f"Chunk size {batch_size} exceeds microbatch {self.microbatch_size}. "
                 "Please report this bug."
             )
 
-        # Prepare a fresh Sampler for THIS chunk (one sampler per worker for thread-safety)
-        max_shots_arg = (
-            self.DEFAULT_SHOTS_PER_CALL
-            if self.max_shots_per_call is None
-            else int(self.max_shots_per_call)
-        )
+        max_shots_arg = self.DEFAULT_SHOTS_PER_CALL if self.max_shots_per_call is None else int(self.max_shots_per_call)
         sampler = Sampler(child_rp, max_shots_per_call=max_shots_arg)
 
-        # Build iterations
         sampler.clear_iterations()
         input_param_names = self._extract_input_params(config)
         input_np = input_chunk.detach().cpu().numpy()
         for i in range(batch_size):
             circuit_params = {}
             for j, param_name in enumerate(input_param_names):
-                if j < input_chunk.shape[1]:
-                    circuit_params[param_name] = float(input_np[i, j])
-                else:
-                    circuit_params[param_name] = 0.0
+                circuit_params[param_name] = float(input_np[i, j]) if j < input_chunk.shape[1] else 0.0
             sampler.add_iteration(circuit_params=circuit_params)
 
-        # Choose execution primitive, set a descriptive (capped) name, then submit
         def _capped_name(base: str, cmd: str) -> str:
-            # Compose and sanitize
             name = f"{base}:{cmd}"
             name = "".join(ch if ch.isalnum() or ch in "-_:/=." else "_" for ch in name)
             if len(name) <= self._JOB_NAME_MAX:
                 return name
-            # Truncate with a stable short hash suffix to preserve uniqueness
-            h = f"{zlib.adler32(name.encode()):08x}"  # 8 hex chars
+            h = f"{zlib.adler32(name.encode()):08x}"
             keep = self._JOB_NAME_MAX - 1 - len(h)
             if keep < 1:
-                # Extremely constrained; fall back to hash head
                 return h[: self._JOB_NAME_MAX]
             return name[:keep] + "~" + h
 
-        if "probs" in self.available_commands:
-            job = sampler.probs  # not submitted yet
+        if ("probs" in self.available_commands) and (nsample is None or int(nsample) <= 0):
+            job = sampler.probs
             cmd = "probs"
             if job_base_label:
                 job.name = _capped_name(job_base_label, cmd)
@@ -588,20 +559,27 @@ class MerlinProcessor:
                 job.name = _capped_name(job_base_label, cmd)
             job = job.execute_async(max_samples=use_shots)
 
-        # Track globally for cancellation & history
         with self._lock:
             self._active_jobs.add(job)
             self._job_history.append(job)
 
-        # Monitor until complete/failed/timeout
         sleep_ms = 50
+        # In async usage, Cloud/Perceval can sometimes report completion before
+        # a proper (dict) results payload is available. In some deployments, the
+        # results field can even be a scalar token (e.g. an int) instead of the
+        # expected dict.
+        #
+        # forward() (sync) tends not to see this because it inherently waits
+        # longer before calling get_results(). forward_async() is more exposed,
+        # so we add a bounded retry window after completion.
+        non_dict_complete_retries = 0
+        max_non_dict_complete_retries = 60  # 60 * 0.1s = 6s
         while True:
             if state.get("cancel_requested"):
                 cancel = getattr(job, "cancel", None)
                 if callable(cancel):
                     with suppress(Exception):
                         cancel()
-                # Stop worker quickly; cloud job will transition to cancel
                 raise CancelledError("Remote call was cancelled")
 
             if deadline is not None and time.time() >= deadline:
@@ -624,17 +602,64 @@ class MerlinProcessor:
 
             if getattr(job, "is_failed", False):
                 msg = state["current_status"].get("message")
-                # Map Perceval "Cancel requested" to CancelledError
                 if msg and "Cancel requested" in str(msg):
                     with self._lock:
                         self._active_jobs.discard(job)
                     raise CancelledError("Remote call was cancelled")
-            # Success?
+
             if getattr(job, "is_complete", False):
-                raw = job.get_results()
-                with self._lock:
-                    self._active_jobs.discard(job)
-                return self._process_batch_results(raw, batch_size, layer, nsample)
+                try:
+                    raw = job.get_results()
+                except RuntimeError as ex:
+                    msg = str(ex)
+                    # Perceval can transiently report complete before results are ready.
+                    if "Results are not available" in msg:
+                        time.sleep(0.05)
+                        continue
+                    # Map cancel to CancelledError for consistent semantics/tests.
+                    if "Cancel requested" in msg:
+                        with self._lock:
+                            self._active_jobs.discard(job)
+                        raise CancelledError("Remote call was cancelled")
+                    raise
+
+                # Normal case: Perceval returns a results dict.
+                if isinstance(raw, dict):
+                    with self._lock:
+                        self._active_jobs.discard(job)
+                    return self._process_batch_results(raw, batch_size, layer, nsample)
+
+                # Async-only edge cases:
+                # - Some cloud deployments return a scalar token (often an int) from get_results().
+                # - Some deployments return a response where response['results'] is a JSON scalar.
+                # In these cases, attempt to recover by querying the underlying RPC handler and
+                # extracting either a proper dict from 'intermediate_results' or a JSON dict.
+                job_id = getattr(job, "id", None) or getattr(job, "job_id", None)
+                recovered: dict | None = None
+                try:
+                    get_rpc = getattr(child_rp, "get_rpc_handler", None)
+                    rpc = get_rpc() if callable(get_rpc) else None
+                    if rpc is not None and job_id is not None:
+                        rpc_resp = rpc.get_job_results(job_id)
+                        recovered = self._decode_rpc_job_results(rpc_resp)
+                except Exception:
+                    recovered = None
+
+                if isinstance(recovered, dict):
+                    with self._lock:
+                        self._active_jobs.discard(job)
+                    return self._process_batch_results(recovered, batch_size, layer, nsample)
+
+                non_dict_complete_retries += 1
+                if non_dict_complete_retries >= max_non_dict_complete_retries:
+                    raise RuntimeError(
+                        "Job marked complete but results were not a dict after retries; "
+                        f"job_id={job_id!r}, type={type(raw)}, value={raw!r}"
+                    )
+
+                # Give the backend a little time and try again.
+                time.sleep(0.1)
+                continue
 
             time.sleep(sleep_ms / 1000.0)
             sleep_ms = min(sleep_ms * 2, 400)
@@ -642,27 +667,16 @@ class MerlinProcessor:
     # ---------------- Per-call RP pool helpers ----------------
 
     def _create_fresh_rp(self) -> RemoteProcessor:
-        """
-        Provide a RemoteProcessor for pool / estimator use.
-
-        - ISession path: returns the single ``_session_rp`` (never create
-          more than one RP from a session).
-        - RemoteProcessor path: clones via ``_clone_remote_processor()``.
-        """
         if self.session is not None:
             return self._session_rp
         else:
             return self._clone_remote_processor(self.remote_processor)
 
-    def _ensure_pool_for_layer(
-        self, config: dict, layer: MerlinModule, pool_ctx: dict
-    ) -> None:
-        """Create an RP pool for this layer within the current forward call, if absent."""
+    def _ensure_pool_for_layer(self, config: dict, layer: MerlinModule, pool_ctx: dict) -> None:
         lid = id(layer)
         if lid in pool_ctx["pools"]:
             return
         pool_size = int(pool_ctx["pool_size"])
-        # Build independent RPs (each with its own handler)
         rps: list[RemoteProcessor] = []
         for _ in range(pool_size):
             rp = self._create_fresh_rp()
@@ -671,16 +685,13 @@ class MerlinProcessor:
                 input_state = pcvl.BasicState(config["input_state"])
                 rp.with_input(input_state)
                 n_photons = sum(config["input_state"])
-                rp.min_detected_photons_filter(n_photons)
+                rp.min_detected_photons_filter(n_photons if self._is_unbunched(layer) else 1)
             rps.append(rp)
         pool_ctx["pools"][lid] = rps
         pool_ctx["cursors"][lid] = 0
         pool_ctx["locks"][lid] = threading.Lock()
 
-    def _pool_next_rp(
-        self, layer_id: int, pool_ctx: dict
-    ) -> tuple[RemoteProcessor, int]:
-        """Round-robin select an RP from the per-call pool for a given layer, returning (rp, slot_index)."""
+    def _pool_next_rp(self, layer_id: int, pool_ctx: dict) -> tuple[RemoteProcessor, int]:
         lock: threading.Lock = pool_ctx["locks"][layer_id]
         with lock:
             i = pool_ctx["cursors"][layer_id]
@@ -692,33 +703,21 @@ class MerlinProcessor:
     # ---------------- Utilities & mapping ----------------
 
     def _clone_remote_processor(self, rp: RemoteProcessor) -> RemoteProcessor:
-        """Create a sibling RemoteProcessor sharing auth/endpoint, with its OWN handler (avoid cross-thread sharing)."""
-        # IMPORTANT: do NOT pass rpc_handler=... (avoid sharing handler across threads)
         return RemoteProcessor(
             name=rp.name,
-            token=None,  # RemoteConfig pulls token from cache
-            url=rp.get_rpc_handler().url
-            if hasattr(rp.get_rpc_handler(), "url")
-            else None,
+            token=None,
+            url=rp.get_rpc_handler().url if hasattr(rp.get_rpc_handler(), "url") else None,
             proxies=rp.proxies,
         )
 
     def _iter_layers_in_order(self, module: nn.Module) -> Iterable[nn.Module]:
-        """
-        Yield execution leaves in a deterministic order.
-
-        Any MerlinModule instance is treated as a single execution leaf: MerlinProcessor
-        will not recurse into its children when building the pipeline.
-        """
         if isinstance(module, MerlinModule):
             yield module
             return
-
         children = list(module.children())
         if not children:
             yield module
             return
-
         for child in children:
             yield from self._iter_layers_in_order(child)
 
@@ -726,7 +725,6 @@ class MerlinProcessor:
         circuit = config["circuit"]
         all_params = [p.name for p in circuit.get_parameters()]
         input_param_names: list[str] = []
-
         for input_spec in config.get("input_parameters", []):
             if input_spec == "px":
                 for p_name in all_params:
@@ -736,22 +734,24 @@ class MerlinProcessor:
                 for p_name in all_params:
                     if p_name.startswith(input_spec):
                         input_param_names.append(p_name)
-
         return sorted(input_param_names)
 
     def _process_batch_results(
         self,
-        raw_results: dict,
+        raw_results: Any,
         batch_size: int,
         layer: MerlinModule,
         nsample: int | None = None,
     ) -> torch.Tensor:
-        # Defensive: handle None results
         if raw_results is None:
             raise RuntimeError(
-                "Remote job returned no results. This may indicate a job "
-                "execution failure or an issue with the remote platform. "
-                "Check job status and platform availability."
+                "Remote job returned no results. This may indicate a job execution failure "
+                "or an issue with the remote platform."
+            )
+
+        if not isinstance(raw_results, dict):
+            raise RuntimeError(
+                f"Unexpected remote results type: {type(raw_results)} (expected dict)."
             )
 
         dist_size, state_to_index, valid_states = self._get_state_mapping(layer)
@@ -759,20 +759,14 @@ class MerlinProcessor:
 
         if "results_list" in raw_results:
             results_list = raw_results["results_list"]
-
             for i, result_item in enumerate(results_list):
                 if i >= batch_size:
                     break
-
                 if "results" in result_item:
                     state_counts = result_item["results"]
                     probs = torch.zeros(dist_size)
-
                     if state_counts:
-                        if (
-                            getattr(layer, "no_bunching", False)
-                            and valid_states is not None
-                        ):
+                        if self._is_unbunched(layer) and valid_states is not None:
                             filtered_counts = {}
                             for state_str, count in state_counts.items():
                                 state_tuple = self._parse_perceval_state(state_str)
@@ -785,9 +779,7 @@ class MerlinProcessor:
                             continue
 
                         first_value = next(iter(state_counts.values()))
-                        is_probability = (
-                            isinstance(first_value, float) and first_value <= 1.0
-                        )
+                        is_probability = isinstance(first_value, float) and first_value <= 1.0
                         total = 1.0 if is_probability else sum(state_counts.values())
 
                         for state_str, value in state_counts.items():
@@ -795,16 +787,11 @@ class MerlinProcessor:
                             if state_to_index and state_tuple in state_to_index:
                                 idx = state_to_index[state_tuple]
                                 if idx < dist_size:
-                                    probs[idx] = (
-                                        value
-                                        if is_probability
-                                        else (value / total if total > 0 else 0)
-                                    )
+                                    probs[idx] = value if is_probability else (value / total if total > 0 else 0)
 
                         prob_sum = probs.sum()
                         if prob_sum > 0 and abs(float(prob_sum) - 1.0) > 1e-6:
                             probs = probs / prob_sum
-
                         output_tensors.append(probs)
                 else:
                     output_tensors.append(torch.zeros(dist_size))
@@ -814,24 +801,8 @@ class MerlinProcessor:
 
         return torch.stack(output_tensors[:batch_size])
 
-    def _get_state_mapping(
-        self, layer: MerlinModule
-    ) -> tuple[int, dict | None, set | None]:
-        """
-        Determine the size of the output distribution and the mapping from Perceval
-        Fock states to tensor indices.
-
-        This requires either:
-          - a `computation_process.simulation_graph` with mapped keys, or
-          - `circuit` and `input_state` attributes on the layer.
-
-        If neither is available, a RuntimeError is raised rather than falling back
-        to an arbitrary default size.
-        """
-        # Preferred path: use the computation_process simulation graph when present.
-        if hasattr(layer, "computation_process") and hasattr(
-            layer.computation_process, "simulation_graph"
-        ):
+    def _get_state_mapping(self, layer: MerlinModule) -> tuple[int, dict | None, set | None]:
+        if hasattr(layer, "computation_process") and hasattr(layer.computation_process, "simulation_graph"):
             graph: Any = layer.computation_process.simulation_graph
 
             final_keys = getattr(graph, "final_keys", None)
@@ -839,12 +810,18 @@ class MerlinProcessor:
                 keys = list(final_keys)
                 dist_size = len(keys)
                 state_to_index = {state: idx for idx, state in enumerate(keys)}
-                valid_states = (
-                    set(keys) if getattr(layer, "no_bunching", False) else None
-                )
+                valid_states = set(keys) if self._is_unbunched(layer) else None
                 return dist_size, state_to_index, valid_states
 
-            # Fallback: compute combinatorial size from modes / photons
+            # Prefer mapped_keys if present (newer graphs)
+            mapped_keys = getattr(graph, "mapped_keys", None)
+            if mapped_keys:
+                keys = list(mapped_keys)
+                dist_size = len(keys)
+                state_to_index = {state: idx for idx, state in enumerate(keys)}
+                valid_states = set(keys) if self._is_unbunched(layer) else None
+                return dist_size, state_to_index, valid_states
+
             if hasattr(layer, "circuit") and hasattr(layer.circuit, "m"):
                 n_modes = int(layer.circuit.m)  # type: ignore[arg-type]
             else:
@@ -856,14 +833,10 @@ class MerlinProcessor:
             else:
                 n_photons = int(graph.n_photons)  # type: ignore[arg-type]
 
-            if getattr(layer, "no_bunching", False):
+            if self._is_unbunched(layer):
                 dist_size = comb(n_modes, n_photons)
-                valid_states = set(
-                    self._generate_no_bunching_states(n_modes, n_photons)
-                )
-                state_to_index = {
-                    state: idx for idx, state in enumerate(sorted(valid_states))
-                }
+                valid_states = set(self._generate_no_bunching_states(n_modes, n_photons))
+                state_to_index = {state: idx for idx, state in enumerate(sorted(valid_states))}
             else:
                 dist_size = comb(n_modes + n_photons - 1, n_photons)
                 state_to_index = None
@@ -871,7 +844,6 @@ class MerlinProcessor:
 
             return dist_size, state_to_index, valid_states
 
-        # Secondary path: a layer with direct circuit + input_state attributes
         if hasattr(layer, "circuit") and hasattr(layer, "input_state"):
             circuit = cast(Any, layer.circuit)
             input_state = cast(Any, layer.input_state)
@@ -879,14 +851,10 @@ class MerlinProcessor:
             n_modes = int(circuit.m)
             n_photons = int(sum(input_state))
 
-            if getattr(layer, "no_bunching", False):
+            if self._is_unbunched(layer):
                 dist_size = comb(n_modes, n_photons)
-                valid_states = set(
-                    self._generate_no_bunching_states(n_modes, n_photons)
-                )
-                state_to_index = {
-                    state: idx for idx, state in enumerate(sorted(valid_states))
-                }
+                valid_states = set(self._generate_no_bunching_states(n_modes, n_photons))
+                state_to_index = {state: idx for idx, state in enumerate(sorted(valid_states))}
             else:
                 dist_size = comb(n_modes + n_photons - 1, n_photons)
                 state_to_index = None
@@ -894,16 +862,13 @@ class MerlinProcessor:
 
             return dist_size, state_to_index, valid_states
 
-        # No valid mapping data => this is a configuration error
         raise RuntimeError(
             f"Cannot infer state mapping for layer of type {type(layer)!r}. "
-            "Expected a MerlinModule with either a 'computation_process' + "
-            "'simulation_graph' or 'circuit' and 'input_state' attributes."
+            "Expected a MerlinModule with either a 'computation_process' + 'simulation_graph' "
+            "or 'circuit' and 'input_state' attributes."
         )
 
-    def _generate_no_bunching_states(
-        self, n_modes: int, n_photons: int
-    ) -> list[tuple[int, ...]]:
+    def _generate_no_bunching_states(self, n_modes: int, n_photons: int) -> list[tuple[int, ...]]:
         valid_states: list[tuple[int, ...]] = []
 
         def generate_states(current: list[int], remaining: int, start: int):
@@ -927,21 +892,9 @@ class MerlinProcessor:
         input: torch.Tensor,
         desired_samples_per_input: int,
     ) -> list[int]:
-        """
-        Estimate required shots per input row for a MerlinModule using the
-        platform's RemoteProcessor estimator (transmittance, filters, etc.).
-
-        - Accepts a single vector (shape: [D]) or a batch (shape: [B, D]).
-        - Returns a list[int] with one entry per input row (0 means 'not viable').
-
-        NOTE: This does not submit any cloud jobs; it only uses the estimator.
-        """
-        if not hasattr(layer, "export_config") or not callable(
-            cast(Any, layer).export_config
-        ):
+        if not hasattr(layer, "export_config") or not callable(cast(Any, layer).export_config):
             raise TypeError("layer must provide export_config() for shot estimation")
 
-        # Normalize input to [B, D]
         if input.dim() == 1:
             x = input.unsqueeze(0)
         elif input.dim() == 2:
@@ -949,25 +902,18 @@ class MerlinProcessor:
         else:
             raise ValueError("input must be 1D or 2D tensor")
 
-        # Prepare a child RemoteProcessor mirroring user's processor (token/proxies)
         config = cast(Any, layer).export_config()
         child_rp = self._create_fresh_rp()
         child_rp.set_circuit(config["circuit"])
 
-        # Mirror input_state & min_detected_photons if present in the exported config
         if config.get("input_state"):
             input_state = pcvl.BasicState(config["input_state"])
             child_rp.with_input(input_state)
             n_photons = sum(config["input_state"])
-            # The estimator accounts for min_detected_photons via the processor setting
-            child_rp.min_detected_photons_filter(
-                n_photons if getattr(layer, "no_bunching", False) else 1
-            )
+            child_rp.min_detected_photons_filter(n_photons if self._is_unbunched(layer) else 1)
 
-        # Build param name list as Merlin does for execution
         input_param_names = self._extract_input_params(config)
 
-        # For each row, map x -> param_values and query RP estimator
         x_np = x.detach().cpu().numpy()
         estimates: list[int] = []
         for i in range(x_np.shape[0]):
@@ -976,10 +922,29 @@ class MerlinProcessor:
             for j, pname in enumerate(input_param_names):
                 param_values[pname] = float(row[j] * np.pi) if j < row.shape[0] else 0.0
 
-            # RemoteProcessor returns an int or None (if zero probability path)
-            est = child_rp.estimate_required_shots(
-                desired_samples_per_input, param_values=param_values
-            )
+            # Network calls to cloud estimators can occasionally hit short read timeouts.
+            # Retry a few times to stabilize usage without changing Perceval internals.
+            est = None
+            last_ex = None
+            for _attempt in range(3):
+                try:
+                    est = child_rp.estimate_required_shots(
+                        desired_samples_per_input, param_values=param_values
+                    )
+                    last_ex = None
+                    break
+                except Exception as ex:
+                    try:
+                        import requests  # type: ignore
+                        if isinstance(ex, requests.exceptions.ReadTimeout):
+                            last_ex = ex
+                            time.sleep(0.2)
+                            continue
+                    except Exception:
+                        pass
+                    raise
+            if last_ex is not None and est is None:
+                raise last_ex
             estimates.append(int(est) if est is not None else 0)
 
         return estimates
@@ -1011,5 +976,4 @@ class MerlinProcessor:
 
     def _cancelled_error(self):
         from concurrent.futures import CancelledError
-
         return CancelledError("Remote call was cancelled")
