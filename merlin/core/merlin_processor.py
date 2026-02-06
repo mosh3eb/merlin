@@ -82,7 +82,9 @@ class MerlinProcessor:
             # ── Legacy RemoteProcessor path ──
             assert remote_processor is not None  # for type checker
             if not isinstance(remote_processor, RemoteProcessor):
-                raise TypeError(f"Expected RemoteProcessor, got {type(remote_processor)}")
+                raise TypeError(
+                    f"Expected RemoteProcessor, got {type(remote_processor)}"
+                )
             self.remote_processor = remote_processor
             self.backend_name = getattr(remote_processor, "name", "unknown")
 
@@ -100,7 +102,9 @@ class MerlinProcessor:
         self.microbatch_size = microbatch_size
         self.default_timeout = float(timeout)
 
-        self.max_shots_per_call = None if max_shots_per_call is None else int(max_shots_per_call)
+        self.max_shots_per_call = (
+            None if max_shots_per_call is None else int(max_shots_per_call)
+        )
 
         # Concurrency of chunk submissions inside a single quantum leaf
         self.chunk_concurrency = max(1, int(chunk_concurrency))
@@ -142,7 +146,9 @@ class MerlinProcessor:
             try:
                 return bool(layer.no_bunching)
             except Exception:
-                logger.debug("Failed to read no_bunching from %s", type(layer), exc_info=True)
+                logger.debug(
+                    "Failed to read no_bunching from %s", type(layer), exc_info=True
+                )
 
         cs = getattr(layer, "computation_space", None)
         if cs is None:
@@ -211,7 +217,11 @@ class MerlinProcessor:
             )
 
         effective_timeout = self.default_timeout if timeout is None else timeout
-        deadline: float | None = None if effective_timeout in (None, 0) else time.time() + float(effective_timeout)
+        deadline: float | None = (
+            None
+            if effective_timeout in (None, 0)
+            else time.time() + float(effective_timeout)
+        )
 
         original_device = input.device
         original_dtype = input.dtype
@@ -235,14 +245,18 @@ class MerlinProcessor:
                 try:
                     from concurrent.futures import CancelledError
                 except Exception:  # pragma: no cover
+
                     class CancelledError(RuntimeError):
                         pass
+
                 fut.set_exception(CancelledError("Remote call was cancelled"))
 
         def _status():
             js = state.get("current_status")
             return {
-                "state": "COMPLETE" if fut.done() and not js else (js.get("state") if js else "IDLE"),
+                "state": "COMPLETE"
+                if fut.done() and not js
+                else (js.get("state") if js else "IDLE"),
                 "progress": js.get("progress") if js else 0.0,
                 "message": js.get("message") if js else None,
                 "chunks_total": state["chunks_total"],
@@ -266,7 +280,9 @@ class MerlinProcessor:
                         except TypeError:
                             # Backward compat: older signature variants
                             try:
-                                should_offload = bool(layer.should_offload(self.remote_processor, nsample))
+                                should_offload = bool(
+                                    layer.should_offload(self.remote_processor, nsample)
+                                )
                             except Exception:
                                 should_offload = False
                         except Exception:
@@ -325,7 +341,9 @@ class MerlinProcessor:
 
         if self.session is not None:
             chunks = [(0, B)]
-            return self._run_chunks_sequential(layer, config, input_tensor, chunks, nsample, state, deadline)
+            return self._run_chunks_sequential(
+                layer, config, input_tensor, chunks, nsample, state, deadline
+            )
         else:
             chunks: list[tuple[int, int]] = []
             start = 0
@@ -333,7 +351,9 @@ class MerlinProcessor:
                 end = min(start + self.microbatch_size, B)
                 chunks.append((start, end))
                 start = end
-            return self._run_chunks_pooled(layer, config, input_tensor, chunks, nsample, state, deadline)
+            return self._run_chunks_pooled(
+                layer, config, input_tensor, chunks, nsample, state, deadline
+            )
 
     def _run_chunks_sequential(
         self,
@@ -362,8 +382,12 @@ class MerlinProcessor:
                 state["active_chunks"] = 1
 
             t = self._run_chunk(
-                layer, config, input_tensor[s:e],
-                nsample, state, deadline,
+                layer,
+                config,
+                input_tensor[s:e],
+                nsample,
+                state,
+                deadline,
                 job_base_label=base_label,
             )
             outputs.append(t)
@@ -392,10 +416,16 @@ class MerlinProcessor:
 
         def _call(s: int, e: int, idx: int):
             try:
-                base_label = f"mer:{layer_name}:{state['call_id']}:{idx + 1}/{total_chunks}"
+                base_label = (
+                    f"mer:{layer_name}:{state['call_id']}:{idx + 1}/{total_chunks}"
+                )
                 t = self._run_chunk(
-                    layer, config, input_tensor[s:e],
-                    nsample, state, deadline,
+                    layer,
+                    config,
+                    input_tensor[s:e],
+                    nsample,
+                    state,
+                    deadline,
                     job_base_label=base_label,
                 )
                 outputs[idx] = t
@@ -462,7 +492,9 @@ class MerlinProcessor:
         for i in range(batch_size):
             circuit_params = {}
             for j, param_name in enumerate(input_param_names):
-                circuit_params[param_name] = float(input_np[i, j]) if j < input_chunk.shape[1] else 0.0
+                circuit_params[param_name] = (
+                    float(input_np[i, j]) if j < input_chunk.shape[1] else 0.0
+                )
             iteration_params.append(circuit_params)
 
         def _capped_name(base: str, cmd: str) -> str:
@@ -493,7 +525,11 @@ class MerlinProcessor:
                 n_photons = sum(config["input_state"])
                 rp.min_detected_photons_filter(n_photons)
 
-            max_shots_arg = self.DEFAULT_SHOTS_PER_CALL if self.max_shots_per_call is None else int(self.max_shots_per_call)
+            max_shots_arg = (
+                self.DEFAULT_SHOTS_PER_CALL
+                if self.max_shots_per_call is None
+                else int(self.max_shots_per_call)
+            )
             sampler = Sampler(rp, max_shots_per_call=max_shots_arg)
             sampler.clear_iterations()
             for params in iteration_params:
@@ -516,10 +552,12 @@ class MerlinProcessor:
                         self._active_jobs.discard(job)
                 logger.warning(
                     "Chunk attempt %d/%d failed: %s",
-                    attempt + 1, self._MAX_CHUNK_RETRIES, exc,
+                    attempt + 1,
+                    self._MAX_CHUNK_RETRIES,
+                    exc,
                 )
                 if attempt < self._MAX_CHUNK_RETRIES - 1:
-                    time.sleep(min(1.0 * (2 ** attempt), 5.0))
+                    time.sleep(min(1.0 * (2**attempt), 5.0))
 
         raise RuntimeError(
             f"Chunk failed after {self._MAX_CHUNK_RETRIES} attempts"
@@ -529,7 +567,9 @@ class MerlinProcessor:
 
     def _submit_job(self, sampler, nsample, job_base_label, _capped_name):
         """Submit a single async job via the sampler."""
-        if ("probs" in self.available_commands) and (nsample is None or int(nsample) <= 0):
+        if ("probs" in self.available_commands) and (
+            nsample is None or int(nsample) <= 0
+        ):
             job = sampler.probs
             cmd = "probs"
             if job_base_label:
@@ -655,7 +695,9 @@ class MerlinProcessor:
         return RemoteProcessor(
             name=rp.name,
             token=None,
-            url=rp.get_rpc_handler().url if hasattr(rp.get_rpc_handler(), "url") else None,
+            url=rp.get_rpc_handler().url
+            if hasattr(rp.get_rpc_handler(), "url")
+            else None,
             proxies=rp.proxies,
         )
 
@@ -728,7 +770,9 @@ class MerlinProcessor:
                             continue
 
                         first_value = next(iter(state_counts.values()))
-                        is_probability = isinstance(first_value, float) and first_value <= 1.0
+                        is_probability = (
+                            isinstance(first_value, float) and first_value <= 1.0
+                        )
                         total = 1.0 if is_probability else sum(state_counts.values())
 
                         for state_str, value in state_counts.items():
@@ -742,7 +786,11 @@ class MerlinProcessor:
                             else:
                                 continue
                             if idx < dist_size:
-                                probs[idx] = value if is_probability else (value / total if total > 0 else 0)
+                                probs[idx] = (
+                                    value
+                                    if is_probability
+                                    else (value / total if total > 0 else 0)
+                                )
 
                         prob_sum = probs.sum()
                         if prob_sum > 0 and abs(float(prob_sum) - 1.0) > 1e-6:
@@ -756,8 +804,12 @@ class MerlinProcessor:
 
         return torch.stack(output_tensors[:batch_size])
 
-    def _get_state_mapping(self, layer: MerlinModule) -> tuple[int, dict | None, set | None]:
-        if hasattr(layer, "computation_process") and hasattr(layer.computation_process, "simulation_graph"):
+    def _get_state_mapping(
+        self, layer: MerlinModule
+    ) -> tuple[int, dict | None, set | None]:
+        if hasattr(layer, "computation_process") and hasattr(
+            layer.computation_process, "simulation_graph"
+        ):
             graph: Any = layer.computation_process.simulation_graph
 
             final_keys = getattr(graph, "final_keys", None)
@@ -868,7 +920,9 @@ class MerlinProcessor:
         input: torch.Tensor,
         desired_samples_per_input: int,
     ) -> list[int]:
-        if not hasattr(layer, "export_config") or not callable(cast(Any, layer).export_config):
+        if not hasattr(layer, "export_config") or not callable(
+            cast(Any, layer).export_config
+        ):
             raise TypeError("layer must provide export_config() for shot estimation")
 
         if input.dim() == 1:
@@ -912,6 +966,7 @@ class MerlinProcessor:
                 except Exception as ex:
                     try:
                         import requests  # type: ignore
+
                         if isinstance(ex, requests.exceptions.ReadTimeout):
                             last_ex = ex
                             time.sleep(0.2)
@@ -952,4 +1007,5 @@ class MerlinProcessor:
 
     def _cancelled_error(self):
         from concurrent.futures import CancelledError
+
         return CancelledError("Remote call was cancelled")
