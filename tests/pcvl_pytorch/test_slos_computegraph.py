@@ -20,21 +20,45 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import perceval as pcvl
 import torch
 from perceval.components import BS
 
+from merlin import ComputationSpace
 from merlin.pcvl_pytorch.slos_torchscript import build_slos_distribution_computegraph
 
 
-def test_slos_compute_probs_from_amplitudes_normalizes():
+def test_slos_compute_probs_from_amplitudes_normalizes_HOM():
+    # HOM-effect based tests
     unitary = torch.tensor(BS().compute_unitary()).unsqueeze(0)
     unitary = unitary.to(torch.complex64)
 
-    graph = build_slos_distribution_computegraph(m=2, n_photons=2, dtype=torch.float)
+    graph = build_slos_distribution_computegraph(
+        m=2, n_photons=2, computation_space=ComputationSpace.FOCK
+    )
 
     _, amplitudes = graph.compute(unitary, [1, 1])
     _, probabilities = graph.compute_probs_from_amplitudes(amplitudes)
+    print(f"Probabilities of shape: {probabilities.shape} with value {probabilities}")
+    assert torch.allclose(
+        probabilities.sum(), torch.tensor(1.0, dtype=probabilities.dtype), atol=1e-6
+    )
 
+
+def test_slos_compute_probs_from_amplitudes_normalizes():
+    # build random torch unitary
+    unitary = torch.tensor(pcvl.Matrix.random_unitary(4)).unsqueeze(0)
+    unitary = unitary.to(torch.complex64)
+
+    graph = build_slos_distribution_computegraph(
+        m=4, n_photons=2, dtype=torch.float, computation_space=ComputationSpace.FOCK
+    )
+
+    _, amplitudes = graph.compute(unitary, [1, 1])
+    _, probabilities = graph.compute_probs_from_amplitudes(amplitudes)
+    print(
+        f"Probabilities of shape: {probabilities.shape} with value {probabilities} and sum {probabilities.sum()}"
+    )
     assert torch.allclose(
         probabilities.sum(), torch.tensor(1.0, dtype=probabilities.dtype), atol=1e-6
     )
