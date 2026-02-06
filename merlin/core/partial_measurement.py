@@ -62,6 +62,7 @@ class PartialMeasurement:
         branches: Tuple of branches, ordered lexicographically by outcome.
         measured_modes: Indices of measured modes in the full system.
         unmeasured_modes: Indices of unmeasured modes in the full system.
+        grouping: Optional grouping callable to group probabilities.
     """
 
     def __init__(
@@ -74,7 +75,7 @@ class PartialMeasurement:
         self.branches = branches
         self.measured_modes = measured_modes
         self.unmeasured_modes = unmeasured_modes
-        self._grouping = grouping
+        self.grouping: Callable[[torch.Tensor], torch.Tensor] | None = grouping
 
         self.verify_branches_order()
 
@@ -96,8 +97,10 @@ class PartialMeasurement:
     @property
     def probability_tensor_shape(self) -> tuple[int, int]:
         """Return the expected (batch, n_outcomes) shape for the probability tensor."""
-        probas = self._probability_tensor()
-        return (probas.shape[0], probas.shape[1])
+        batch = self._as_batch(self.branches[0].probability).shape[0]
+        if self.grouping is None:
+            return (batch, len(self.branches))
+        return (batch, self._grouping_output_size())
 
     @property
     def n_measured_modes(self) -> int:
@@ -110,7 +113,8 @@ class PartialMeasurement:
     @property
     def tensor(self) -> torch.Tensor:
         """
-        Return the probabilities of all branches as a tensor of shape (batch, n_outcomes).
+        Return the probabilities of all branches as a tensor of shape (batch, n_branches). unless a grouping was set
+        in which case, the probabilities are grouped and the returned tensor has shape (batch, grouping_output_size).
 
         This property assumes that all branches are ordered lexicographically by their outcomes
         so the stacking of probabilities follows the same order.
@@ -121,9 +125,46 @@ class PartialMeasurement:
         probas = torch.stack(
             [self._as_batch(branch.probability) for branch in self.branches], dim=1
         )
-        if self._grouping is not None:
-            probas = self._grouping(probas)
-        return probas
+        if self.grouping is None:
+            assert self.probability_tensor_shape == probas.shape, (
+                "Inconsistent probability tensor shape."
+            )
+            return probas
+        grouping = self.grouping
+        output_size = self._grouping_output_size()
+        # Verify shape of probas
+        assert probas.shape == (
+            self.probability_tensor_shape[0],
+            len(self.branches),
+        ), "Inconsistent probability tensor shape before grouping"
+        # Verify shape of grouped probas
+        grouped_probas = grouping(probas)
+        assert grouped_probas.shape == (self.probability_tensor_shape), (
+            "Inconsistent grouped probability tensor shape after grouping"
+        )
+        assert self.probability_tensor_shape == (
+            probas.shape[0],
+            output_size,
+        ), "Inconsistent grouped probability tensor shape after grouping"
+        return grouped_probas
+
+    @property
+    def probabilities(self) -> torch.Tensor:
+        """
+        Return the probabilities of all branches as a tensor of shape (batch, n_branches) unless a grouping was set
+        in which case, the probabilities are grouped and the returned tensor has shape (batch, grouping_output_size).
+
+        Same property as self.tensor.
+        """
+        return self.tensor
+
+    @property
+    def amplitudes(self):
+        return [branch.amplitudes for branch in self.branches]
+
+    @property
+    def outcomes(self):
+        return [branch.outcome for branch in self.branches]
 
     @staticmethod
     def _as_batch(probability: torch.Tensor) -> torch.Tensor:
@@ -139,6 +180,33 @@ class PartialMeasurement:
             f"probability tensor shape={self.probability_tensor_shape}, "
             f"StateVector shape={self.branches[0].amplitudes.shape})"
         )
+
+    def set_grouping(
+        self, grouping: Callable[[torch.Tensor], torch.Tensor] | None
+    ) -> None:
+        """
+        Set the grouping used to group probabilities.
+
+        Once the grouping is set, the properties `probabilities` and `tensor` return grouped probabilities.
+
+        Args:
+            grouping: Grouping object used to group probabilities.
+        """
+        if grouping is not None and not callable(grouping):
+            raise TypeError("Grouping must be callable.")
+        self.grouping = grouping
+
+    def _grouping_output_size(self) -> int:
+        grouping = self.grouping
+        if grouping is None:
+            raise RuntimeError("Grouping is not set.")
+        try:
+            output_size = getattr(grouping, "output_size", None)
+        except Exception as exc:
+            raise TypeError("Grouping must expose an 'output_size' attribute.") from exc
+        if not isinstance(output_size, int):
+            raise TypeError("Grouping 'output_size' must be an int.")
+        return output_size
 
     @staticmethod
     def from_detector_transform_output(
