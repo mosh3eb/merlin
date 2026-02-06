@@ -8,6 +8,7 @@ import perceval.providers.scaleway as scw
 import pytest
 from perceval.runtime import RemoteConfig
 
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Add Scaleway test option (--run-cloud-tests is defined in parent conftest)."""
     try:

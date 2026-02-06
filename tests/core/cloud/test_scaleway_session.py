@@ -26,7 +26,6 @@ from merlin.builder.circuit_builder import CircuitBuilder
 from merlin.core.computation_space import ComputationSpace
 from merlin.core.merlin_processor import MerlinProcessor
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

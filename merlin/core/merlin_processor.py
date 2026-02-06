@@ -141,9 +141,9 @@ class MerlinProcessor:
         """
         if hasattr(layer, "no_bunching"):
             try:
-                return bool(getattr(layer, "no_bunching"))
+                return bool(layer.no_bunching)
             except Exception:
-                pass
+                logger.debug("Failed to read no_bunching from %s", type(layer), exc_info=True)
 
         cs = getattr(layer, "computation_space", None)
         if cs is None:
@@ -435,7 +435,6 @@ class MerlinProcessor:
             raise errors[0]
 
         return torch.cat(outputs, dim=0)  # type: ignore[arg-type]
-
 
     def _run_chunk(
         self,
@@ -892,7 +891,7 @@ class MerlinProcessor:
                             time.sleep(0.2)
                             continue
                     except Exception:
-                        pass
+                        logger.debug("Could not check for ReadTimeout", exc_info=True)
                     raise
             if last_ex is not None and est is None:
                 raise last_ex

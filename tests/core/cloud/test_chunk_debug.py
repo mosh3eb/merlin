@@ -9,10 +9,10 @@ Run with:
 """
 
 import time
+from math import comb
 
 import pytest
 import torch
-from math import comb
 
 from merlin.algorithms import QuantumLayer
 from merlin.builder.circuit_builder import CircuitBuilder
