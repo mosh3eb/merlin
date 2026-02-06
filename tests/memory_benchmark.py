@@ -31,7 +31,7 @@ import torch
 from pynvml_utils import nvidia_smi
 from torch.amp import GradScaler, autocast
 
-from merlin import MeasurementStrategy, QuantumLayer
+from merlin import ComputationSpace, MeasurementStrategy, QuantumLayer
 
 parser = argparse.ArgumentParser(description="Test MerLin on your GPU !")
 parser.add_argument(
@@ -128,9 +128,10 @@ def benchmark_bs(MODES=8, PHOTONS=4, BS=32, TYPE=torch.float32, set_hp=False):
         input_state=input_state,
         trainable_parameters=[],
         input_parameters=["phase", "theta"],
-        measurement_strategy=MeasurementStrategy.probs(),
+        measurement_strategy=MeasurementStrategy.probs(
+            computation_space=ComputationSpace.UNBUNCHED
+        ),
         device=device,
-        no_bunching=True,
     )
     print(f"Checking device of qlayer = {q_model.device}")
     t_end_layer = time.time() - t_start_layer
