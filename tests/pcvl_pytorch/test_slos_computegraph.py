@@ -39,7 +39,6 @@ def test_slos_compute_probs_from_amplitudes_normalizes_HOM():
 
     _, amplitudes = graph.compute(unitary, [1, 1])
     _, probabilities = graph.compute_probs_from_amplitudes(amplitudes)
-    print(f"Probabilities of shape: {probabilities.shape} with value {probabilities}")
     assert torch.allclose(
         probabilities.sum(), torch.tensor(1.0, dtype=probabilities.dtype), atol=1e-6
     )
@@ -54,11 +53,8 @@ def test_slos_compute_probs_from_amplitudes_normalizes():
         m=4, n_photons=2, dtype=torch.float, computation_space=ComputationSpace.FOCK
     )
 
-    _, amplitudes = graph.compute(unitary, [1, 1])
+    _, amplitudes = graph.compute(unitary, [1, 0, 1, 0])
     _, probabilities = graph.compute_probs_from_amplitudes(amplitudes)
-    print(
-        f"Probabilities of shape: {probabilities.shape} with value {probabilities} and sum {probabilities.sum()}"
-    )
     assert torch.allclose(
         probabilities.sum(), torch.tensor(1.0, dtype=probabilities.dtype), atol=1e-6
     )

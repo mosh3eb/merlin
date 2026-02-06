@@ -912,8 +912,6 @@ class SLOSComputeGraph:
         is_batched = amplitudes.shape[0] > 1
 
         probabilities = amplitudes.real**2 + amplitudes.imag**2
-        probabilities *= self.norm_factor_output.to(probabilities.device)
-        probabilities /= self.norm_factor_input
 
         # Apply output mapping if needed
         if self.output_map_func is not None:
