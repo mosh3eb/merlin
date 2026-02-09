@@ -223,6 +223,7 @@ class MeasurementStrategy(metaclass=_MeasurementStrategyMeta):
         grouping: LexGrouping | ModGrouping | None = None,
     ) -> MeasurementStrategy:
         # Full measurement returning a probability distribution.
+        computation_space = ComputationSpace.coerce(computation_space)
         return MeasurementStrategy(
             type=MeasurementKind["PROBABILITIES"],
             computation_space=computation_space,
@@ -235,6 +236,7 @@ class MeasurementStrategy(metaclass=_MeasurementStrategyMeta):
     ) -> MeasurementStrategy:
         # Mode_expectations
         # Per-mode expectation values from the measured distribution.
+        computation_space = ComputationSpace.coerce(computation_space)
         return MeasurementStrategy(
             type=MeasurementKind.MODE_EXPECTATIONS,
             computation_space=computation_space,
@@ -245,6 +247,7 @@ class MeasurementStrategy(metaclass=_MeasurementStrategyMeta):
         computation_space: ComputationSpace = ComputationSpace.UNBUNCHED,
     ) -> MeasurementStrategy:
         # Raw amplitudes without detector/noise/sampling processing.
+        computation_space = ComputationSpace.coerce(computation_space)
         return MeasurementStrategy(
             type=MeasurementKind.AMPLITUDES,
             computation_space=computation_space,
@@ -269,6 +272,7 @@ class MeasurementStrategy(metaclass=_MeasurementStrategyMeta):
             raise ValueError("Negative mode index")
 
         # Partial measurement is explicit and validated; modes drive processing.
+        computation_space = ComputationSpace.coerce(computation_space)
         return MeasurementStrategy(
             type=MeasurementKind.PARTIAL,
             measured_modes=tuple(modes),

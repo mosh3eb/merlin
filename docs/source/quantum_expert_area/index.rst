@@ -16,3 +16,4 @@ Quantum Expert Area
    experiment_support
    quantum_bridge
    kernels
+   partial_measurement

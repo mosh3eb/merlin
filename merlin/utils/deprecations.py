@@ -20,30 +20,30 @@ _MEASUREMENT_STRATEGY_ENUM_MIGRATIONS = {
 }
 
 
-def _convert_no_bunching_init(
+_NO_BUNCHING_REMOVED_MESSAGE = (
+    "The 'no_bunching' parameter is removed. "
+    "Use measurement_strategy=MeasurementStrategy.probs(computation_space=ComputationSpace.UNBUNCHED) "
+    "for no_bunching=True or computation_space=ComputationSpace.FOCK for no_bunching=False."
+)
+
+
+def raise_no_bunching_deprecated(*, stacklevel: int = 2) -> None:
+    """Warn and raise when deprecated no_bunching is used."""
+    warnings.warn(
+        _NO_BUNCHING_REMOVED_MESSAGE,
+        DeprecationWarning,
+        stacklevel=stacklevel,
+    )
+    raise ValueError(_NO_BUNCHING_REMOVED_MESSAGE)
+
+
+def _reject_no_bunching_init(
     method_qualname: str, kwargs: dict[str, Any]
 ) -> dict[str, Any]:
-    """Converter for QuantumLayer.__init__ deprecated `no_bunching`.
-    Removes `no_bunching`, sets/validates `computation_space`.
-    """
-    no_bunching = kwargs.pop("no_bunching", None)
-    comp_space_in = kwargs.get("computation_space", None)
-
-    if comp_space_in is None:
-        if no_bunching is None:
-            comp_value = ComputationSpace.UNBUNCHED
-        else:
-            comp_value = ComputationSpace.default(no_bunching=bool(no_bunching))
-    else:
-        comp_value = ComputationSpace.coerce(comp_space_in)
-        if no_bunching is not None:
-            derived_nb = comp_value is ComputationSpace.UNBUNCHED
-            if bool(no_bunching) != derived_nb:
-                raise ValueError(
-                    "Incompatible 'no_bunching' value with selected 'computation_space'. "
-                )
-
-    kwargs["computation_space"] = comp_value
+    """Reject deprecated `no_bunching` usage (hard-fail with warning)."""
+    _ = method_qualname
+    if "no_bunching" in kwargs:
+        raise_no_bunching_deprecated(stacklevel=3)
     return kwargs
 
 
@@ -120,15 +120,15 @@ DEPRECATION_REGISTRY: dict[
         None,
     ),
     "QuantumLayer.__init__.no_bunching": (
-        "The 'no_bunching' keyword is deprecated; prefer selecting the computation_space instead.",
-        False,
-        _convert_no_bunching_init,
+        None,
+        None,
+        _reject_no_bunching_init,
     ),
     # QuantumLayer.simple deprecations
     "QuantumLayer.simple.no_bunching": (
-        "The 'no_bunching' keyword is deprecated; prefer selecting the computation_space instead.",
-        False,
-        _convert_no_bunching_init,
+        None,
+        None,
+        _reject_no_bunching_init,
     ),
     "QuantumLayer.simple.computation_space": (
         "The 'computation_space' keyword is deprecated; move it into MeasurementStrategy.probs(computation_space).",
@@ -168,6 +168,11 @@ DEPRECATION_REGISTRY: dict[
         False,
         _remove_FidelityKernel_simple_n_photons,
     ),
+    "FidelityKernel.simple.no_bunching": (
+        None,
+        None,
+        _reject_no_bunching_init,
+    ),
     "FidelityKernel.simple.trainable": (
         "Since merlin >= 0.3, input parameter allocation is automatically inferred from input dimensionality, following Gan et al. (2022) on Fock-space expressivity. Manual control of input/trainable parameters is deprecated.",
         False,
@@ -177,6 +182,18 @@ DEPRECATION_REGISTRY: dict[
         "Since merlin >= 0.3, The input state is alway going to be a [0,1,0,1,...] state depending on input size.",
         False,
         _remove_FidelityKernel_input_state,
+    ),
+    # FidelityKernel.__init__ deprecations
+    "FidelityKernel.__init__.no_bunching": (
+        None,
+        None,
+        _reject_no_bunching_init,
+    ),
+    # KernelCircuitBuilder.build_fidelity_kernel deprecations
+    "KernelCircuitBuilder.build_fidelity_kernel.no_bunching": (
+        None,
+        None,
+        _reject_no_bunching_init,
     ),
 }
 
@@ -246,10 +263,12 @@ def normalize_measurement_strategy(
     Rules:
     1. If MeasurementStrategy instance (new API) + constructor computation_space provided
        → ERROR: user must move computation_space into the factory method
-    2. If legacy enum (PROBABILITIES, etc) + constructor computation_space
+    2. If measurement_strategy is None and computation_space provided
+       → OK with deprecation warning (default to MeasurementStrategy.probs(computation_space))
+    3. If legacy enum (PROBABILITIES, etc) + constructor computation_space
        → OK with deprecation warning (backward compat)
-    3. If MeasurementStrategy instance only → use its computation_space
-    4. If legacy enum only → wrap with computation_space param
+    4. If MeasurementStrategy instance only → use its computation_space
+    5. If legacy enum only → wrap with computation_space param
     """
     from ..measurement.strategies import (
         MeasurementKind,
@@ -265,6 +284,13 @@ def normalize_measurement_strategy(
             computation_space = ComputationSpace.UNBUNCHED
         else:
             computation_space = ComputationSpace.coerce(computation_space)
+            warnings.warn(
+                "Passing 'computation_space' without an explicit measurement_strategy is deprecated. "
+                "Use MeasurementStrategy.probs(computation_space=...) instead. "
+                "Will be removed in 0.4 (v0.4).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         measurement_strategy = MeasurementStrategy.probs(computation_space)
         return measurement_strategy, computation_space
 

@@ -65,7 +65,7 @@ Example: Declarative builder API
         input_size=4,
         builder=builder,
         n_photons=3,  # is equivalent to input_state=[1,1,1,0,0,0]
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(),
     )
 
     model = nn.Sequential(
@@ -126,7 +126,7 @@ Example: Manual Perceval circuit (more control)
         input_state=[1, 0, 1, 0, 1, 0],
         trainable_parameters=["theta"],
         input_parameters=["input"],
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(),
     )
 
     model = nn.Sequential(
@@ -139,6 +139,8 @@ Example: Manual Perceval circuit (more control)
    :alt: A Perceval Circuit built with the Perceval API
    :width: 600px
    :align: center
+
+Here, the grouping can also be directly added to the ``MeasurementStrategy`` object used in the ``measurement_strategy`` parameter.
 
 See the User guide and Notebooks for more advanced usage and training routines !
 
@@ -170,6 +172,7 @@ The snippet below prepares a dual-rail Bell state as the initial condition and e
     from merlin.algorithms.layer import QuantumLayer
     from merlin.core import ComputationSpace
     from merlin.measurement.strategies import MeasurementStrategy
+    from merlin.measurement.
 
     circuit = pcvl.Unitary(pcvl.Matrix.random_unitary(4))  # some haar-random 4-mode circuit
 
@@ -182,8 +185,7 @@ The snippet below prepares a dual-rail Bell state as the initial condition and e
         circuit=circuit,
         n_photons=2,
         input_state=bell,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
-        computation_space=ComputationSpace.DUAL_RAIL,
+        measurement_strategy=MeasurementStrategy.probs(computation_space=ComputationSpace.DUAL_RAIL),
     )
 
     x = torch.rand(10, circuit.m)  # batch of classical parameters
@@ -197,7 +199,7 @@ For comparison, the ``amplitude_encoding`` variant supplies the photonic state d
     import torch
     import perceval as pcvl
     from merlin.algorithms.layer import QuantumLayer
-    from merlin.core import ComputationSpace
+    from merlin.core import MeasurementStrategy,ComputationSpace
 
     circuit = pcvl.Circuit(3)
 
@@ -205,7 +207,7 @@ For comparison, the ``amplitude_encoding`` variant supplies the photonic state d
         circuit=circuit,
         n_photons=2,
         amplitude_encoding=True,
-        computation_space=ComputationSpace.UNBUNCHED,
+        measurement_strategy=MeasurementStrategy.probs(computation_space=ComputationSpace.UNBUNCHED),
         dtype=torch.cdouble,
     )
 
@@ -260,8 +262,7 @@ The snippet below prepares a basic quantum layer and returns a ``ProbabilityDist
         circuit=circuit,
         n_photons=2,
         input_state=bell,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
-        computation_space=ComputationSpace.DUAL_RAIL,
+        measurement_strategy=MeasurementStrategy.probs(computation_space=ComputationSpace.DUAL_RAIL),
         return_object=True,
     )
 
@@ -269,3 +270,9 @@ The snippet below prepares a basic quantum layer and returns a ``ProbabilityDist
     probs = layer(x)
     assert isinstance(probs,ProbabilityDistribution)
     assert isinstance(probs.tensor,torch.Tensor)
+
+Deprecations
+-------------------------
+.. deprecated:: 0.4
+   The use of the ``no_bunching`` flag  is deprecated and will be removed in version 0.4.
+   Use the ``computation_space`` flag inside ``measurement_strategy`` instead. See :doc:`/user_guide/migration_guide`.
