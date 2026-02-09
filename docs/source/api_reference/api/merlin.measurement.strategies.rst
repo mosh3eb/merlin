@@ -33,8 +33,7 @@ Partial measurement
 -------------------
 
 Partial measurement is explicit and validated. It returns a
-:class:`merlin.core.partial_measurement.PartialMeasurement` and requires the detector
-pipeline to run with ``partial_measurement=True``.
+:class:`merlin.core.partial_measurement.PartialMeasurement`.
 
 .. code-block:: python
 
@@ -87,10 +86,10 @@ methods, do not also pass ``computation_space`` separately in constructors such 
 
    # Deprecated (legacy enum + separate computation_space)
    # QuantumLayer(..., measurement_strategy=MeasurementStrategy.PROBABILITIES,
-   #              computation_space=ComputationSpace.FOCK)
+   #             computation_space=ComputationSpace.FOCK)
 
    # Recommended
-   # QuantumLayer(..., measurement_strategy=MeasurementStrategy.probs(ComputationSpace.FOCK))
+   QuantumLayer(..., measurement_strategy=MeasurementStrategy.probs(ComputationSpace.FOCK))
 
 Reference
 ---------

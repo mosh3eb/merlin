@@ -80,7 +80,7 @@ according to a custom grouping function (e.g., for classical post-processing or 
    from merlin.utils.grouping import ModGrouping
    
    # Define a grouping function
-   grouping = ModGrouping(output_size=2)  # example grouping
+   grouping = ModGrouping(input_size = 4,output_size=2)  # example grouping
    
    # Apply grouping to PartialMeasurement
    pm.set_grouping(grouping)

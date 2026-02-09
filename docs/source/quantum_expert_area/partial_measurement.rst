@@ -57,9 +57,11 @@ What you get (and what it means)
 ``output`` is a ``PartialMeasurement`` object. The key fields are:
 
 1. ``output.measured_modes``: the indices you measured (``(0, 1)`` here).
-2. ``output.probabilities``: a tensor with the probability of each measured-mode
+2. ``output.outcomes``: a list of tuples indicating the measured Fock outcomes 
+   for the measured modes.
+3. ``output.probabilities``: a tensor with the probability of each measured-mode
    outcome. Each column corresponds to one measured Fock outcome.
-3. ``output.amplitudes``: a list of ``StateVector`` objects for the **unmeasured
+4. ``output.amplitudes``: a list of ``StateVector`` objects for the **unmeasured
    modes only**. The list is aligned with ``output.probabilities``: each element
    is the conditional state given the corresponding measured outcome.
 
