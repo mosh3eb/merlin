@@ -77,7 +77,8 @@ If you pass a ``grouping`` object to ``MeasurementStrategy.partial(...)``, it
 **only groups the probabilities**, not the amplitudes. Concretely:
 
 1. ``output.probabilities`` (or ``output.tensor``) is grouped according to the
-   grouping rule, so its second dimension becomes the grouping output size.
+   grouping rule, so its second dimension becomes the grouping output size. This does
+   not change the .outcomes themselves.
 2. ``output.amplitudes`` stays **one conditional state per measured outcome**.
    The amplitudes list is not grouped or merged.
 
