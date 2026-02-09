@@ -2,9 +2,9 @@ import os
 import tempfile
 
 import perceval as pcvl
-from perceval.components import BS
 import pytest
 import torch
+from perceval.components import BS
 
 from merlin.core.computation_space import ComputationSpace
 from merlin.pcvl_pytorch.slos_torchscript import (
@@ -127,7 +127,6 @@ def test_slos_save_load_computation_graph(get_tmp_file):
 
 
 def test_slos_compute_slos_distribution_with_output_map_function():
-
     # small instance
     m = 4
     n_photons = 2
@@ -206,6 +205,7 @@ def test_slos_compute_slos_distribution_with_output_map_function():
         f"expected : {expected_amplitudes}\n"
         f"calculated  : {amplitudes}"
     )
+
 
 def test_slos_compute_probs_from_amplitudes_normalizes_HOM():
     # HOM-effect based tests
