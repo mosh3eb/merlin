@@ -5,7 +5,7 @@ Angle Encoding and Amplitude Encoding
 =====================================
 
 This guide shows how to use **angle encoding** and **amplitude encoding** with
-Merlin's :class:`~merlin.algorithms.QuantumLayer`.  You'll find when to use each,
+Merlin's :class:`~merlin.algorithms.QuantumLayer`. You'll find when to use each,
 how to build circuits with :class:`~merlin.builder.CircuitBuilder` or native
 Perceval, and complete, runnable snippets.
 
@@ -20,10 +20,10 @@ Conceptual overview
 -------------------
 
 - **Angle encoding** maps a *real feature vector* into *circuit parameters*
-  (e.g., phase shifter angles).  The circuit unitary depends on your data.
+  (e.g., phase shifter angles). The circuit unitary depends on your data.
   Data is encoded at specific points in the circuit using phase shifters.
 - **Amplitude encoding** feeds a *quantum state* directly to the layer as
-  input.  Instead of turning features into angles, you supply the input
+  input. Instead of turning features into angles, you supply the input
   quantum state's amplitudes at the beginning of the circuit.
   The preferred way to do this is with a
   :class:`~merlin.core.state_vector.StateVector`.
@@ -83,14 +83,14 @@ angle-encoding stage into your photonic circuit.
         input_state=StateVector.from_basic_state([1, 0, 1, 0, 1, 0]),  # 3 photons in 6 modes
     )
 
-    x = torch.rand((4, 6))      # batch of 4 samples
-    probs = layer(x)             # default MeasurementStrategy.PROBABILITIES
+    x = torch.rand((4, 6))       # batch of 4 samples
+    probs = layer(x)              # default .probs() measurement
 
 Parameter names and prefixes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The :py:meth:`~merlin.builder.CircuitBuilder.add_angle_encoding` call registers
-parameters prefixed by ``name`` (e.g., ``"input"``).  Internally,
+parameters prefixed by ``name`` (e.g., ``"input"``). Internally,
 :class:`~merlin.algorithms.QuantumLayer` will consume your real-valued input
 tensor and map each feature to the corresponding prefixed angle(s).
 
@@ -100,7 +100,7 @@ Tips and constraints
 - **Modes vs. features**: By construction you typically shouldn't encode more
   independent features than available modes in the encoding step.
 - **Scaling and combinations**: You can use ``scale=...`` to rescale inputs
-  before turning them into angles.  If you create multiple encoding stages with
+  before turning them into angles. If you create multiple encoding stages with
   different names (prefixes), the layer can split the input tensor across them.
 - **Kernels**: For quantum kernels, consider :class:`~merlin.kernels.FeatureMap`
   and :class:`~merlin.kernels.FidelityKernel` if you need a reusable feature
@@ -165,56 +165,64 @@ Amplitude Encoding
 When to use
 ^^^^^^^^^^^
 
-Choose amplitude encoding when you want to map **classical feature vectors**
-directly into Fock-space amplitudes.  Your real-valued data becomes the quantum
-state itself and the circuit acts as a learned unitary transformation on it.
-Use :meth:`StateVector.from_tensor() <merlin.core.state_vector.StateVector.from_tensor>`
-to wrap the data.
+Choose amplitude encoding when you want to:
+
+- **Map classical feature vectors** directly into Fock-space amplitudes. Your
+  real-valued data becomes the quantum state itself and the circuit acts as a
+  learned unitary transformation on it. Use
+  :meth:`StateVector.from_tensor() <merlin.core.state_vector.StateVector.from_tensor>`
+  to wrap the data.
+- **Inject a prepared quantum state** into the circuit — for example, a state
+  produced by an upstream simulator or another photonic block. In this case you
+  can provide complex-valued data directly.
 
 How it works
 ^^^^^^^^^^^^^
 
-Amplitude encoding replaces the input quantum state of the circuit at runtime with a
-state whose amplitudes are derived from your classical data.  The circuit then acts as a
+Amplitude encoding replaces the input quantum state of the circuit at runtime
+with a state whose amplitudes come from your data. The circuit then acts as a
 learned unitary transformation on that state.
 
 The workflow is:
 
-1. Start with a real feature vector of length *d* (the Fock basis size).
+1. Start with a feature vector of length *d* (the Fock basis size). This can
+   be real-valued classical data or complex-valued quantum-state amplitudes.
 2. Wrap it via :meth:`StateVector.from_tensor() <merlin.core.state_vector.StateVector.from_tensor>`,
    which attaches the Fock metadata and auto-promotes real data to complex.
-3. Pass the :class:`~merlin.core.state_vector.StateVector` to ``forward()`` — the layer
-   detects the type and activates amplitude encoding automatically.
+3. Pass the :class:`~merlin.core.state_vector.StateVector` to ``forward()`` —
+   the layer detects the type and activates amplitude encoding automatically.
 
-No special constructor flags are needed.  The encoding mode is inferred purely from
-the **type** of the first argument to ``forward()``:
+No special constructor flags are needed. The encoding mode is inferred purely
+from the **type** of the first argument to ``forward()``:
 
 .. list-table::
    :header-rows: 1
-   :widths: 10 30 60
+   :widths: 5 25 70
 
    * - #
      - Input type
      - Behaviour
    * - 1
-     - :class:`~merlin.core.state_vector.StateVector` **(preferred)**
-     - Automatically activates amplitude encoding.  The layer extracts the
+     - | :class:`~merlin.core.state_vector.StateVector`
+       | **(preferred)**
+     - Automatically activates amplitude encoding. The layer extracts the
        dense complex tensor, validates its dimension against the layer basis,
        and propagates it through the circuit.
    * - 2
      - Complex ``torch.Tensor``
      - A single complex-dtype tensor is treated identically to a
-       :class:`StateVector`'s underlying tensor.  Useful when you manage
+       :class:`StateVector`'s underlying tensor. Useful when you manage
        tensors directly without wrapping them.
    * - 3
-     - Real ``torch.Tensor`` + ``amplitude_encoding=True``
+     - | Real ``torch.Tensor``
+       | + ``amplitude_encoding=True``
      - **Legacy path — deprecated (will be removed in 0.4).**
        The constructor flag forces amplitude interpretation on a real-valued
-       tensor.  Migrate to path 1 or 2.
+       tensor. Migrate to path 1 or 2.
 
 .. deprecated:: 0.3
    The ``amplitude_encoding=True`` constructor parameter is deprecated and will
-   be removed in **0.4**.  Pass a :class:`~merlin.core.state_vector.StateVector`
+   be removed in **0.4**. Pass a :class:`~merlin.core.state_vector.StateVector`
    or a complex ``torch.Tensor`` to ``forward()`` instead.
 
 Setup
@@ -228,13 +236,16 @@ Just make sure:
 
 .. code-block:: python
 
-    from merlin import QuantumLayer, CircuitBuilder, MeasurementStrategy, ComputationSpace
+    import perceval as pcvl
+    from merlin.algorithms import QuantumLayer
+    from merlin.measurement import MeasurementStrategy
+    from merlin.core.computation_space import ComputationSpace
 
-    builder = CircuitBuilder(n_modes=4)
-    builder.add_generic_interferometer(trainable_prefix="theta")
+    circuit = pcvl.Circuit(4)
+    # ... populate with beam splitters, phase shifters, etc. ...
 
     layer = QuantumLayer(
-        builder=builder,
+        circuit=circuit,
         n_photons=2,
         measurement_strategy=MeasurementStrategy.probs(ComputationSpace.FOCK),
     )
@@ -263,7 +274,7 @@ Encoding classical data with ``from_tensor``
 
 The primary amplitude encoding path wraps a classical feature vector as a
 :class:`~merlin.core.state_vector.StateVector` via
-:meth:`~merlin.core.state_vector.StateVector.from_tensor`.  This method accepts
+:meth:`~merlin.core.state_vector.StateVector.from_tensor`. This method accepts
 **real or complex** tensors — real data is automatically promoted to complex
 internally — and validates that the last dimension matches the Fock basis size.
 
@@ -282,8 +293,6 @@ internally — and validates that the last dimension matches the Fock basis size
 
     # Pass to the layer — amplitude encoding is detected from the type
     output = layer(sv)
-
-.. note::
 
 .. tip::
 
@@ -364,11 +373,11 @@ Restrictions
 - :class:`~merlin.core.state_vector.StateVector` and ``torch.Tensor`` inputs
   **cannot be mixed** in the same call.
 - **Batched (2-D)** :class:`~merlin.core.state_vector.StateVector` inputs are
-  supported.  Pass a 2-D tensor of shape ``(batch_size, d)`` to
+  supported. Pass a 2-D tensor of shape ``(batch_size, d)`` to
   :meth:`~StateVector.from_tensor` and the layer processes the whole batch in a
   single ``forward()`` call.
-- With ``MeasurementStrategy.AMPLITUDES`` the layer **bypasses** detectors and
-  noise; ``shots`` must be unset or zero.
+- With ``MeasurementStrategy.amplitudes()`` the layer **bypasses** detectors
+  and noise; ``shots`` must be unset or zero.
 - If you need to combine a custom quantum input with classical angle-encoded
   features, set the quantum state via the ``input_state`` constructor parameter
   and pass the classical features as a real tensor to ``forward()``.
@@ -377,15 +386,15 @@ Restrictions
 Returning typed objects
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-With ``return_object=True``, amplitude encoding returns a
-:class:`~merlin.core.state_vector.StateVector`:
+With ``return_object=True``, the measurement strategy determines the return
+type. This applies equally to angle and amplitude encoding:
 
 .. code-block:: python
 
     layer = QuantumLayer(
         builder=builder,
         n_photons=2,
-        measurement_strategy=MeasurementStrategy.amplitudes(),
+        measurement_strategy=MeasurementStrategy.amplitudes(ComputationSpace.FOCK),
         return_object=True,
     )
 
@@ -426,7 +435,7 @@ so that the output amplitudes of one feed into the next:
     layer_1 = QuantumLayer(
         builder=builder_1,
         input_state=StateVector.from_basic_state([1, 0, 1, 0]),
-        measurement_strategy=MeasurementStrategy.amplitudes(),
+        measurement_strategy=MeasurementStrategy.amplitudes(ComputationSpace.FOCK),
         return_object=True,
     )
 
@@ -455,7 +464,7 @@ Encodings Key Differences
 | Number of inputs          | User-defined               | Fixed by n_modes and n_photons           |
 |                           | (``input_size``)           | (combinatorial formula)                  |
 +---------------------------+----------------------------+------------------------------------------+
-| Circuit dependence        | Features set parameters    | State defines input quantum              |
+| Circuit dependence        | Features set parameters    | Data defines input quantum               |
 |                           | (phases/angles)            | state; circuit is fixed unitary          |
 +---------------------------+----------------------------+------------------------------------------+
 | Setup (constructor)       | ``input_size``,            | ``n_photons``; no ``input_size`` or      |
@@ -464,14 +473,13 @@ Encodings Key Differences
 | Activation trigger        | Real tensor to             | ``StateVector.from_tensor(data, ...)``   |
 |                           | ``forward()``              | or complex tensor to ``forward()``       |
 +---------------------------+----------------------------+------------------------------------------+
-| Typical use               | Feature maps, kernels,     | Encoding classical data as quantum       |
-|                           | hybrid NN layers           | amplitudes via ``from_tensor``            |
+| Typical use               | Feature maps, kernels,     | Classical data as amplitudes via          |
+|                           | hybrid NN layers           | ``from_tensor``; or injecting a           |
+|                           |                            | prepared quantum state                    |
 +---------------------------+----------------------------+------------------------------------------+
 | Measurement options       | Probabilities, modes,      | Probabilities, modes,                    |
-|                           | amplitudes (sim-only)      | amplitudes (sim-only)                    |
-+---------------------------+----------------------------+------------------------------------------+
-| Typed output              | ``ProbabilityDistribution``| ``StateVector`` (amplitudes) or          |
-| (``return_object=True``)  |                            | ``ProbabilityDistribution`` (probs)      |
+|                           | amplitudes, partial        | amplitudes, partial                      |
+|                           | (sim-only)                 | (sim-only)                               |
 +---------------------------+----------------------------+------------------------------------------+
 
 Troubleshooting
@@ -484,15 +492,15 @@ Troubleshooting
   your encoding stage, reduce features using dimensionality reduction techniques
   such as PCA or UMAP, or expand the circuit's encoding modes.
 - **Shape errors (amplitude encoding)**: The amplitude vector length must match
-  the layer basis size: ``len(layer.output_keys)``.  For batching, use
+  the layer basis size: ``len(layer.output_keys)``. For batching, use
   ``(batch, len(output_keys))``.
 - **Incompatible measurement strategy**: When
-  ``MeasurementStrategy.AMPLITUDES`` is selected, do not set nonzero ``shots``
+  ``MeasurementStrategy.amplitudes()`` is selected, do not set nonzero ``shots``
   or enable detectors/noise.
 - **Unnormalized amplitudes**: Always normalize amplitude inputs to avoid
   unstable gradients and to ensure proper probability mass.
 - **Mixing input types**: You cannot pass both a ``StateVector`` and a
-  ``torch.Tensor`` in the same ``forward()`` call.  Use either angle encoding
+  ``torch.Tensor`` in the same ``forward()`` call. Use either angle encoding
   (real tensors) or amplitude encoding (``StateVector`` / complex tensor), not
   both.
 - **DeprecationWarning for** ``amplitude_encoding=True``: Migrate to passing a
@@ -500,7 +508,7 @@ Troubleshooting
   ``forward()`` instead of using the constructor flag.
 - **Batched amplitude encoding**: Pass a 2-D tensor to
   :meth:`StateVector.from_tensor` and call ``forward()`` with the resulting
-  :class:`StateVector`.  The layer normalizes each sample independently and
+  :class:`StateVector`. The layer normalizes each sample independently and
   returns a ``(batch_size, output_size)`` tensor.
 
 Complete Examples
@@ -516,6 +524,7 @@ Angle encoding with builder and probabilities out
     from merlin.builder import CircuitBuilder
     from merlin.algorithms import QuantumLayer
     from merlin.measurement import MeasurementStrategy
+    from merlin.core.computation_space import ComputationSpace
     from merlin.core.state_vector import StateVector
 
     builder = CircuitBuilder(n_modes=6)
@@ -527,7 +536,7 @@ Angle encoding with builder and probabilities out
         input_size=6,
         builder=builder,
         input_state=StateVector.from_basic_state([1, 0, 1, 0, 1, 0]),
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(ComputationSpace.FOCK),
     )
 
     x = torch.rand((3, 6))
@@ -542,6 +551,7 @@ Amplitude encoding with ``StateVector.from_tensor`` and amplitudes out
     import perceval as pcvl
     from merlin.algorithms import QuantumLayer
     from merlin.measurement import MeasurementStrategy
+    from merlin.core.computation_space import ComputationSpace
     from merlin.core.state_vector import StateVector
 
     # Simple unitary circuit placeholder; customize as needed
@@ -551,7 +561,7 @@ Amplitude encoding with ``StateVector.from_tensor`` and amplitudes out
     layer = QuantumLayer(
         circuit=circuit,
         n_photons=2,
-        measurement_strategy=MeasurementStrategy.AMPLITUDES,
+        measurement_strategy=MeasurementStrategy.amplitudes(ComputationSpace.FOCK),
         return_object=True,
     )
 
@@ -569,11 +579,12 @@ Amplitude encoding with complex tensor (no wrapper)
     import torch
     from merlin.algorithms import QuantumLayer
     from merlin.measurement import MeasurementStrategy
+    from merlin.core.computation_space import ComputationSpace
 
     layer = QuantumLayer(
         circuit=circuit,     # same circuit as above
         n_photons=2,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(ComputationSpace.FOCK),
     )
 
     d = len(layer.output_keys)
@@ -612,24 +623,26 @@ Measurement Strategies (Output Options)
 ---------------------------------------
 
 Both angle and amplitude encoding support the following output measurement
-strategies.  For more details, see :doc:`measurement_strategy`.
+strategies. For more details, see :doc:`measurement_strategy`.
 
-- ``MeasurementStrategy.probs(computation_space)`` / ``PROBABILITIES``
-  (default): returns a probability vector aligned with ``layer.output_keys``.
+- ``MeasurementStrategy.probs(computation_space)`` (default): returns a
+  probability vector aligned with ``layer.output_keys``.
   With ``return_object=True``, returns a
   :class:`~merlin.core.probability_distribution.ProbabilityDistribution`.
-- ``MeasurementStrategy.mode_expectations(computation_space)`` /
-  ``MODE_EXPECTATIONS``: returns per-mode expected photon counts.
-- ``MeasurementStrategy.amplitudes()`` / ``AMPLITUDES``: returns complex
-  amplitudes (simulation-only; bypasses detectors and noise).
+- ``MeasurementStrategy.mode_expectations(computation_space)``: returns
+  per-mode expected photon counts.
+- ``MeasurementStrategy.amplitudes()``: returns complex amplitudes
+  (simulation-only; bypasses detectors and noise).
   With ``return_object=True``, returns a
   :class:`~merlin.core.state_vector.StateVector`.
+- ``MeasurementStrategy.partial(computation_space)``: returns a partial
+  measurement result for selected modes.
 
 References
 ----------
 
 Tak Hur et al., "Quantum convolutional neural network for classical data
-classification", 2022.  https://arxiv.org/abs/2108.00661
+classification", 2022. https://arxiv.org/abs/2108.00661
 
 .. seealso::
 
