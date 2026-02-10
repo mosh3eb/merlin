@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 
 import perceval as pcvl
-import perceval.providers.scaleway as scw
 import pytest
 from perceval.runtime import RemoteConfig
 
@@ -135,6 +134,8 @@ def scaleway_session(scaleway_credentials):
     The session is shared across all tests in a module to avoid
     repeatedly creating/destroying sessions.
     """
+    scw = pytest.importorskip("perceval.providers.scaleway")
+
     with scw.Session(
         "EMU-ASCELLA-6PQ",
         project_id=scaleway_credentials["project_id"],
@@ -143,6 +144,4 @@ def scaleway_session(scaleway_credentials):
         max_idle_duration_s=300,
         max_duration_s=600,
     ) as session:
-        # Workaround for MerlinProcessor compatibility
-        session.default_rpc_handler = session._rpc_handler
         yield session
