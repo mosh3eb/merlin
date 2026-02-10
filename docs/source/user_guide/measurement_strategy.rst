@@ -109,6 +109,11 @@ Return type (forward call):
   which collapses it and is therefore incompatible with amplitude retrieval. Thus,
   this measurement strategy **requires that no noise model or detectors are defined**.
 
+PARTIAL MEASUREMENT
+---------------
+
+Partial measurement is a specific kind of measurement strategy. Some of the modes are measured in the middle of the interferometer. The measurement results are then used to affect the other modes. For more details, checkout the :doc:`/quantum_expert_area/partial_measurement` page.
+
 Photon Loss-aware & Detector-aware execution
 ============================================
 
