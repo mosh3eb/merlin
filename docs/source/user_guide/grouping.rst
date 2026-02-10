@@ -11,6 +11,10 @@ Merlin now exposes quantum-to-classical conversion through two orthogonal concep
 
 Grouping modules are often used to reshape a torch.tensor into smaller feature sets while preserving differentiability.
 
+It can be directly defined in a ``MeasurementStrategy`` in the QuantumLayer construction with the ``measurement_strategy``parameter. Here is an example.
+    - measurement_strategy=merlin.MeasurementStrategy.probs(grouping=grouping = LexGrouping(fock_space_dim, 3))
+See :ref:`measurement_strategy` for more details.
+
 LexGrouping
 -----------
 
@@ -67,7 +71,7 @@ Chaining Measurement Strategy and Grouping
         input_size=2,
         builder=builder,
         n_photons=2,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(),
     )
 
     quantum_pipeline = nn.Sequential(
