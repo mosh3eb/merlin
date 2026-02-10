@@ -1,8 +1,9 @@
 """
 Diagnostic tests for chunking with ISession.
 
-Investigates why chunk_concurrency=2 (waves) fails while
-chunk_concurrency=4 (all at once) succeeds.
+Compares sequential vs parallel chunk execution to verify that
+session.build_remote_processor() returns independent RPs safe for
+concurrent use.
 
 Run with:
     pytest --run-scaleway-tests tests/core/cloud/test_chunk_debug.py -v -s
@@ -18,6 +19,7 @@ from merlin.algorithms import QuantumLayer
 from merlin.builder.circuit_builder import CircuitBuilder
 from merlin.core.computation_space import ComputationSpace
 from merlin.core.merlin_processor import MerlinProcessor
+from merlin.measurement.strategies import MeasurementStrategy
 
 
 def _make_layer():
@@ -29,7 +31,9 @@ def _make_layer():
         input_size=2,
         builder=b,
         n_photons=2,
-        computation_space=ComputationSpace.UNBUNCHED,
+        measurement_strategy=MeasurementStrategy.probs(
+            computation_space=ComputationSpace.UNBUNCHED,
+        ),
     ).eval()
 
 
@@ -64,6 +68,9 @@ class TestChunkDebug:
         elapsed = time.time() - start
 
         assert y.shape == (32, comb(6, 2))
+        st = fut.status()
+        assert st.get("chunks_total", 0) == 4
+        assert st.get("chunks_done", 0) == 4
         print(f"\n  Sequential (concurrency=1): {elapsed:.1f}s")
 
     def test_parallel_all_at_once(self, scaleway_session):
@@ -85,10 +92,13 @@ class TestChunkDebug:
         elapsed = time.time() - start
 
         assert y.shape == (16, comb(6, 2))
+        st = fut.status()
+        assert st.get("chunks_total", 0) == 4
+        assert st.get("chunks_done", 0) == 4
         print(f"\n  All at once (concurrency=4): {elapsed:.1f}s")
 
     def test_parallel_waves(self, scaleway_session):
-        """chunk_concurrency=2: 2 waves of 2 — this is the failing case."""
+        """chunk_concurrency=2: 2 waves of 2."""
         proc = MerlinProcessor(
             session=scaleway_session,
             microbatch_size=8,
@@ -106,4 +116,7 @@ class TestChunkDebug:
         elapsed = time.time() - start
 
         assert y.shape == (32, comb(6, 2))
+        st = fut.status()
+        assert st.get("chunks_total", 0) == 4
+        assert st.get("chunks_done", 0) == 4
         print(f"\n  Waves (concurrency=2): {elapsed:.1f}s")

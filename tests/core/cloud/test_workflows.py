@@ -14,6 +14,7 @@ from merlin.algorithms import QuantumLayer
 from merlin.builder.circuit_builder import CircuitBuilder
 from merlin.core.computation_space import ComputationSpace
 from merlin.core.merlin_processor import MerlinProcessor
+from merlin.measurement.strategies import MeasurementStrategy
 
 
 def _make_layer(
@@ -35,7 +36,9 @@ def _make_layer(
         input_size=input_size,
         builder=b,
         n_photons=n_photons,
-        computation_space=computation_space,
+        measurement_strategy=MeasurementStrategy.probs(
+            computation_space=computation_space,
+        ),
     ).eval()
 
 
@@ -70,7 +73,9 @@ class TestUserGuideExamples:
             input_size=2,
             builder=b,
             n_photons=2,
-            computation_space=ComputationSpace.UNBUNCHED,
+            measurement_strategy=MeasurementStrategy.probs(
+                computation_space=ComputationSpace.UNBUNCHED,
+            ),
         ).eval()
 
         model = nn.Sequential(

@@ -71,7 +71,8 @@ class TestPolicyAndPipeline:
         fut = proc.forward_async(model, torch.rand(2, 2), nsample=3000)
         y = _wait(fut)
         assert y.shape == (2, dist2)
-        assert len(fut.job_ids) == 1  # exactly one offloaded layer
+        # Only q1 offloaded; >= 1 because retries append extra job IDs
+        assert len(fut.job_ids) >= 1
 
     def test_local_vs_remote_shape_and_norm(self, remote_processor):
         q = make_layer(5, 2, 2, computation_space=ComputationSpace.UNBUNCHED).eval()

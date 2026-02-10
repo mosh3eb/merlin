@@ -25,6 +25,7 @@ from merlin.algorithms import QuantumLayer
 from merlin.builder.circuit_builder import CircuitBuilder
 from merlin.core.computation_space import ComputationSpace
 from merlin.core.merlin_processor import MerlinProcessor
+from merlin.measurement.strategies import MeasurementStrategy
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -50,7 +51,9 @@ def _make_layer(
         input_size=input_size,
         builder=b,
         n_photons=n_photons,
-        computation_space=computation_space,
+        measurement_strategy=MeasurementStrategy.probs(
+            computation_space=computation_space,
+        ),
     ).eval()
 
 
@@ -155,7 +158,9 @@ class TestScalewaySessionPipeline:
             input_size=2,
             builder=b,
             n_photons=2,
-            computation_space=ComputationSpace.UNBUNCHED,
+            measurement_strategy=MeasurementStrategy.probs(
+                computation_space=ComputationSpace.UNBUNCHED,
+            ),
         ).eval()
 
         model = nn.Sequential(
@@ -204,21 +209,16 @@ class TestScalewaySessionChunking:
     """Test batching and chunking behavior with Scaleway session."""
 
     def test_chunked_batch(self, scaleway_session):
-        """Large batch should be submitted as a single job for ISession.
-
-        ISession does not support chunking — the entire batch is sent in
-        one call regardless of microbatch_size / chunk_concurrency.
-        """
+        """ISession supports chunking — batch is split by microbatch_size."""
         proc = MerlinProcessor(
             session=scaleway_session,
             microbatch_size=8,
             timeout=300.0,
             max_shots_per_call=100,
-            chunk_concurrency=2,  # ignored for ISession
         )
 
         q = _make_layer(6, 2, input_size=2, computation_space=ComputationSpace.UNBUNCHED)
-        X = torch.rand(32, 2)  # Entire batch submitted at once
+        X = torch.rand(32, 2)
 
         fut = proc.forward_async(q, X, nsample=100)
         y = _wait_future(fut)
@@ -226,28 +226,31 @@ class TestScalewaySessionChunking:
         assert y.shape == (32, comb(6, 2))
 
         st = fut.status()
-        # ISession: always 1 chunk (the whole batch)
-        assert st.get("chunks_total", 0) == 1
-        assert st.get("chunks_done", 0) == 1
+        assert st.get("chunks_total", 0) == 4  # 32 / 8
+        assert st.get("chunks_done", 0) == 4
 
     def test_concurrent_chunks(self, scaleway_session):
-        """ISession ignores chunk_concurrency — single job regardless."""
+        """ISession with chunk_concurrency > 1 runs chunks in parallel."""
         proc = MerlinProcessor(
             session=scaleway_session,
             microbatch_size=4,
             timeout=300.0,
             max_shots_per_call=100,
-            chunk_concurrency=4,  # ignored for ISession
+            chunk_concurrency=4,
         )
 
         q = _make_layer(6, 2, input_size=2, computation_space=ComputationSpace.UNBUNCHED)
-        X = torch.rand(16, 2)  # Entire batch submitted at once
+        X = torch.rand(16, 2)  # 4 chunks of 4
 
         fut = proc.forward_async(q, X, nsample=100)
         y = _wait_future(fut)
 
         assert y.shape == (16, comb(6, 2))
         assert len(fut.job_ids) >= 1
+
+        st = fut.status()
+        assert st.get("chunks_total", 0) == 4  # 16 / 4
+        assert st.get("chunks_done", 0) == 4
 
 
 class TestScalewaySessionStatus:

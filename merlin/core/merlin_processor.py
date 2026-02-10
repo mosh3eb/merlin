@@ -73,9 +73,6 @@ class MerlinProcessor:
             self.session = session
             self.backend_name = getattr(session, "platform_name", "unknown")
 
-            # Build ONE RemoteProcessor from the session.
-            self._session_rp: RemoteProcessor = session.build_remote_processor()
-
             # Command detection is not supported on ISession-based platforms
             self.available_commands = []
         else:
@@ -108,21 +105,6 @@ class MerlinProcessor:
 
         # Concurrency of chunk submissions inside a single quantum leaf
         self.chunk_concurrency = max(1, int(chunk_concurrency))
-
-        # ISession-created RPs share internal session state => concurrent result retrieval corrupts responses.
-        if self.session is not None and self.chunk_concurrency > 1:
-            logger.info(
-                "ISession detected: clamping chunk_concurrency to 1 "
-                "(concurrent result retrieval through a shared session handler is not supported)"
-            )
-            self.chunk_concurrency = 1
-
-        if self.chunk_concurrency > 1:
-            warnings.warn(
-                f"chunk_concurrency={self.chunk_concurrency} is experimental "
-                "and may cause unexpected behaviour. Use with caution.",
-                stacklevel=2,
-            )
 
         # Caches & global tracking
         self._layer_cache: dict[int, dict] = {}
@@ -277,14 +259,7 @@ class MerlinProcessor:
                         try:
                             # Preferred (new) signature
                             should_offload = bool(layer.should_offload())
-                        except TypeError:
-                            # Backward compat: older signature variants
-                            try:
-                                should_offload = bool(
-                                    layer.should_offload(self.remote_processor, nsample)
-                                )
-                            except Exception:
-                                should_offload = False
+
                         except Exception:
                             should_offload = False
                     else:
@@ -332,70 +307,15 @@ class MerlinProcessor:
 
         B = input_tensor.shape[0]
 
-        if B > self.microbatch_size:
-            warnings.warn(
-                f"Input batch size ({B}) exceeds microbatch_size ({self.microbatch_size}); "
-                "microbatch splitting is experimental and may cause unexpected behaviour.",
-                stacklevel=2,
-            )
-
-        if self.session is not None:
-            chunks = [(0, B)]
-            return self._run_chunks_sequential(
-                layer, config, input_tensor, chunks, nsample, state, deadline
-            )
-        else:
-            chunks: list[tuple[int, int]] = []
-            start = 0
-            while start < B:
-                end = min(start + self.microbatch_size, B)
-                chunks.append((start, end))
-                start = end
-            return self._run_chunks_pooled(
-                layer, config, input_tensor, chunks, nsample, state, deadline
-            )
-
-    def _run_chunks_sequential(
-        self,
-        layer: MerlinModule,
-        config: dict,
-        input_tensor: torch.Tensor,
-        chunks: list[tuple[int, int]],
-        nsample: int | None,
-        state: dict,
-        deadline: float | None,
-    ) -> torch.Tensor:
-        total_chunks = len(chunks)
-        layer_name = getattr(layer, "name", layer.__class__.__name__)
-        state["chunks_total"] += total_chunks
-        outputs: list[torch.Tensor] = []
-
-        for idx, (s, e) in enumerate(chunks):
-            if state.get("cancel_requested"):
-                raise self._cancelled_error()
-            if deadline is not None and time.time() >= deadline:
-                self.cancel_all()
-                raise TimeoutError("Remote call timed out (remote cancel issued)")
-
-            base_label = f"mer:{layer_name}:{state['call_id']}:{idx + 1}/{total_chunks}"
-            with self._lock:
-                state["active_chunks"] = 1
-
-            t = self._run_chunk(
-                layer,
-                config,
-                input_tensor[s:e],
-                nsample,
-                state,
-                deadline,
-                job_base_label=base_label,
-            )
-            outputs.append(t)
-            with self._lock:
-                state["active_chunks"] = 0
-                state["chunks_done"] += 1
-
-        return torch.cat(outputs, dim=0)
+        chunks: list[tuple[int, int]] = []
+        start = 0
+        while start < B:
+            end = min(start + self.microbatch_size, B)
+            chunks.append((start, end))
+            start = end
+        return self._run_chunks_pooled(
+            layer, config, input_tensor, chunks, nsample, state, deadline
+        )
 
     def _run_chunks_pooled(
         self,
@@ -684,8 +604,14 @@ class MerlinProcessor:
     # ---------------- Per-call RP pool helpers ----------------
 
     def _create_fresh_rp(self) -> RemoteProcessor:
+        """Build a fresh RemoteProcessor for each chunk/attempt.
+
+        For the ISession path, each call to ``session.build_remote_processor()``
+        returns an independent RP with its own RPC handler state, which is safe
+        for concurrent chunk execution and clean retries.
+        """
         if self.session is not None:
-            return self._session_rp
+            return self.session.build_remote_processor()
         else:
             return self._clone_remote_processor(self.remote_processor)
 

@@ -6,6 +6,7 @@ import time
 from merlin.algorithms import QuantumLayer
 from merlin.builder.circuit_builder import CircuitBuilder
 from merlin.core.computation_space import ComputationSpace
+from merlin.measurement.strategies import MeasurementStrategy
 
 
 def spin_until(pred, timeout_s: float = 10.0, sleep_s: float = 0.02) -> bool:
@@ -35,5 +36,7 @@ def make_layer(
         input_size=input_size,
         builder=b,
         n_photons=n,
-        computation_space=computation_space,
+        measurement_strategy=MeasurementStrategy.probs(
+            computation_space=computation_space,
+        ),
     ).eval()

@@ -16,3 +16,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="include tests under tests/core/cloud",
     )
+
+    parser.addoption(
+        "--run-scaleway-tests",
+        action="store_true",
+        default=False,
+        help="Run tests that require Scaleway credentials (SCW_PROJECT_ID, SCW_SECRET_KEY)",
+    )
