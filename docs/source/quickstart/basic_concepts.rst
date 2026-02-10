@@ -203,7 +203,7 @@ The **QuantumLayer** combines all these concepts into a PyTorch-compatible inter
         input_state=StateVector.from_basic_state([1, 0, 0, 1, 0, 0]),  # Initial photon pattern
         measurement_strategy=ML.MeasurementStrategy.probs(ML.ComputationSpace.FOCK),
         return_object=False                             # Choose whether or not to return a typed object after a forward call 
-                                                        # depending on the measurement strategy.
+                                                        # depending on the measurement strategy. Default is False.
     )
 
     # Optional: down-sample the Fock distribution to 3 features using a Linear Layer

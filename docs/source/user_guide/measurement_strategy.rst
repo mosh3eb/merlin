@@ -112,7 +112,7 @@ Return type (forward call):
 PARTIAL MEASUREMENT
 ---------------
 
-Partial measurement is a specific kind of measurement strategy. Some of the modes are measured in the middle of the interferometer. The measurement results are then used to affect the other modes. For more details, checkout the :doc:`/quantum_expert_area/partial_measurement` page.
+Partial measurement is a specific kind of measurement strategy. With this measurement strategy, only some modes are measured while amplitudes are preserved on the other modes. For more details, checkout the :doc:`/quantum_expert_area/partial_measurement` page.
 
 Photon Loss-aware & Detector-aware execution
 ============================================
