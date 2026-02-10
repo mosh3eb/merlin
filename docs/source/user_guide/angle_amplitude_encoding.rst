@@ -197,7 +197,7 @@ from the **type** of the first argument to ``forward()``:
 
 .. list-table::
    :header-rows: 1
-   :widths: 5 25 70
+   :widths: 2 5 10
 
    * - #
      - Input type
@@ -205,23 +205,23 @@ from the **type** of the first argument to ``forward()``:
    * - 1
      - | :class:`~merlin.core.state_vector.StateVector`
        | **(preferred)**
-     - Automatically activates amplitude encoding. The layer extracts the
-       dense complex tensor, validates its dimension against the layer basis,
-       and propagates it through the circuit.
+     - | Automatically activates amplitude encoding. The layer extracts the
+       | dense complex tensor, validates its dimension against the layer basis,
+       | and propagates it through the circuit.
    * - 2
      - Complex ``torch.Tensor``
-     - A single complex-dtype tensor is treated identically to a
-       :class:`StateVector`'s underlying tensor. Useful when you manage
-       tensors directly without wrapping them.
+     - | A single complex-dtype tensor is treated identically to a :class:`StateVector`'s
+       | underlying tensor. Useful when you manage tensors directly without 
+       | wrapping them.
    * - 3
      - | Real ``torch.Tensor``
        | + ``amplitude_encoding=True``
-     - **Legacy path — deprecated (will be removed in 0.4).**
-       The constructor flag forces amplitude interpretation on a real-valued
-       tensor. Migrate to path 1 or 2.
+     - | **Legacy path — deprecated (will be removed in 0.4).**
+       | The constructor flag forces amplitude interpretation on a real-valued
+       | tensor. Migrate to path 1 or 2.
 
-.. deprecated:: 0.3
-   The ``amplitude_encoding=True`` constructor parameter is deprecated and will
+.. warning::
+   *Deprecated since version 0.3:* The ``amplitude_encoding=True`` constructor parameter is deprecated and will
    be removed in **0.4**. Pass a :class:`~merlin.core.state_vector.StateVector`
    or a complex ``torch.Tensor`` to ``forward()`` instead.
 
@@ -455,6 +455,10 @@ Gradients flow through both layers during backpropagation.
 Encodings Key Differences
 -------------------------
 
+.. |br| raw:: html
+
+   <br />
+
 +---------------------------+----------------------------+------------------------------------------+
 | Aspect                    | Angle Encoding             | Amplitude Encoding                       |
 +===========================+============================+==========================================+
@@ -473,13 +477,13 @@ Encodings Key Differences
 | Activation trigger        | Real tensor to             | ``StateVector.from_tensor(data, ...)``   |
 |                           | ``forward()``              | or complex tensor to ``forward()``       |
 +---------------------------+----------------------------+------------------------------------------+
-| Typical use               | Feature maps, kernels,     | Classical data as amplitudes via         |
-|                           | hybrid NN layers           | ``from_tensor``; or injecting a          |
+| Typical use               | Feature maps, kernels,     | Classical data as amplitudes.            |
+|                           | hybrid NN layers           | via ``from_tensor``; or injecting a |br| |
 |                           |                            | prepared quantum state                   |
 +---------------------------+----------------------------+------------------------------------------+
 | Measurement options       | Probabilities, modes,      | Probabilities, modes,                    |
-|                           | amplitudes, partial        | amplitudes, partial                      |
-|                           | (sim-only)                 | (sim-only)                               |
+|                           | amplitudes (sim-only),     | amplitudes (sim-only), partial           |
+|                           | partial (sim-only)         | (sim-only)                               |
 +---------------------------+----------------------------+------------------------------------------+
 
 Troubleshooting
