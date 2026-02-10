@@ -473,9 +473,9 @@ Encodings Key Differences
 | Activation trigger        | Real tensor to             | ``StateVector.from_tensor(data, ...)``   |
 |                           | ``forward()``              | or complex tensor to ``forward()``       |
 +---------------------------+----------------------------+------------------------------------------+
-| Typical use               | Feature maps, kernels,     | Classical data as amplitudes via          |
-|                           | hybrid NN layers           | ``from_tensor``; or injecting a           |
-|                           |                            | prepared quantum state                    |
+| Typical use               | Feature maps, kernels,     | Classical data as amplitudes via         |
+|                           | hybrid NN layers           | ``from_tensor``; or injecting a          |
+|                           |                            | prepared quantum state                   |
 +---------------------------+----------------------------+------------------------------------------+
 | Measurement options       | Probabilities, modes,      | Probabilities, modes,                    |
 |                           | amplitudes, partial        | amplitudes, partial                      |
