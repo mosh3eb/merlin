@@ -48,8 +48,7 @@ out of 4 total modes with 2 photons in the Fock basis.
    print(f"\n - Amplitudes to tensor = {[amp.tensor for amp in output.amplitudes]}")
    print(f"\n - Measured modes = {output.measured_modes}")
    print(f"\n --------- PROBABILITIES (measured modes) ---------")
-   print(f"\n - Probabilities (tensor shape) = {output.probabilities}")
-   print(f"\n - Amplitudes length {len(output.amplitudes)} and probabilities {output.probabilities.shape}")
+   print(f"\n - Probabilities (tensor) = {output.probabilities}")
 
 What you get (and what it means)
 --------------------------------
