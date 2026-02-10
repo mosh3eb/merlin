@@ -48,20 +48,21 @@ MerlinProcessor
    Create a processor that offloads quantum leaves to a remote backend.
    Exactly **one** of ``remote_processor`` or ``session`` must be provided.
 
-   :param perceval.runtime.RemoteProcessor | None remote_processor:
-      Authenticated Perceval remote processor (simulator or QPU-backed).
+   :param remote_processor: Authenticated Perceval
+      :class:`~perceval.runtime.RemoteProcessor` (simulator or QPU-backed).
       Merlin clones it per chunk so concurrent jobs have independent state.
-   :param perceval.runtime.session.ISession | None session:
-      A Perceval session object — e.g. from
-      ``perceval.providers.scaleway.Session``. Merlin calls
+      Type: ``RemoteProcessor | None``.
+   :param session: A Perceval :class:`~perceval.runtime.session.ISession`
+      object — e.g. from ``perceval.providers.scaleway.Session``. Merlin calls
       ``session.build_remote_processor()`` per chunk, giving each chunk
-      an independent RP.
+      an independent RP. Type: ``ISession | None``.
    :param int microbatch_size: Maximum **rows per cloud job** (chunk size).
    :param float timeout: Default wall-time limit (seconds) per call. Per-call
       override via ``timeout=...`` on API methods.
-   :param int | None max_shots_per_call: Hard cap on **shots per cloud call**.
+   :param max_shots_per_call: Hard cap on **shots per cloud call**.
       If ``None``, a safe default is used internally. If ``nsample`` exceeds
       this cap, Merlin automatically raises it to match.
+      Type: ``int | None``.
    :param int chunk_concurrency: Max number of chunk jobs in flight **per
       quantum leaf** during a single call. ``>=1`` (default: 1, i.e., serial).
 
