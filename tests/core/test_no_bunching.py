@@ -27,15 +27,15 @@ Tests for no_bunching functionality in quantum computation.
 import math
 
 import torch
-
-from merlin.algorithms.layer import QuantumLayer
-from merlin.core.computation_space import ComputationSpace
 from merlin.core.generators import (
     CircuitGenerator,
     CircuitType,
     StateGenerator,
     StatePattern,
 )
+
+from merlin.algorithms.layer import QuantumLayer
+from merlin.core.computation_space import ComputationSpace
 from merlin.core.process import ComputationProcessFactory
 from merlin.measurement.strategies import MeasurementStrategy
 
