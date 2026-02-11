@@ -166,10 +166,10 @@ FidelityKernel Parameters
      - str
      - ``"multinomial"``
      - Sampling strategy: multinomial/binomial/gaussian
-   * - ``no_bunching``
-     - bool
-     - False
-     - Forbid multiple photons per mode (incompatible with detectors)
+   * - ``computation_space``
+     - ComputationSpace | str | None = None
+     - None
+     - Chose the computation state between UNBUNCHED (maximum one photon per mode), FOCK (multiple phorons per mode allowed) and DUAL_RAIL
    * - ``force_psd``
      - bool
      - True
@@ -182,6 +182,10 @@ FidelityKernel Parameters
      - torch.device
      - *from feature_map*
      - Simulation device
+
+.. deprecated:: 0.4
+   The use of the ``no_bunching`` flag  is deprecated and will be removed in version 0.4.
+   Use the ``computation_space`` flag instead. See :doc:`/user_guide/migration_guide`.
 
 Implementation highlights
 -------------------------
@@ -199,13 +203,14 @@ Minimal example (factory)
 .. code-block:: python
 
 	import torch
+  from merlin import ComputationSpace
 	from merlin.algorithms.kernels import FidelityKernel
 
 	# Build a kernel where inputs of size 2 are encoded in a 4-mode circuit
 	kernel = FidelityKernel.simple(
 		input_size=2,
 		n_modes=4,               # Here the number of modes is optional, if n_modes is not given, n_modes=input_size
-		no_bunching=False,       # allow bunched outcomes if needed
+		computation_space=ComputationSpace.FOCK,       # allow bunched outcomes if needed
 		dtype=torch.float32,
 		device=torch.device("cpu"),
 	)
@@ -241,7 +246,7 @@ Custom experiment with detectors and loss
         feature_map=fmap,
         input_state=[1, 0, 1, 0, 1, 0],
         shots=0,
-        no_bunching=False,
+       computation_space=ComputationSpace.FOCK, 
     )
 
     X = torch.rand(8, 3)
@@ -317,14 +322,13 @@ Performance and batching tips
 
 - Build feature maps once and reuse them; the converter caches parameter specs.
 - Prefer contiguous tensors on the same device/dtype for inputs to minimise transfers.
-- When memory is constrained, reduce the number of modes/photons or enable ``no_bunching`` where physically appropriate.
+- When memory is constrained, reduce the number of modes/photons or change ``ComputationSpace.FOCK`` to ``ComputationSpace.UNBUNCHED`` where physically appropriate.
 
 Limitations and caveats
 -----------------------
 
 - The feature map encodes classical features via angle encoding; amplitude encoding of state vectors is not part of the kernel API.
-- ``no_bunching=True`` cannot be used together with detectors defined in the experiment.
-- ``KernelCircuitBuilder.bandwidth_tuning`` is a placeholder in the current release.
+- ``ComputationSpace.UNBUNCHED`` cannot be used together with detectors defined in the experiment.
 - Consider GPU acceleration via ``device=torch.device("cuda")`` for large datasets
 
 API reference
