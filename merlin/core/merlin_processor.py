@@ -18,6 +18,7 @@ from perceval.runtime.session import ISession
 from torch.futures import Future
 
 from ..algorithms.module import MerlinModule
+from ..utils.combinadics import Combinadics
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class MerlinProcessor:
       - Batch chunking per quantum leaf with limited concurrency
       - Cancellation (per-future and global)
       - Global timeouts that cancel in-flight jobs
-      - Per-call RemoteProcessor pooling (no shared RPC handlers across threads)
+      - Fresh RemoteProcessor per chunk/attempt (no shared RPC handlers across threads)
       - Descriptive cloud job names (<= 50 chars) for traceability
 
     Only modules that subclass MerlinModule and implement `export_config()` are
@@ -117,32 +118,39 @@ class MerlinProcessor:
 
     # ---------------- Small compatibility helpers ----------------
 
-    def _is_unbunched(self, layer: MerlinModule) -> bool:
-        """
-        Backward-compatible check for "no-bunching" output spaces.
+    def _get_computation_scheme(self, layer: MerlinModule) -> str:
+        """Return the Combinadics scheme string for a layer's computation space.
 
-        - Old API: layer.no_bunching (bool)
-        - New API: layer.computation_space == UNBUNCHED (or DUAL_RAIL)
+        Supports both the old ``no_bunching`` API and the new
+        ``computation_space`` enum.  Falls back to ``"fock"`` when neither
+        is available.
+
+        Returns one of ``"fock"``, ``"unbunched"``, ``"dual_rail"``.
         """
+        cs = getattr(layer, "computation_space", None)
+        if cs is not None:
+            # ComputationSpace.value is the scheme string
+            val = getattr(cs, "value", None)
+            if isinstance(val, str) and val in ("fock", "unbunched", "dual_rail"):
+                return val
+            # Fallback: match by enum name
+            name = getattr(cs, "name", "")
+            if name == "UNBUNCHED":
+                return "unbunched"
+            if name == "DUAL_RAIL":
+                return "dual_rail"
+
+        # Old API: no_bunching → unbunched
         if hasattr(layer, "no_bunching"):
             try:
-                return bool(layer.no_bunching)
+                if bool(layer.no_bunching):
+                    return "unbunched"
             except Exception:
                 logger.debug(
                     "Failed to read no_bunching from %s", type(layer), exc_info=True
                 )
 
-        cs = getattr(layer, "computation_space", None)
-        if cs is None:
-            return False
-
-        # Avoid hard imports here; compare by enum name / string.
-        name = getattr(cs, "name", None)
-        if isinstance(name, str):
-            return name in ("UNBUNCHED", "DUAL_RAIL")
-
-        s = str(cs)
-        return ("UNBUNCHED" in s) or ("DUAL_RAIL" in s)
+        return "fock"
 
     # ---------------- Public APIs ----------------
 
@@ -177,6 +185,7 @@ class MerlinProcessor:
         nsample: int | None = None,
         timeout: float | None = None,
     ) -> torch.Tensor:
+        """Synchronous convenience wrapper around forward_async()."""
         fut = self.forward_async(module, input, nsample=nsample, timeout=timeout)
         return fut.wait()
 
@@ -188,6 +197,12 @@ class MerlinProcessor:
         nsample: int | None = None,
         timeout: float | None = None,
     ) -> Future:
+        """Asynchronous execution of a PyTorch module, offloading MerlinModule
+        leaves to the configured remote processor.
+
+        Returns a ``torch.futures.Future`` with extra helpers:
+        ``future.job_ids``, ``future.status()``, ``future.cancel_remote()``.
+        """
         with self._lock:
             if self._closed:
                 raise RuntimeError("MerlinProcessor is closed")
@@ -260,6 +275,7 @@ class MerlinProcessor:
                             # Preferred (new) signature
                             should_offload = bool(layer.should_offload())
 
+
                         except Exception:
                             should_offload = False
                     else:
@@ -295,6 +311,8 @@ class MerlinProcessor:
         state: dict,
         deadline: float | None,
     ) -> torch.Tensor:
+        """Split the batch into chunks of size <= microbatch_size,
+        submit up to chunk_concurrency jobs concurrently, and stitch."""
         if input_tensor.is_cuda:
             input_tensor = input_tensor.cpu()
 
@@ -327,6 +345,7 @@ class MerlinProcessor:
         state: dict,
         deadline: float | None,
     ) -> torch.Tensor:
+        """Submit chunk jobs with limited concurrency and stitch results."""
         state["chunks_total"] += len(chunks)
         outputs: list[torch.Tensor | None] = [None] * len(chunks)
         errors: list[BaseException] = []
@@ -395,6 +414,7 @@ class MerlinProcessor:
         deadline: float | None,
         job_base_label: str | None = None,
     ) -> torch.Tensor:
+        """Submit a single chunk job with retries and return the mapped tensor."""
         from concurrent.futures import CancelledError
 
         batch_size = input_chunk.shape[0]
@@ -521,6 +541,7 @@ class MerlinProcessor:
         layer: MerlinModule,
         nsample: int | None,
     ) -> torch.Tensor:
+        """Poll a submitted job until complete/failed/timeout and return results."""
         from concurrent.futures import CancelledError
 
         _MAX_NON_DICT_RETRIES = 60  # 60 * 0.1s = 6s
@@ -618,6 +639,7 @@ class MerlinProcessor:
     # ---------------- Utilities & mapping ----------------
 
     def _clone_remote_processor(self, rp: RemoteProcessor) -> RemoteProcessor:
+        """Create a sibling RemoteProcessor with its own RPC handler (thread-safe)."""
         return RemoteProcessor(
             name=rp.name,
             token=None,
@@ -628,6 +650,10 @@ class MerlinProcessor:
         )
 
     def _iter_layers_in_order(self, module: nn.Module) -> Iterable[nn.Module]:
+        """Yield execution leaves in deterministic order.
+
+        MerlinModule instances are treated as single leaves (not recursed into).
+        """
         if isinstance(module, MerlinModule):
             yield module
             return
@@ -639,6 +665,7 @@ class MerlinProcessor:
             yield from self._iter_layers_in_order(child)
 
     def _extract_input_params(self, config: dict) -> list[str]:
+        """Extract and sort circuit parameter names that correspond to model inputs."""
         circuit = config["circuit"]
         all_params = [p.name for p in circuit.get_parameters()]
         input_param_names: list[str] = []
@@ -660,6 +687,7 @@ class MerlinProcessor:
         layer: MerlinModule,
         nsample: int | None = None,
     ) -> torch.Tensor:
+        """Map raw cloud results dict into a [B, dist_size] probability tensor."""
         if raw_results is None:
             raise RuntimeError(
                 "Remote job returned no results. This may indicate a job execution failure "
@@ -683,7 +711,7 @@ class MerlinProcessor:
                     state_counts = result_item["results"]
                     probs = torch.zeros(dist_size)
                     if state_counts:
-                        if self._is_unbunched(layer) and valid_states is not None:
+                        if valid_states is not None:
                             filtered_counts = {}
                             for state_str, count in state_counts.items():
                                 state_tuple = self._parse_perceval_state(state_str)
@@ -733,6 +761,10 @@ class MerlinProcessor:
     def _get_state_mapping(
         self, layer: MerlinModule
     ) -> tuple[int, dict | None, set | None]:
+        """Determine the output distribution size and Fock-state-to-index mapping."""
+        scheme = self._get_computation_scheme(layer)
+        needs_filter = scheme != "fock"
+
         if hasattr(layer, "computation_process") and hasattr(
             layer.computation_process, "simulation_graph"
         ):
@@ -743,7 +775,7 @@ class MerlinProcessor:
                 keys = list(final_keys)
                 dist_size = len(keys)
                 state_to_index = {state: idx for idx, state in enumerate(keys)}
-                valid_states = set(keys) if self._is_unbunched(layer) else None
+                valid_states = set(keys) if needs_filter else None
                 return dist_size, state_to_index, valid_states
 
             # Prefer mapped_keys if present (newer graphs)
@@ -752,7 +784,7 @@ class MerlinProcessor:
                 keys = list(mapped_keys)
                 dist_size = len(keys)
                 state_to_index = {state: idx for idx, state in enumerate(keys)}
-                valid_states = set(keys) if self._is_unbunched(layer) else None
+                valid_states = set(keys) if needs_filter else None
                 return dist_size, state_to_index, valid_states
 
             if hasattr(layer, "circuit") and hasattr(layer.circuit, "m"):
@@ -766,11 +798,10 @@ class MerlinProcessor:
             else:
                 n_photons = int(graph.n_photons)  # type: ignore[arg-type]
 
-            unbunched = self._is_unbunched(layer)
-            keys = self._generate_slos_state_ordering(n_modes, n_photons, unbunched)
+            keys = Combinadics(scheme, n_photons, n_modes).enumerate_states()
             dist_size = len(keys)
             state_to_index = {state: idx for idx, state in enumerate(keys)}
-            valid_states = set(keys) if unbunched else None
+            valid_states = set(keys) if needs_filter else None
 
             return dist_size, state_to_index, valid_states
 
@@ -781,11 +812,10 @@ class MerlinProcessor:
             n_modes = int(circuit.m)
             n_photons = int(sum(input_state))
 
-            unbunched = self._is_unbunched(layer)
-            keys = self._generate_slos_state_ordering(n_modes, n_photons, unbunched)
+            keys = Combinadics(scheme, n_photons, n_modes).enumerate_states()
             dist_size = len(keys)
             state_to_index = {state: idx for idx, state in enumerate(keys)}
-            valid_states = set(keys) if unbunched else None
+            valid_states = set(keys) if needs_filter else None
 
             return dist_size, state_to_index, valid_states
 
@@ -795,48 +825,6 @@ class MerlinProcessor:
             "or 'circuit' and 'input_state' attributes."
         )
 
-    @staticmethod
-    def _generate_slos_state_ordering(
-        n_modes: int,
-        n_photons: int,
-        unbunched: bool,
-    ) -> list[tuple[int, ...]]:
-        """Reproduce the SLOS graph construction order for output states.
-
-        This mirrors ``SLOSComputeGraph._build_graph_structure`` from the local
-        backend so that the probability tensor indices match exactly.  States
-        are discovered by iterating — for each photon layer — over existing
-        parent states and trying to place a photon in modes 0 … m-1. The
-        first time a new state is encountered it receives the next available
-        index.
-
-        Args:
-            n_modes:   Number of optical modes (*m*).
-            n_photons: Total photon number (*n*).
-            unbunched: If ``True``, at most one photon per mode is allowed
-                       (UNBUNCHED / DUAL_RAIL spaces).
-
-        Returns:
-            Final-layer states in SLOS discovery order.
-        """
-        # Each entry maps state → index (insertion order)
-        last_layer: dict[tuple[int, ...], int] = {tuple([0] * n_modes): 0}
-
-        for _ in range(n_photons):
-            next_layer: dict[tuple[int, ...], int] = {}
-            for state in last_layer:
-                nstate = list(state)
-                for mode in range(n_modes):
-                    if unbunched and nstate[mode]:
-                        continue
-                    nstate[mode] += 1
-                    nstate_t = tuple(nstate)
-                    if nstate_t not in next_layer:
-                        next_layer[nstate_t] = len(next_layer)
-                    nstate[mode] -= 1
-            last_layer = next_layer
-
-        return list(last_layer.keys())
 
     # ---- Shot estimation (no remote jobs submitted) ----
 
@@ -846,6 +834,11 @@ class MerlinProcessor:
         input: torch.Tensor,
         desired_samples_per_input: int,
     ) -> list[int]:
+        """Estimate required shots per input row using the platform estimator.
+
+        Returns a list[int] with one entry per input row (0 means 'not viable').
+        Does not submit any cloud jobs.
+        """
         if not hasattr(layer, "export_config") or not callable(
             cast(Any, layer).export_config
         ):
@@ -909,6 +902,7 @@ class MerlinProcessor:
     # ---- Misc ----
 
     def _parse_perceval_state(self, state_str: Any) -> tuple:
+        """Parse a Perceval state string like '|1,0,1>' into a tuple of ints."""
         if isinstance(state_str, str):
             if "|" in state_str and ">" in state_str:
                 state_str = state_str.strip("|>")
@@ -926,12 +920,15 @@ class MerlinProcessor:
         return ()
 
     def get_job_history(self) -> list[RemoteJob]:
+        """Return all jobs observed/submitted by this instance."""
         return self._job_history
 
     def clear_job_history(self) -> None:
+        """Clear the internal job history list."""
         self._job_history = []
 
     def _cancelled_error(self):
+        """Create a CancelledError with a standard message."""
         from concurrent.futures import CancelledError
 
         return CancelledError("Remote call was cancelled")

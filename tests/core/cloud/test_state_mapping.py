@@ -24,6 +24,7 @@ from _helpers import make_layer
 
 from merlin.core.computation_space import ComputationSpace
 from merlin.core.merlin_processor import MerlinProcessor
+from merlin.utils.combinadics import Combinadics
 
 
 # ---------------------------------------------------------------------------
@@ -68,16 +69,16 @@ def _slos_reference_ordering(
 # ---------------------------------------------------------------------------
 
 
-class TestUnitSlosOrdering:
-    """Unit tests for _generate_slos_state_ordering."""
+class TestUnitStateOrdering:
+    """Unit tests for Combinadics-based state ordering used by MerlinProcessor."""
 
     @pytest.mark.parametrize(
         "n_modes,n_photons",
         [(2, 1), (2, 2), (3, 2), (3, 3), (4, 2), (4, 3), (5, 2), (6, 2)],
     )
-    def test_bunched_ordering_matches_reference(self, n_modes, n_photons):
+    def test_fock_ordering_matches_slos_reference(self, n_modes, n_photons):
         """FOCK ordering must match the SLOS graph construction order exactly."""
-        result = MerlinProcessor._generate_slos_state_ordering(n_modes, n_photons, unbunched=False)
+        result = Combinadics("fock", n_photons, n_modes).enumerate_states()
         reference = _slos_reference_ordering(n_modes, n_photons, unbunched=False)
         assert result == reference
 
@@ -85,9 +86,9 @@ class TestUnitSlosOrdering:
         "n_modes,n_photons",
         [(3, 2), (4, 2), (5, 2), (5, 3), (6, 2), (6, 3)],
     )
-    def test_unbunched_ordering_matches_reference(self, n_modes, n_photons):
+    def test_unbunched_ordering_matches_slos_reference(self, n_modes, n_photons):
         """UNBUNCHED ordering must match the SLOS graph construction order exactly."""
-        result = MerlinProcessor._generate_slos_state_ordering(n_modes, n_photons, unbunched=True)
+        result = Combinadics("unbunched", n_photons, n_modes).enumerate_states()
         reference = _slos_reference_ordering(n_modes, n_photons, unbunched=True)
         assert result == reference
 
@@ -95,9 +96,9 @@ class TestUnitSlosOrdering:
         "n_modes,n_photons",
         [(2, 2), (3, 2), (3, 3), (4, 2), (5, 2), (6, 2)],
     )
-    def test_bunched_state_count(self, n_modes, n_photons):
+    def test_fock_state_count(self, n_modes, n_photons):
         """FOCK state count should equal C(m + n - 1, n)."""
-        states = MerlinProcessor._generate_slos_state_ordering(n_modes, n_photons, unbunched=False)
+        states = Combinadics("fock", n_photons, n_modes).enumerate_states()
         assert len(states) == comb(n_modes + n_photons - 1, n_photons)
 
     @pytest.mark.parametrize(
@@ -106,47 +107,68 @@ class TestUnitSlosOrdering:
     )
     def test_unbunched_state_count(self, n_modes, n_photons):
         """UNBUNCHED state count should equal C(m, n)."""
-        states = MerlinProcessor._generate_slos_state_ordering(n_modes, n_photons, unbunched=True)
+        states = Combinadics("unbunched", n_photons, n_modes).enumerate_states()
         assert len(states) == comb(n_modes, n_photons)
 
-    def test_bunched_states_are_unique(self):
+    @pytest.mark.parametrize("n_modes", [4, 6, 8])
+    def test_dual_rail_state_count(self, n_modes):
+        """DUAL_RAIL state count should equal 2^(m/2)."""
+        n_photons = n_modes // 2
+        states = Combinadics("dual_rail", n_photons, n_modes).enumerate_states()
+        assert len(states) == 2 ** (n_modes // 2)
+
+    def test_fock_states_are_unique(self):
         """Every state in the ordering must be unique."""
-        states = MerlinProcessor._generate_slos_state_ordering(5, 3, unbunched=False)
+        states = Combinadics("fock", 3, 5).enumerate_states()
         assert len(states) == len(set(states))
 
     def test_unbunched_states_are_unique(self):
         """Every state in the ordering must be unique."""
-        states = MerlinProcessor._generate_slos_state_ordering(6, 2, unbunched=True)
+        states = Combinadics("unbunched", 2, 6).enumerate_states()
         assert len(states) == len(set(states))
 
-    def test_bunched_all_photons_first_mode_is_first(self):
-        """In SLOS order, all photons in mode 0 is always the first state."""
+    def test_dual_rail_states_are_unique(self):
+        """Every state in the ordering must be unique."""
+        states = Combinadics("dual_rail", 3, 6).enumerate_states()
+        assert len(states) == len(set(states))
+
+    def test_fock_all_photons_first_mode_is_first(self):
+        """In descending lex order, all photons in mode 0 is always first."""
         for m in range(2, 6):
             for n in range(1, 4):
-                states = MerlinProcessor._generate_slos_state_ordering(m, n, unbunched=False)
+                states = Combinadics("fock", n, m).enumerate_states()
                 expected_first = tuple([n] + [0] * (m - 1))
                 assert states[0] == expected_first
 
-    def test_bunched_all_photons_last_mode_is_last(self):
-        """In SLOS order, all photons in the last mode is always the last state."""
+    def test_fock_all_photons_last_mode_is_last(self):
+        """In descending lex order, all photons in last mode is always last."""
         for m in range(2, 6):
             for n in range(1, 4):
-                states = MerlinProcessor._generate_slos_state_ordering(m, n, unbunched=False)
+                states = Combinadics("fock", n, m).enumerate_states()
                 expected_last = tuple([0] * (m - 1) + [n])
                 assert states[-1] == expected_last
 
     def test_unbunched_no_bunching_constraint(self):
         """Unbunched states must have at most 1 photon per mode."""
-        states = MerlinProcessor._generate_slos_state_ordering(6, 3, unbunched=True)
+        states = Combinadics("unbunched", 3, 6).enumerate_states()
         for state in states:
             assert all(s <= 1 for s in state), f"State {state} violates no-bunching"
 
+    def test_dual_rail_pair_constraint(self):
+        """DUAL_RAIL: each pair of modes must have exactly 1 photon total."""
+        states = Combinadics("dual_rail", 3, 6).enumerate_states()
+        for state in states:
+            for k in range(0, 6, 2):
+                assert state[k] + state[k + 1] == 1, (
+                    f"State {state} violates dual-rail at modes {k},{k+1}"
+                )
+
     def test_all_states_have_correct_photon_count(self):
         """Every state must have exactly n_photons total."""
-        for unbunched in (True, False):
-            states = MerlinProcessor._generate_slos_state_ordering(5, 2, unbunched=unbunched)
+        for scheme, n, m in [("fock", 2, 5), ("unbunched", 2, 5), ("dual_rail", 2, 4)]:
+            states = Combinadics(scheme, n, m).enumerate_states()
             for state in states:
-                assert sum(state) == 2, f"State {state} has wrong photon count"
+                assert sum(state) == n, f"State {state} has wrong photon count"
 
 
 class TestUnitLocalOutputShape:
