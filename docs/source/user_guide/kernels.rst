@@ -329,7 +329,6 @@ Limitations and caveats
 
 - The feature map encodes classical features via angle encoding; amplitude encoding of state vectors is not part of the kernel API.
 - ``ComputationSpace.UNBUNCHED`` cannot be used together with detectors defined in the experiment.
-- ``KernelCircuitBuilder.bandwidth_tuning`` is a placeholder in the current release.
 - Consider GPU acceleration via ``device=torch.device("cuda")`` for large datasets
 
 API reference

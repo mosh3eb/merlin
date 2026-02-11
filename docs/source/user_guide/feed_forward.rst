@@ -6,7 +6,7 @@ Feedforward Circuits
 Feedforward is a key capability in photonic quantum circuits, where a *partial
 measurement* determines the configuration of the downstream circuit.
 This mechanism is comparable to *dynamic circuits* in the gate-based model of
-quantum computing (see `IBM Dynamic Circuits <https://research.ibm.com/blog/dynamic-circuits>`_).
+quantum computing (see `IBM Dynamic Circuits <https://quantum.cloud.ibm.com/docs/en/guides/classical-feedforward-and-control-flow>`_).
 
 The main difference is in the physical implementation:
 
@@ -118,7 +118,6 @@ without passing a tensor (an empty feature tensor is injected automatically).
 
 Further Reading
 ---------------
-
-- :ref:`internal_design`
-- :ref:`circuit_specific_optimizations`
-- :ref:`output_mappings`
+- :doc:`/quantum_expert_area/internal_design`
+- For circuit specific optimizations: :doc:`/quantum_expert_area/building_intuition`
+- Output mapping startegies: :doc:`/user_guide/grouping`
