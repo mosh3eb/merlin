@@ -67,14 +67,14 @@ For a first analysis, we use a Generic Interferometer:
    n_photons = modes // 2
    input_state = ML.generate_state(modes, n_photons, ML.StatePattern.PERIODIC)
 
-      layer = ML.QuantumLayer(
-         input_size=0,
-         circuit=circuit,
-         input_state=input_state,
-         trainable_parameters=["phi_"],
-         input_parameters=["pl"],
-         measurement_strategy=ML.MeasurementStrategy.probs(),
-      )
+   layer = ML.QuantumLayer(
+       input_size=0,
+       circuit=circuit,
+       input_state=input_state,
+       trainable_parameters=["phi_"],
+       input_parameters=["pl"],
+       measurement_strategy=ML.MeasurementStrategy.probs(),
+   )
 
 Experimental Results
 ====================
