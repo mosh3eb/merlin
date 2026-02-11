@@ -46,6 +46,8 @@ class MerlinProcessor:
     """
 
     DEFAULT_MAX_SHOTS: int = 100_000
+    _MAX_CHUNK_RETRIES: int = 3
+    _MAX_ESTIMATOR_RETRIES: int = 3
     DEFAULT_SHOTS_PER_CALL: int = 10_000
     _JOB_NAME_MAX: int = 50
 
@@ -121,10 +123,6 @@ class MerlinProcessor:
     def _get_computation_scheme(self, layer: MerlinModule) -> str:
         """Return the Combinadics scheme string for a layer's computation space.
 
-        Supports both the old ``no_bunching`` API and the new
-        ``computation_space`` enum.  Falls back to ``"fock"`` when neither
-        is available.
-
         Returns one of ``"fock"``, ``"unbunched"``, ``"dual_rail"``.
         """
         cs = getattr(layer, "computation_space", None)
@@ -139,16 +137,6 @@ class MerlinProcessor:
                 return "unbunched"
             if name == "DUAL_RAIL":
                 return "dual_rail"
-
-        # Old API: no_bunching → unbunched
-        if hasattr(layer, "no_bunching"):
-            try:
-                if bool(layer.no_bunching):
-                    return "unbunched"
-            except Exception:
-                logger.debug(
-                    "Failed to read no_bunching from %s", type(layer), exc_info=True
-                )
 
         return "fock"
 
@@ -503,7 +491,6 @@ class MerlinProcessor:
             f"Chunk failed after {self._MAX_CHUNK_RETRIES} attempts"
         ) from last_error
 
-    _MAX_CHUNK_RETRIES: int = 3
 
     def _submit_job(self, sampler, nsample, job_base_label, _capped_name):
         """Submit a single async job via the sampler."""
@@ -863,6 +850,8 @@ class MerlinProcessor:
 
         input_param_names = self._extract_input_params(config)
 
+        import requests
+
         x_np = x.detach().cpu().numpy()
         estimates: list[int] = []
         for i in range(x_np.shape[0]):
@@ -871,29 +860,19 @@ class MerlinProcessor:
             for j, pname in enumerate(input_param_names):
                 param_values[pname] = float(row[j] * np.pi) if j < row.shape[0] else 0.0
 
-            # Network calls to cloud estimators can occasionally hit short read timeouts.
-            # Retry a few times to stabilize usage without changing Perceval internals.
+            # Retry on transient read timeouts from the cloud estimator.
             est = None
-            last_ex = None
-            for _attempt in range(3):
+            last_ex: Exception | None = None
+            for _attempt in range(self._MAX_ESTIMATOR_RETRIES):
                 try:
                     est = child_rp.estimate_required_shots(
                         desired_samples_per_input, param_values=param_values
                     )
-                    last_ex = None
                     break
-                except Exception as ex:
-                    try:
-                        import requests  # type: ignore
-
-                        if isinstance(ex, requests.exceptions.ReadTimeout):
-                            last_ex = ex
-                            time.sleep(0.2)
-                            continue
-                    except Exception:
-                        logger.debug("Could not check for ReadTimeout", exc_info=True)
-                    raise
-            if last_ex is not None and est is None:
+                except requests.exceptions.ReadTimeout as ex:
+                    last_ex = ex
+                    time.sleep(0.2)
+            if est is None and last_ex is not None:
                 raise last_ex
             estimates.append(int(est) if est is not None else 0)
 
