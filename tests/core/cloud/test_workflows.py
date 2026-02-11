@@ -12,7 +12,9 @@ import torch.nn as nn
 
 from merlin.algorithms import QuantumLayer
 from merlin.builder.circuit_builder import CircuitBuilder
+from merlin.core.computation_space import ComputationSpace
 from merlin.core.merlin_processor import MerlinProcessor
+from merlin.measurement.strategies import MeasurementStrategy
 
 
 def _make_layer(
@@ -20,7 +22,7 @@ def _make_layer(
     n_photons: int,
     input_size: int,
     *,
-    no_bunching: bool = True,
+    computation_space: ComputationSpace = ComputationSpace.UNBUNCHED,
     trainable: bool = True,
 ) -> QuantumLayer:
     """Helper that mirrors the builder pattern used in the docs."""
@@ -34,7 +36,9 @@ def _make_layer(
         input_size=input_size,
         builder=b,
         n_photons=n_photons,
-        no_bunching=no_bunching,
+        measurement_strategy=MeasurementStrategy.probs(
+            computation_space=computation_space,
+        ),
     ).eval()
 
 
@@ -69,7 +73,9 @@ class TestUserGuideExamples:
             input_size=2,
             builder=b,
             n_photons=2,
-            no_bunching=True,
+            measurement_strategy=MeasurementStrategy.probs(
+                computation_space=ComputationSpace.UNBUNCHED,
+            ),
         ).eval()
 
         model = nn.Sequential(
@@ -87,7 +93,7 @@ class TestUserGuideExamples:
 
     def test_local_vs_remote_ab_force_simulation(self, remote_processor):
         """Remote vs forced-local A/B; distributions should be reasonably close."""
-        q = _make_layer(6, 2, input_size=2, no_bunching=True, trainable=True)
+        q = _make_layer(6, 2, input_size=2, computation_space=ComputationSpace.UNBUNCHED, trainable=True)
         X = torch.rand(4, 2)
         proc = MerlinProcessor(remote_processor)
 
@@ -103,7 +109,7 @@ class TestUserGuideExamples:
 
     def test_monitor_status_and_cancellation(self, remote_processor):
         """Status polling and cooperative cancellation should raise CancelledError."""
-        q = _make_layer(6, 2, input_size=2, no_bunching=True, trainable=True)
+        q = _make_layer(6, 2, input_size=2, computation_space=ComputationSpace.UNBUNCHED, trainable=True)
         proc = MerlinProcessor(remote_processor)
         fut = proc.forward_async(q, torch.rand(16, 2), nsample=40_000, timeout=None)
 
@@ -124,17 +130,18 @@ class TestUserGuideExamples:
 
     def test_high_throughput_batching_with_chunking(self, remote_processor):
         """Large batch is chunked; counters and output shape match expectations."""
-        q = _make_layer(6, 2, input_size=2, no_bunching=True, trainable=True)
+        q = _make_layer(6, 2, input_size=2, computation_space=ComputationSpace.UNBUNCHED, trainable=True)
 
         proc = MerlinProcessor(
             remote_processor,
             microbatch_size=8,  # as in docs
             chunk_concurrency=2,
+            timeout=300.0,  # 5 min for chunked jobs
         )
 
         X = torch.rand(64, 2)
-        fut = proc.forward_async(q, X, nsample=3000, timeout=180.0)
-        y = _wait_future(fut, timeout_s=180.0)
+        fut = proc.forward_async(q, X, nsample=3000, timeout=300.0)
+        y = _wait_future(fut, timeout_s=300.0)
 
         # Expect stitching of 64 x C(6,2)=15
         assert y.shape == (64, comb(6, 2))
@@ -147,8 +154,8 @@ class TestUserGuideExamples:
 
     def test_device_and_dtype_roundtrip(self, remote_processor):
         """Ensure outputs preserve input device/dtype semantics after remote call."""
-        q = _make_layer(6, 2, input_size=2, no_bunching=True, trainable=True)
-        proc = MerlinProcessor(remote_processor)
+        q = _make_layer(6, 2, input_size=2, computation_space=ComputationSpace.UNBUNCHED, trainable=True)
+        proc = MerlinProcessor(remote_processor, timeout=300.0)
 
         x_f32 = torch.rand(3, 2, dtype=torch.float32)
         y_f32 = proc.forward(q, x_f32, nsample=3000)
@@ -157,7 +164,7 @@ class TestUserGuideExamples:
         # If CUDA is available, verify round-trip back to CUDA device
         if torch.cuda.is_available():
             q_cuda = _make_layer(
-                6, 2, input_size=2, no_bunching=True, trainable=True
+                6, 2, input_size=2, computation_space=ComputationSpace.UNBUNCHED, trainable=True
             ).to("cuda")
             x_cuda = torch.rand(2, 2, device="cuda", dtype=torch.float32)
             y_cuda = proc.forward(q_cuda, x_cuda, nsample=1500)
