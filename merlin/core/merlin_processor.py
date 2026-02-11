@@ -847,7 +847,7 @@ class MerlinProcessor:
 
         input_param_names = self._extract_input_params(config)
 
-        import requests
+        import requests  # type: ignore[import-untyped]
 
         x_np = x.detach().cpu().numpy()
         estimates: list[int] = []
