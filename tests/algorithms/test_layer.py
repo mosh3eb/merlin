@@ -190,7 +190,7 @@ class TestQuantumLayer:
                 input_state=[0, 1],
             )
 
-        assert layer.input_state == [1, 0]
+        assert layer.input_state == pcvl.BasicState([1, 0])
 
     def test_statevector_empty_rejected(self):
         """Empty StateVector inputs should be rejected."""
@@ -503,9 +503,7 @@ class TestQuantumLayer:
             measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
-        expected_state = ML.StateGenerator.generate_state(
-            circuit.m, 2, ML.StatePattern.SPACED
-        )
+        expected_state = ML.generate_state(circuit.m, 2, ML.StatePattern.SPACED)
         assert layer.input_state == expected_state
 
     def test_gradient_computation(self):
@@ -1358,17 +1356,17 @@ def test_simple_num_photons_modes_and_input_state():
         ql = ML.QuantumLayer.simple(input_size=i)
         if i < 2:
             assert ql.quantum_layer.n_photons == 1
-            assert ql.quantum_layer.input_state == [0, 1]
+            assert ql.quantum_layer.input_state == pcvl.BasicState([0, 1])
         else:
             assert ql.quantum_layer.n_photons == (i) // 2
-            assert np.sum(ql.quantum_layer.input_state) == (i) // 2
+            assert sum(ql.quantum_layer.input_state) == (i) // 2
             assert len(ql.quantum_layer.input_state) == i
 
             input_state = [0] * (i)
             for j in range(len(input_state)):
                 if j % 2 == 1:
                     input_state[j] = 1
-            assert ql.quantum_layer.input_state == input_state
+            assert ql.quantum_layer.input_state == pcvl.BasicState(input_state)
 
 
 def test_simple_parameters():

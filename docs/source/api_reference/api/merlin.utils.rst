@@ -13,4 +13,4 @@ Modules
    :maxdepth: 4
 
    merlin.utils.grouping
-   merlin.utils.torch_codes
+

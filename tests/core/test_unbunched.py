@@ -30,15 +30,49 @@ import pytest
 import torch
 
 from merlin.algorithms.layer import QuantumLayer
+from merlin.builder.circuit_builder import CircuitBuilder
 from merlin.core.computation_space import ComputationSpace
-from merlin.core.generators import (
-    CircuitGenerator,
-    CircuitType,
-    StateGenerator,
-    StatePattern,
-)
 from merlin.core.process import ComputationProcessFactory
+from merlin.core.state import StatePattern, generate_state
 from merlin.measurement.strategies import MeasurementStrategy
+
+
+def _build_parallel_columns(n_modes: int, n_features: int) -> CircuitBuilder:
+    builder = CircuitBuilder(n_modes=n_modes)
+    for stage in range(n_features + 1):
+        builder.add_entangling_layer(name="phi_")
+        if stage < n_features:
+            builder.add_rotations(role="input", name="pl", axis="z")
+    return builder
+
+
+def _build_series(n_modes: int, n_features: int) -> CircuitBuilder:
+    builder = CircuitBuilder(n_modes=n_modes)
+    builder.add_entangling_layer(name="phi_")
+
+    if n_features == 1:
+        target_modes = list(range(max(0, n_modes - 1)))
+    else:
+        num_shifters = min((1 << n_features) - 1, max(0, n_modes - 1))
+        target_modes = list(range(num_shifters))
+
+    if target_modes:
+        builder.add_rotations(modes=target_modes, role="input", name="pl", axis="z")
+
+    builder.add_entangling_layer(name="phi_")
+    return builder
+
+
+def _build_parallel(n_modes: int, n_features: int) -> CircuitBuilder:
+    builder = CircuitBuilder(n_modes=n_modes)
+    num_blocks = (n_modes - 1) if n_features == 1 else n_features
+
+    for _ in range(max(0, num_blocks)):
+        builder.add_entangling_layer(name="phi_")
+        builder.add_rotations(modes=[0], role="input", name="pl", axis="z")
+
+    builder.add_entangling_layer(name="phi_")
+    return builder
 
 
 def calculate_fock_space_size(n_modes: int, n_photons: int) -> int:
@@ -91,12 +125,8 @@ class TestNoBunchingFunctionality:
         n_photons = 2
 
         # Create circuit and state
-        circuit, _ = CircuitGenerator.generate_circuit(
-            CircuitType.PARALLEL_COLUMNS, n_modes, 2
-        )
-        input_state = StateGenerator.generate_state(
-            n_modes, n_photons, StatePattern.SEQUENTIAL
-        )
+        circuit = _build_parallel_columns(n_modes, 2).to_pcvl_circuit()
+        input_state = list(generate_state(n_modes, n_photons, StatePattern.SEQUENTIAL))
 
         # Create computation process with full Fock space
         process = ComputationProcessFactory.create(
@@ -134,12 +164,8 @@ class TestNoBunchingFunctionality:
         n_photons = 2
 
         # Create circuit and state
-        circuit, _ = CircuitGenerator.generate_circuit(
-            CircuitType.PARALLEL_COLUMNS, n_modes, 2
-        )
-        input_state = StateGenerator.generate_state(
-            n_modes, n_photons, StatePattern.SEQUENTIAL
-        )
+        circuit = _build_parallel_columns(n_modes, 2).to_pcvl_circuit()
+        input_state = list(generate_state(n_modes, n_photons, StatePattern.SEQUENTIAL))
 
         # Create computation process with UNBUNCHED space
         process = ComputationProcessFactory.create(
@@ -181,11 +207,9 @@ class TestNoBunchingFunctionality:
             ComputationSpace.FOCK,
             ComputationSpace.UNBUNCHED,
         ):
-            circuit, _ = CircuitGenerator.generate_circuit(
-                CircuitType.SERIES, n_modes, 2
-            )
-            input_state = StateGenerator.generate_state(
-                n_modes, n_photons, StatePattern.PERIODIC
+            circuit = _build_series(n_modes, 2).to_pcvl_circuit()
+            input_state = list(
+                generate_state(n_modes, n_photons, StatePattern.PERIODIC)
             )
             q_layer = QuantumLayer(
                 input_size=3,
@@ -222,12 +246,8 @@ class TestNoBunchingFunctionality:
         for n_photons in [1, 2, 3]:
             print(f"\nTesting {n_photons} photons in {n_modes} modes:")
 
-            circuit, _ = CircuitGenerator.generate_circuit(
-                CircuitType.PARALLEL, n_modes, 2
-            )
-            input_state = StateGenerator.generate_state(
-                n_modes, n_photons, StatePattern.SPACED
-            )
+            circuit = _build_parallel(n_modes, 2).to_pcvl_circuit()
+            input_state = list(generate_state(n_modes, n_photons, StatePattern.SPACED))
 
             # Test with UNBUNCHED
             process_unbunched = ComputationProcessFactory.create(
@@ -281,7 +301,7 @@ class TestNoBunchingFunctionality:
         n_modes = 3
         n_photons = 4  # More photons than modes
 
-        circuit, _ = CircuitGenerator.generate_circuit(CircuitType.SERIES, n_modes, 2)
+        circuit = _build_series(n_modes, 2).to_pcvl_circuit()
         input_state = [1, 1, 1, 1][:n_modes] + [0] * max(0, n_modes - 4)
 
         # This should work but result in empty or minimal space
@@ -321,12 +341,8 @@ class TestNoBunchingFunctionality:
         n_modes = 5
         n_photons = 1
 
-        circuit, _ = CircuitGenerator.generate_circuit(
-            CircuitType.PARALLEL_COLUMNS, n_modes, 2
-        )
-        input_state = StateGenerator.generate_state(
-            n_modes, n_photons, StatePattern.SEQUENTIAL
-        )
+        circuit = _build_parallel_columns(n_modes, 2).to_pcvl_circuit()
+        input_state = list(generate_state(n_modes, n_photons, StatePattern.SEQUENTIAL))
 
         for computation_space in (
             ComputationSpace.FOCK,
@@ -378,11 +394,9 @@ class TestNoBunchingFunctionality:
             print(
                 f"\nTesting compute_with_keys {n_photons} photons in {n_modes} modes:"
             )
-            circuit, _ = CircuitGenerator.generate_circuit(
-                CircuitType.SERIES, n_modes, 2
-            )
-            input_state = StateGenerator.generate_state(
-                n_modes, n_photons, StatePattern.PERIODIC
+            circuit = _build_series(n_modes, 2).to_pcvl_circuit()
+            input_state = list(
+                generate_state(n_modes, n_photons, StatePattern.PERIODIC)
             )
 
             # Process with UNBUNCHED
@@ -500,10 +514,8 @@ class TestNoBunchingFunctionality:
 
     def test_no_bunching_deprecation_warning_and_error(self):
         """Passing no_bunching should warn and raise a ValueError."""
-        circuit, _ = CircuitGenerator.generate_circuit(
-            CircuitType.PARALLEL_COLUMNS, 2, 1
-        )
-        input_state = StateGenerator.generate_state(2, 1, StatePattern.SEQUENTIAL)
+        circuit = _build_parallel_columns(2, 1).to_pcvl_circuit()
+        input_state = list(generate_state(2, 1, StatePattern.SEQUENTIAL))
 
         with pytest.warns(DeprecationWarning):
             with pytest.raises(ValueError):
@@ -518,8 +530,8 @@ class TestNoBunchingFunctionality:
 
 @pytest.mark.parametrize("no_bunching", [True, False])
 def test_quantum_layer_rejects_no_bunching(no_bunching: bool):
-    circuit, _ = CircuitGenerator.generate_circuit(CircuitType.SERIES, 4, 2)
-    input_state = StateGenerator.generate_state(4, 2, StatePattern.PERIODIC)
+    circuit = _build_series(4, 2).to_pcvl_circuit()
+    input_state = list(generate_state(4, 2, StatePattern.PERIODIC))
 
     with pytest.warns(DeprecationWarning):
         with pytest.raises(ValueError) as exc_info:

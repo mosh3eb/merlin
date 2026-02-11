@@ -31,12 +31,10 @@ from .combinadics import Combinadics
 from .deprecations import sanitize_parameters
 from .dtypes import resolve_float_complex, to_torch_dtype
 from .grouping import LexGrouping, ModGrouping
-from .torch_codes import FeatureEncoder
 
 __all__ = [
     "LexGrouping",
     "ModGrouping",
-    "FeatureEncoder",
     "Combinadics",
     "sanitize_parameters",
     "resolve_float_complex",

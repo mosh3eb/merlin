@@ -46,7 +46,7 @@ import torch
 
 from ..builder.circuit_builder import CircuitBuilder
 from ..core.computation_space import ComputationSpace
-from ..core.generators import StateGenerator, StatePattern
+from ..core.state import StatePattern, generate_state
 from ..core.state_vector import StateVector
 from ..measurement.detectors import resolve_detectors
 from ..measurement.photon_loss import resolve_photon_loss
@@ -115,7 +115,7 @@ class InitializationContext:
     experiment: pcvl.Experiment
     noise_model: Any | None
     has_custom_noise: bool
-    input_state: StateVector | list[int] | torch.Tensor | None
+    input_state: StateVector | pcvl.BasicState | torch.Tensor | None
     n_photons: int | None
     trainable_parameters: list[str]
     input_parameters: list[str]
@@ -177,7 +177,7 @@ def prepare_input_state(
     experiment: pcvl.Experiment | None = None,
     circuit_m: int | None = None,
     amplitude_encoding: bool = False,
-) -> tuple[StateVector | list[int] | torch.Tensor | None, int | None]:
+) -> tuple[StateVector | pcvl.BasicState | torch.Tensor | None, int | None]:
     """Normalize input_state to canonical form.
 
     Parameters
@@ -202,7 +202,7 @@ def prepare_input_state(
 
     Returns
     -------
-    tuple[StateVector | list[int] | torch.Tensor | None, int | None]
+    tuple[StateVector | pcvl.BasicState | torch.Tensor | None, int | None]
         The normalized input state and resolved photon count.
 
     Raises
@@ -243,7 +243,7 @@ def prepare_input_state(
         # Pass through as tensor for backward compatibility
         return input_state, n_photons
 
-    # === Handle tuple (convert to list, same as list handling) ===
+    # === Handle tuple/list (convert to BasicState) ===
     if isinstance(input_state, tuple):
         input_state = list(input_state)
 
@@ -251,7 +251,7 @@ def prepare_input_state(
     if isinstance(input_state, pcvl.BasicState):
         if not isinstance(input_state, xqlbr.FockState):
             raise ValueError("BasicState with annotations is not supported")
-        input_state = list(input_state)
+        return input_state, n_photons
 
     # === Handle pcvl.StateVector ===
     elif isinstance(input_state, pcvl.StateVector):
@@ -279,7 +279,7 @@ def prepare_input_state(
     # === Generate default state from n_photons ===
     if input_state is None and n_photons is not None:
         if computation_space is ComputationSpace.DUAL_RAIL:
-            input_state = [1, 0] * n_photons
+            return pcvl.BasicState(tuple([1, 0] * n_photons)), n_photons
         elif amplitude_encoding:
             if circuit_m is None:
                 raise ValueError(
@@ -291,12 +291,15 @@ def prepare_input_state(
                 raise ValueError(
                     "circuit_m must be provided to generate default state when input_state is omitted."
                 )
-            input_state = StateGenerator.generate_state(
-                circuit_m, n_photons, StatePattern.SPACED
-            )
+            return generate_state(circuit_m, n_photons, StatePattern.SPACED), n_photons
 
-    # At this point input_state is always list[int]
-    return cast(list[int], input_state), n_photons
+    # === Handle list[int] (legacy) ===
+    if isinstance(input_state, list):
+        return pcvl.BasicState(tuple(cast(list[int], input_state))), n_photons
+
+    return cast(
+        StateVector | pcvl.BasicState | torch.Tensor | None, input_state
+    ), n_photons
 
 
 def validate_and_resolve_circuit_source(

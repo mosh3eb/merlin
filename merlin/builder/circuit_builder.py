@@ -270,8 +270,8 @@ class CircuitBuilder:
             name: Prefix used for generated input parameters. Defaults to ``"px"``.
             scale: Global scaling factor applied before angle mapping.
             subset_combinations: When ``True``, generate higher-order feature
-                combinations (up to ``max_order``) similar to the legacy
-                ``FeatureEncoder``.
+                combinations (up to ``max_order``) matching the historical
+                subset encoding utility.
             max_order: Optional cap on the size of feature combinations when
                 ``subset_combinations`` is enabled. ``None`` uses all orders.
 
@@ -427,10 +427,8 @@ class CircuitBuilder:
         if span < 2:
             raise ValueError("Entangling layer requires at least two modes")
 
-        if name is None:
-            prefix = f"el_{self._entangling_layer_counter}"
-        else:
-            prefix = name
+        base_prefix = name or f"el_{self._entangling_layer_counter}"
+        prefix = self._unique_trainable_name(base_prefix) if trainable else base_prefix
 
         component = GenericInterferometer(
             start_mode=start,
