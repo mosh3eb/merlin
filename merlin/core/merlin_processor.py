@@ -263,7 +263,6 @@ class MerlinProcessor:
                             # Preferred (new) signature
                             should_offload = bool(layer.should_offload())
 
-
                         except Exception:
                             should_offload = False
                     else:
@@ -490,7 +489,6 @@ class MerlinProcessor:
         raise RuntimeError(
             f"Chunk failed after {self._MAX_CHUNK_RETRIES} attempts"
         ) from last_error
-
 
     def _submit_job(self, sampler, nsample, job_base_label, _capped_name):
         """Submit a single async job via the sampler."""
@@ -811,7 +809,6 @@ class MerlinProcessor:
             "Expected a MerlinModule with either a 'computation_process' + 'simulation_graph' "
             "or 'circuit' and 'input_state' attributes."
         )
-
 
     # ---- Shot estimation (no remote jobs submitted) ----
 
