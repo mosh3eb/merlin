@@ -272,6 +272,11 @@ Declarative builder + kernel
 	X = torch.rand(32, 4)
 	K = kernel(X)
 
+.. note::
+
+  ``input_state=[...]`` is accepted for convenience and is converted to a Perceval
+  :class:`perceval.BasicState` internally.
+
 Using with scikit‑learn (precomputed kernel)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

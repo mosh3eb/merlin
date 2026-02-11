@@ -65,7 +65,7 @@ def test_prepare_input_state_basic_state():
         None,
         torch.complex64,
     )
-    assert state == [1, 0, 1]
+    assert state == pcvl.BasicState([1, 0, 1])
     assert resolved is None
 
 
@@ -109,7 +109,7 @@ def test_prepare_input_state_experiment_override_warns():
             torch.complex64,
             experiment=experiment,
         )
-    assert state == [1, 0]
+    assert state == pcvl.BasicState([1, 0])
 
 
 def test_prepare_input_state_default_generation():
@@ -122,7 +122,7 @@ def test_prepare_input_state_default_generation():
         circuit_m=4,
         amplitude_encoding=False,
     )
-    assert state == ML.StateGenerator.generate_state(4, 2, ML.StatePattern.SPACED)
+    assert state == ML.generate_state(4, 2, ML.StatePattern.SPACED)
 
 
 def test_validate_and_resolve_circuit_source_builder_conflict():

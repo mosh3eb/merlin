@@ -36,12 +36,10 @@ from .normalization import (
     normalize_probabilities_and_amplitudes,
     probabilities_from_amplitudes,
 )
-from .torch_codes import FeatureEncoder
 
 __all__ = [
     "LexGrouping",
     "ModGrouping",
-    "FeatureEncoder",
     "Combinadics",
     "normalize_probabilities",
     "normalize_probabilities_and_amplitudes",

@@ -131,9 +131,12 @@ The initial distribution of photons affects quantum behavior:
 .. code-block:: python
 
     # Example state patterns
-    ML.StatePattern.PERIODIC     # [1,0,1,0] - alternating photons
-    ML.StatePattern.SPACED       # [1,0,0,1] - evenly spaced
-    ML.StatePattern.SEQUENTIAL   # [1,1,0,0] - consecutive
+    ML.StatePattern.PERIODIC     # occupations: [1, 0, 1, 0] (alternating photons)
+    ML.StatePattern.SPACED       # occupations: [1, 0, 0, 1] (evenly spaced)
+    ML.StatePattern.SEQUENTIAL   # occupations: [1, 1, 0, 0] (consecutive)
+
+You can build a concrete input state as a Perceval ``BasicState`` with
+``ML.generate_state(n_modes, n_photons, pattern)``.
 
 Different patterns create different types of quantum interference and correlations.
 

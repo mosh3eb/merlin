@@ -107,6 +107,11 @@ a good understanding of Perceval.
    x = torch.linspace(0.0, 1.0, steps=8).unsqueeze(1)
    probs = layer(x)
 
+.. note::
+
+  ``input_state=[...]`` is accepted as a convenience input, but the layer stores it as a Perceval
+  :class:`perceval.BasicState` (access the occupation vector via ``list(layer.input_state)``).
+
 Experiment-driven
 ~~~~~~~~~~~~~~~~~
 

@@ -94,7 +94,7 @@ class TestConstructorInputTypes:
             measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
-        assert layer.input_state == [1, 0, 1]
+        assert layer.input_state == pcvl.BasicState([1, 0, 1])
 
     def test_input_state_accepts_list(self):
         """List should be accepted as input_state."""
@@ -107,7 +107,7 @@ class TestConstructorInputTypes:
             measurement_strategy=ML.MeasurementStrategy.probs(),
         )
 
-        assert layer.input_state == [1, 1, 0]
+        assert layer.input_state == pcvl.BasicState([1, 1, 0])
 
     def test_input_state_accepts_tuple(self):
         """Tuple should be accepted as input_state."""

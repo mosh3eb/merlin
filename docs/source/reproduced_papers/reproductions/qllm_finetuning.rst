@@ -71,6 +71,7 @@ For a first analysis, we use a Generic Interferometer:
        input_size=X_train.shape[1],
        builder=builder,
        n_photons=modes // 2,
+       measurement_strategy=ML.MeasurementStrategy.probs(),
    )
 
 Experimental Results
