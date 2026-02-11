@@ -13,8 +13,10 @@ Submodules
    :maxdepth: 4
 
    merlin.core.base
-   merlin.core.photonicbackend
+   merlin.core.state
    merlin.core.state_vector
    merlin.core.probability_distribution
    merlin.core.process
    merlin.core.components
+   merlin.core.partial_measurement
+   merlin.core.merlin_processor

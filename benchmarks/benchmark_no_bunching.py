@@ -36,8 +36,33 @@ import torch
 
 import merlin as ML
 from merlin.core.computation_space import ComputationSpace
-from merlin.core.generators import CircuitGenerator, StateGenerator
 from merlin.core.process import ComputationProcessFactory
+
+
+def _build_parallel_columns(n_modes: int, n_features: int) -> ML.CircuitBuilder:
+    builder = ML.CircuitBuilder(n_modes=n_modes)
+    for stage in range(n_features + 1):
+        builder.add_entangling_layer(name="phi_")
+        if stage < n_features:
+            builder.add_rotations(role="input", name="pl", axis="z")
+    return builder
+
+
+def _build_series(n_modes: int, n_features: int) -> ML.CircuitBuilder:
+    builder = ML.CircuitBuilder(n_modes=n_modes)
+    builder.add_entangling_layer(name="phi_")
+
+    if n_features == 1:
+        target_modes = list(range(max(0, n_modes - 1)))
+    else:
+        num_shifters = min((1 << n_features) - 1, max(0, n_modes - 1))
+        target_modes = list(range(num_shifters))
+
+    if target_modes:
+        builder.add_rotations(modes=target_modes, role="input", name="pl", axis="z")
+
+    builder.add_entangling_layer(name="phi_")
+    return builder
 
 
 class NoBunchingBenchmarkRunner:
@@ -99,11 +124,10 @@ def test_no_bunching_computation_benchmark(benchmark, config: dict, device: str)
     n_photons = config["n_photons"]
 
     # Create circuit and state
-    circuit, _ = CircuitGenerator.generate_circuit(
-        ML.CircuitType.PARALLEL_COLUMNS, n_modes, 3
-    )
-    input_state = StateGenerator.generate_state(
-        n_modes, n_photons, ML.StatePattern.SEQUENTIAL
+    builder = _build_parallel_columns(n_modes, 3)
+    circuit = builder.to_pcvl_circuit()
+    input_state = list(
+        ML.generate_state(n_modes, n_photons, ML.StatePattern.SEQUENTIAL)
     )
 
     # Create computation process with default (UNBUNCHED) computation space
@@ -142,11 +166,10 @@ def test_fock_space_comparison_benchmark(benchmark, config: dict, device: str):
     n_photons = config["n_photons"]
 
     # Create circuit and state
-    circuit, _ = CircuitGenerator.generate_circuit(
-        ML.CircuitType.PARALLEL_COLUMNS, n_modes, 2
-    )
-    input_state = StateGenerator.generate_state(
-        n_modes, n_photons, ML.StatePattern.SEQUENTIAL
+    builder = _build_parallel_columns(n_modes, 2)
+    circuit = builder.to_pcvl_circuit()
+    input_state = list(
+        ML.generate_state(n_modes, n_photons, ML.StatePattern.SEQUENTIAL)
     )
 
     def compute_both_modes():
@@ -208,10 +231,9 @@ def test_compute_with_keys_benchmark(benchmark, config: dict, device: str):
     n_modes = config["n_modes"]
     n_photons = config["n_photons"]
 
-    circuit, _ = CircuitGenerator.generate_circuit(ML.CircuitType.SERIES, n_modes, 2)
-    input_state = StateGenerator.generate_state(
-        n_modes, n_photons, ML.StatePattern.PERIODIC
-    )
+    builder = _build_series(n_modes, 2)
+    circuit = builder.to_pcvl_circuit()
+    input_state = list(ML.generate_state(n_modes, n_photons, ML.StatePattern.PERIODIC))
 
     # Process with no_bunching
     process_no_bunching = ComputationProcessFactory.create(
@@ -252,11 +274,10 @@ class TestNoBunchingPerformanceRegression:
         n_modes = 8
         n_photons = 3
 
-        circuit, _ = CircuitGenerator.generate_circuit(
-            ML.CircuitType.PARALLEL_COLUMNS, n_modes, 2
-        )
-        input_state = StateGenerator.generate_state(
-            n_modes, n_photons, ML.StatePattern.SEQUENTIAL
+        builder = _build_parallel_columns(n_modes, 2)
+        circuit = builder.to_pcvl_circuit()
+        input_state = list(
+            ML.generate_state(n_modes, n_photons, ML.StatePattern.SEQUENTIAL)
         )
 
         process = ComputationProcessFactory.create(
@@ -322,11 +343,10 @@ if __name__ == "__main__":
     n_modes = 6
     n_photons = 3
 
-    circuit, _ = CircuitGenerator.generate_circuit(
-        ML.CircuitType.PARALLEL_COLUMNS, n_modes, 2
-    )
-    input_state = StateGenerator.generate_state(
-        n_modes, n_photons, ML.StatePattern.SEQUENTIAL
+    builder = _build_parallel_columns(n_modes, 2)
+    circuit = builder.to_pcvl_circuit()
+    input_state = list(
+        ML.generate_state(n_modes, n_photons, ML.StatePattern.SEQUENTIAL)
     )
 
     process = ComputationProcessFactory.create(
