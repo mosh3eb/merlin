@@ -1,6 +1,7 @@
 merlin.core.photonicbackend module (removed)
 ===========================================
 
-This module name is no longer used.
+.. warning:: *Deprecated since version 0.3:*
+    This module name is no longer used.
 
-See :mod:`merlin.core.merlin_processor`.
+    See :mod:`merlin.core.merlin_processor`.
