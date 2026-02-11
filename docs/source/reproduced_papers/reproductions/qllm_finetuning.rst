@@ -53,11 +53,12 @@ For a first analysis, we use a Generic Interferometer:
 .. code-block:: python
 
    import merlin as ML # Package: merlinquantum, import: merlin
+   import numpy as np
    import torch
 
    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-   builder = CircuitBuilder(n_modes=modes)
+   builder = ML.CircuitBuilder(n_modes=modes)
    builder.add_entangling_layer(trainable=True)
    builder.add_angle_encoding(
        modes=list(range(X_train.shape[1])),
