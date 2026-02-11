@@ -60,12 +60,12 @@ Implementation Details
 
    import merlin as ml
 
-   # Example code showing key implementation
-   circuit = ml.Circuit(
-       type=ml.CircuitType.[TYPE],
-       modes=[number],
-       layers=[number]
-   )
+  # Example code showing key implementation
+  builder = ml.CircuitBuilder(n_modes=[number])
+  builder.add_entangling_layer(name="phi_")
+  builder.add_rotations(role="input", name="pl", axis="z")
+  builder.add_entangling_layer(name="phi_")
+     circuit = builder.to_pcvl_circuit()
 
    # Additional setup code
    model = ml.[ModelType](
