@@ -13,7 +13,6 @@ Submodules
    :maxdepth: 4
 
    merlin.core.base
-   merlin.core.generators
    merlin.core.photonicbackend
    merlin.core.state_vector
    merlin.core.probability_distribution
