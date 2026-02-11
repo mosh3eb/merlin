@@ -1,7 +1,6 @@
-merlin.core.photonicbackend module
-==================================
+merlin.core.photonicbackend module (removed)
+===========================================
 
-.. automodule:: merlin.core.photonicbackend
-   :members:
-   :undoc-members:
-   :show-inheritance:
+This module name is no longer used.
+
+See :mod:`merlin.core.merlin_processor`.
