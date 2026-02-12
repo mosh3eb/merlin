@@ -154,8 +154,13 @@ following representations:
 
 * :class:`perceval.BasicState` – a single configuration such as ``pcvl.BasicState([1, 0, 1, 0])``;
 * :class:`perceval.StateVector` – an arbitrary superposition of basic states with complex amplitudes;
-* **Deprecated**: Python lists, e.g. ``[1, 0, 1, 0]``. Lists are still recognised for backward compatibility but are
-  immediately converted to their Perceval counterparts—new code should build explicit ``BasicState`` objects.
+* Python lists/tuples, e.g. ``[1, 0, 1, 0]``. These are accepted as convenience inputs and are immediately converted
+    to a Perceval :class:`perceval.BasicState`.
+
+.. note::
+
+     For Fock/occupation inputs, :class:`~merlin.algorithms.layer.QuantumLayer` stores ``.input_state`` as a Perceval
+     :class:`perceval.BasicState`. If you need the raw occupation vector, use ``list(layer.input_state)``.
 
 When ``input_state`` is passed, the layer always injects that photonic state. In more elaborate pipelines you may want
 to cascade circuits and let the output amplitudes of the previous layer become the input state of the next. Merlin
@@ -282,6 +287,6 @@ The snippet below prepares a basic quantum layer and returns a ``ProbabilityDist
 
 Deprecations
 -------------------------
-.. deprecated:: 0.4
-   The use of the ``no_bunching`` flag  is deprecated and will be removed in version 0.4.
+.. warning:: *Deprecated since version 0.3:*
+   The use of the ``no_bunching`` flag  is deprecated and is removed since version 0.3.0.
    Use the ``computation_space`` flag inside ``measurement_strategy`` instead. See :doc:`/user_guide/migration_guide`.

@@ -39,10 +39,10 @@ from ..builder.circuit_builder import (
     CircuitBuilder,
 )
 from ..core.computation_space import ComputationSpace
-from ..core.generators import StateGenerator, StatePattern
 from ..core.partial_measurement import PartialMeasurement
 from ..core.probability_distribution import ProbabilityDistribution
 from ..core.process import ComputationProcessFactory
+from ..core.state import StatePattern, generate_state
 from ..core.state_vector import StateVector
 from ..measurement import OutputMapper
 from ..measurement.autodiff import AutoDiffProcess
@@ -60,6 +60,7 @@ from ..utils.deprecations import (
     sanitize_parameters,
 )
 from ..utils.grouping import ModGrouping
+from ..utils.normalization import normalize_probabilities_and_amplitudes
 from .layer_utils import (
     InitializationContext,
     apply_angle_encoding,
@@ -362,9 +363,9 @@ class QuantumLayer(MerlinModule):
         elif n_photons is not None:
             # Default behavior: place [1,0,1,0,...] in dual-rail, else distribute photons across modes
             if self.computation_space is ComputationSpace.DUAL_RAIL:
-                self.input_state = [1, 0] * n_photons
+                self.input_state = pcvl.BasicState(tuple([1, 0] * n_photons))
             elif not self.amplitude_encoding:
-                self.input_state = StateGenerator.generate_state(
+                self.input_state = generate_state(
                     circuit.m, n_photons, StatePattern.SPACED
                 )
             else:
@@ -391,6 +392,11 @@ class QuantumLayer(MerlinModule):
                 n_photons  # n_photons must be provided for tensor input
             )
             process_input_state = self.input_state
+        elif isinstance(self.input_state, pcvl.BasicState):
+            resolved_n_photons = (
+                n_photons if n_photons is not None else sum(self.input_state)
+            )
+            process_input_state = list(self.input_state)
         else:
             # list[int]
             resolved_n_photons = (
@@ -678,6 +684,20 @@ class QuantumLayer(MerlinModule):
         return amplitude
 
     def set_input_state(self, input_state):
+        if isinstance(input_state, pcvl.BasicState):
+            self.input_state = input_state
+            self.computation_process.input_state = list(input_state)
+            return
+
+        if isinstance(input_state, tuple):
+            input_state = list(input_state)
+
+        if isinstance(input_state, list):
+            basic = pcvl.BasicState(tuple(input_state))
+            self.input_state = basic
+            self.computation_process.input_state = list(basic)
+            return
+
         self.input_state = input_state
         self.computation_process.input_state = input_state
 
@@ -980,36 +1000,9 @@ class QuantumLayer(MerlinModule):
         self, amplitudes: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return probability distribution and renormalized amplitudes."""
-        # even in amplitude mode, we do need to calculation distribution for renormalization
-        # of the amplitudes
-        distribution = amplitudes.real**2 + amplitudes.imag**2
-
-        # renormalize distribution and amplitudes for UNBUNCHED and DUAL_RAIL spaces
-        if (
-            self.computation_space is ComputationSpace.UNBUNCHED
-            or self.computation_space is ComputationSpace.DUAL_RAIL
-        ):
-            sum_probs = distribution.sum(dim=-1, keepdim=True)
-
-            # Only normalize when sum > 0 to avoid division by zero
-            valid_entries = sum_probs > 0
-            if valid_entries.any():
-                distribution = torch.where(
-                    valid_entries,
-                    distribution
-                    / torch.where(valid_entries, sum_probs, torch.ones_like(sum_probs)),
-                    distribution,
-                )
-                amplitudes = torch.where(
-                    valid_entries,
-                    amplitudes
-                    / torch.where(
-                        valid_entries, sum_probs.sqrt(), torch.ones_like(sum_probs)
-                    ),
-                    amplitudes,
-                )
-
-        return distribution, amplitudes
+        return normalize_probabilities_and_amplitudes(
+            amplitudes, self.computation_space
+        )
 
     def _prepare_amplitude_input(
         self, inputs: list[torch.Tensor]

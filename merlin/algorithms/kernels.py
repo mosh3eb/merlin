@@ -32,7 +32,7 @@ from torch import Tensor
 
 from ..builder.circuit_builder import ANGLE_ENCODING_MODE_ERROR, CircuitBuilder
 from ..core.computation_space import ComputationSpace
-from ..core.generators import StateGenerator, StatePattern
+from ..core.state import StatePattern, generate_state
 from ..measurement.autodiff import AutoDiffProcess
 from ..measurement.detectors import DetectorTransform, resolve_detectors
 from ..measurement.photon_loss import PhotonLossTransform, resolve_photon_loss
@@ -478,7 +478,6 @@ class KernelCircuitBuilder:
         self._n_photons: int | None = None
         self._dtype: str | torch.dtype = torch.float32
         self._device: torch.device | None = None
-        self._use_bandwidth_tuning: bool = False
         self._angle_encoding_scale: float = 1.0
         self._trainable: bool = True
         self._trainable_prefix: str = "phi"
@@ -518,11 +517,6 @@ class KernelCircuitBuilder:
     def device(self, device: torch.device) -> "KernelCircuitBuilder":
         """Set the computation device."""
         self._device = device
-        return self
-
-    def bandwidth_tuning(self, enabled: bool = True) -> "KernelCircuitBuilder":
-        """Enable or disable bandwidth tuning."""
-        self._use_bandwidth_tuning = enabled
         return self
 
     def angle_encoding(
@@ -606,9 +600,7 @@ class KernelCircuitBuilder:
         if input_state is None:
             n_modes = self._n_modes or max(self._input_size or 2, 4)
             n_photons = self._n_photons or (self._input_size or 2)
-            input_state = StateGenerator.generate_state(
-                n_modes, n_photons, StatePattern.SPACED
-            )
+            input_state = list(generate_state(n_modes, n_photons, StatePattern.SPACED))
 
         return FidelityKernel(
             feature_map=feature_map,

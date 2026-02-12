@@ -107,6 +107,11 @@ a good understanding of Perceval.
    x = torch.linspace(0.0, 1.0, steps=8).unsqueeze(1)
    probs = layer(x)
 
+.. note::
+
+  ``input_state=[...]`` is accepted as a convenience input, but the layer stores it as a Perceval
+  :class:`perceval.BasicState` (access the occupation vector via ``list(layer.input_state)``).
+
 Experiment-driven
 ~~~~~~~~~~~~~~~~~
 
@@ -164,8 +169,8 @@ Notes
 - Inspect ``layer.has_custom_noise_model`` and ``layer.output_keys`` to confirm
   whether photon loss is active and how it alters the output distribution.
 
-.. deprecated:: 0.4
-   The use of the ``no_bunching`` flag  is deprecated and will be removed in version 0.4.
+.. warning::
+   *Deprecated since version 0.3:* The use of the ``no_bunching`` flag  is deprecated and is removed since version 0.3.0.
    Use the ``computation_space`` flag inside ``measurement_strategy`` instead. See :doc:`/user_guide/migration_guide`.
 
 -----------

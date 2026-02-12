@@ -45,6 +45,7 @@ Merlin exposes three common working regimes; each is a subspace of the full Fock
      - Restricts to configurations with at most one photon per mode.
      - Circuits read with threshold detectors or when loss resilience is required.
      - Threshold detectors
+     - It is the **default computation space** since the current photonic detectors can not count the number of photons.
    * - Dual-rail
      - Special case of the unbunched space: one photon shared across every pair of modes.
      - Logical qubit encodings, qubit ↔ photonic interfacing.
@@ -58,7 +59,7 @@ construction time.
 
 The ``measurement_strategy`` can define the computation space with its ``computation_space`` argument.
 We can choose from 
-  - ``merlin.ComputationSpace.UNBUNCHED``, do not allow multiple photons per modes.
+  - ``merlin.ComputationSpace.UNBUNCHED``, do not allow multiple photons per modes. It is the default value when no MeasurementStrategy is given.
   - ``merlin.ComputationSpace.FOCK``, allow multiple photons per modes (i.e. explore the full Fock space).
   - ``merlin.ComputationSpace.DUAL_RAIL``, use a dual rail encoding (two modes per photon).
 
@@ -66,8 +67,8 @@ Those computation spaces can also be assigned with the ``computation_space`` arg
 is prefered to exploit the ``measurement_strategy`` since ``computation_space`` will be deprecated in the future.
 
 It will be the only way to control the computation space as the ``no_bunching`` flag is deprecated.
-.. deprecated:: 0.4
-   The use of the ``no_bunching`` flag  is deprecated and will be removed in version 0.4.
+.. warning:: *Deprecated since version 0.3:*
+   The use of the ``no_bunching`` flag  is deprecated and is removed since version 0.3.0.
    Use the ``computation_space`` flag inside ``measurement_strategy`` instead. See :doc:`/user_guide/migration_guide`.
 
 Another parameter is also relevent.

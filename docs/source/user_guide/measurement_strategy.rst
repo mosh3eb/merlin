@@ -109,6 +109,11 @@ Return type (forward call):
   which collapses it and is therefore incompatible with amplitude retrieval. Thus,
   this measurement strategy **requires that no noise model or detectors are defined**.
 
+PARTIAL MEASUREMENT
+---------------
+
+Partial measurement is a specific kind of measurement strategy. With this measurement strategy, only some modes are measured while amplitudes are preserved on the other modes. For more details, checkout the :doc:`/quantum_expert_area/partial_measurement` page.
+
 Photon Loss-aware & Detector-aware execution
 ============================================
 
@@ -128,8 +133,9 @@ The MeasurementStrategy now gets two arguments in input.
 * ``computation_space``: A ``ComputationSpace`` object that defines the output computation space.
 
   It will be the only way to define the computation space as the ``no_bunching`` flag is deprecated.
-  .. deprecated:: 0.4
-   The use of the ``no_bunching`` flag  is deprecated and will be removed in version 0.4.
+  
+  .. warning:: *Deprecated since version 0.3:*
+   The use of the ``no_bunching`` flag  is deprecated and is removed since version 0.3.0.
    Use the ``computation_space`` flag inside ``measurement_strategy`` instead. See :doc:`/user_guide/migration_guide`.
 
 

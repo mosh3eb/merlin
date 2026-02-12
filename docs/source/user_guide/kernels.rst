@@ -183,8 +183,8 @@ FidelityKernel Parameters
      - *from feature_map*
      - Simulation device
 
-.. deprecated:: 0.4
-   The use of the ``no_bunching`` flag  is deprecated and will be removed in version 0.4.
+.. warning:: *Deprecated since version 0.3:*
+   The use of the ``no_bunching`` flag  is deprecated and is removed since version 0.3.0.
    Use the ``computation_space`` flag instead. See :doc:`/user_guide/migration_guide`.
 
 Implementation highlights
@@ -272,6 +272,11 @@ Declarative builder + kernel
 	X = torch.rand(32, 4)
 	K = kernel(X)
 
+.. note::
+
+  ``input_state=[...]`` is accepted for convenience and is converted to a Perceval
+  :class:`perceval.BasicState` internally.
+
 Using with scikit‑learn (precomputed kernel)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -329,7 +334,6 @@ Limitations and caveats
 
 - The feature map encodes classical features via angle encoding; amplitude encoding of state vectors is not part of the kernel API.
 - ``ComputationSpace.UNBUNCHED`` cannot be used together with detectors defined in the experiment.
-- ``KernelCircuitBuilder.bandwidth_tuning`` is a placeholder in the current release.
 - Consider GPU acceleration via ``device=torch.device("cuda")`` for large datasets
 
 API reference
