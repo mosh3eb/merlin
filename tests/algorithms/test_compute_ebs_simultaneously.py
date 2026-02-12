@@ -78,13 +78,14 @@ class TestComputeEbsSimultaneously:
             input_size=0,
             circuit=self.circuit,
             n_photons=self.n_photons,
-            measurement_strategy=MeasurementStrategy.PROBABILITIES,
+            measurement_strategy=MeasurementStrategy.probs(
+                computation_space=ComputationSpace.UNBUNCHED
+            ),
             input_state=self.input_state_tensor,
             trainable_parameters=self.trainable_parameters,
             input_parameters=self.input_parameters,
             dtype=torch.float64,
             device=device,
-            computation_space=ComputationSpace.UNBUNCHED,
         )
         # Create computation process
         self.process = self.layer.computation_process
@@ -160,7 +161,6 @@ class TestComputeEbsSimultaneously:
             input_parameters=self.input_parameters,
             n_photons=self.n_photons,
             dtype=torch.float64,
-            no_bunching=True,
         )
 
         result = process_single.compute_ebs_simultaneously(
@@ -182,7 +182,6 @@ class TestComputeEbsSimultaneously:
             input_parameters=self.input_parameters,
             n_photons=self.n_photons,
             dtype=torch.float32,
-            no_bunching=True,
         )
 
         params_f32 = [p.to(torch.float32) for p in self.test_parameters]
@@ -225,7 +224,7 @@ class TestComputeEbsSimultaneously:
             input_parameters=self.input_parameters,
             n_photons=self.n_photons,
             dtype=torch.float64,
-            no_bunching=False,
+            computation_space=ComputationSpace.FOCK,
         )
 
         invalid_state = torch.rand(
@@ -249,7 +248,6 @@ class TestComputeEbsSimultaneously:
                 input_parameters=self.input_parameters,
                 n_photons=self.n_photons,
                 dtype=torch.float64,
-                no_bunching=True,
             )
             process_invalid.compute_ebs_simultaneously(
                 self.test_parameters, simultaneous_processes=1

@@ -31,7 +31,8 @@ import torch
 from torch import Tensor
 
 from ..builder.circuit_builder import ANGLE_ENCODING_MODE_ERROR, CircuitBuilder
-from ..core.generators import StateGenerator, StatePattern
+from ..core.computation_space import ComputationSpace
+from ..core.state import StatePattern, generate_state
 from ..measurement.autodiff import AutoDiffProcess
 from ..measurement.detectors import DetectorTransform, resolve_detectors
 from ..measurement.photon_loss import PhotonLossTransform, resolve_photon_loss
@@ -39,6 +40,7 @@ from ..pcvl_pytorch.locirc_to_tensor import CircuitConverter
 from ..pcvl_pytorch.slos_torchscript import (
     build_slos_distribution_computegraph as build_slos_graph,
 )
+from ..utils.deprecations import sanitize_parameters
 from ..utils.dtypes import to_torch_dtype
 from .module import MerlinModule
 
@@ -379,65 +381,84 @@ class FeatureMap:
         raise ValueError(error_msg)
 
     @classmethod
+    @sanitize_parameters
     def simple(
         cls,
         input_size: int,
-        n_modes: int,
-        n_photons: int | None = None,
         *,
         dtype: str | torch.dtype = torch.float32,
         device: torch.device | None = None,
         angle_encoding_scale: float = 1.0,
-        trainable: bool = True,
-        trainable_prefix: str = "phi",
+        n_modes: int = None,
     ) -> "FeatureMap":
         """
         Simple factory method to create a FeatureMap with minimal configuration.
 
         Args:
-            input_size: Classical feature dimension.
-            n_modes: Number of photonic modes used by the helper circuit.
+            input_size: Classical feature dimension. Maximum is 20.
             n_photons: Optional photon count (defaults to ``input_size``).
             dtype: Target dtype for internal tensors.
             device: Optional torch device handle.
             angle_encoding_scale: Global scaling applied to angle encoding features.
-            trainable: Whether to expose a trainable rotation layer.
-            trainable_prefix: Prefix used for the generated trainable parameter names.
+            n_modes: Number of photonic modes used by the helper circuit. If it is not defined: n_modes=input_size. Maximum is 20.
 
         Returns:
             FeatureMap: Configured feature-map instance.
         """
-        if n_photons is None:
-            n_photons = input_size
+        if n_modes is None:
+            n_modes = input_size
+        if input_size > 20 or n_modes > 20:
+            raise ValueError(
+                "Input size too large for the simple layer construction. For large inputs (with larger size than 20), please use the CircuitBuilder. Here is a quick tutorial on how to use it: https://merlinquantum.ai/quickstart/first_quantum_layer.html#circuitbuilder-walkthrough"
+            )
+        if input_size < 1:
+            raise ValueError(f"input_size must be at least 1, got {input_size}")
 
         if input_size > n_modes:
             raise ValueError(ANGLE_ENCODING_MODE_ERROR)
 
-        builder = CircuitBuilder(n_modes=n_modes)
+        if n_modes == 1:
+            builder = CircuitBuilder(n_modes=2)
 
-        builder.add_superpositions(depth=1)
-        input_modes = list(range(input_size))
+            # Trainable entangling layer before encoding
+            builder.add_entangling_layer(trainable=True, name="LI_simple")
 
-        builder.add_angle_encoding(
-            modes=input_modes,
-            name="input",
-            scale=angle_encoding_scale,
-        )
+            # Angle encoding
+            builder.add_angle_encoding(
+                modes=[1], name="input", subset_combinations=False
+            )
 
-        trainable_parameters: list[str] | None
-        if trainable:
-            builder.add_rotations(trainable=True, name=trainable_prefix)
-            trainable_parameters = [trainable_prefix]
+            # Trainable entangling layer after encoding
+            builder.add_entangling_layer(trainable=True, name="RI_simple")
+
         else:
-            trainable_parameters = None
+            builder = CircuitBuilder(n_modes=n_modes)
 
-        builder.add_superpositions(depth=1)
+            # Trainable entangling layer before encoding
+            builder.add_entangling_layer(
+                trainable=True,
+                name="LI_simple",
+            )
+
+            # Angle encoding
+            builder.add_angle_encoding(
+                modes=list(range(int(input_size))),
+                name="input",
+                subset_combinations=False,
+                scale=angle_encoding_scale,
+            )
+
+            # Trainable entangling layer after encoding
+            builder.add_entangling_layer(trainable=True, name="RI_simple")
 
         return cls(
             builder=builder,
             input_size=input_size,
             input_parameters=None,
-            trainable_parameters=trainable_parameters,
+            trainable_parameters=[
+                "LI_simple",
+                "RI_simple",
+            ],
             dtype=dtype,
             device=device,
         )
@@ -451,13 +472,12 @@ class KernelCircuitBuilder:
     with various configurations, inspired by the core.layer architecture.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._input_size: int | None = None
         self._n_modes: int | None = None
         self._n_photons: int | None = None
         self._dtype: str | torch.dtype = torch.float32
         self._device: torch.device | None = None
-        self._use_bandwidth_tuning: bool = False
         self._angle_encoding_scale: float = 1.0
         self._trainable: bool = True
         self._trainable_prefix: str = "phi"
@@ -497,11 +517,6 @@ class KernelCircuitBuilder:
     def device(self, device: torch.device) -> "KernelCircuitBuilder":
         """Set the computation device."""
         self._device = device
-        return self
-
-    def bandwidth_tuning(self, enabled: bool = True) -> "KernelCircuitBuilder":
-        """Enable or disable bandwidth tuning."""
-        self._use_bandwidth_tuning = enabled
         return self
 
     def angle_encoding(
@@ -559,13 +574,14 @@ class KernelCircuitBuilder:
             device=self._device,
         )
 
+    @sanitize_parameters
     def build_fidelity_kernel(
         self,
         input_state: list[int] | None = None,
         *,
         shots: int = 0,
         sampling_method: str = "multinomial",
-        no_bunching: bool = False,
+        computation_space: ComputationSpace | str | None = None,
         force_psd: bool = True,
     ) -> "FidelityKernel":
         """
@@ -574,7 +590,7 @@ class KernelCircuitBuilder:
         :param input_state: Input Fock state. If None, automatically generated
         :param shots: Number of sampling shots
         :param sampling_method: Sampling method for shots
-        :param no_bunching: Whether to exclude bunched states
+        :param computation_space: Logical computation subspace; one of {"fock", "unbunched", "dual_rail"}.
         :param force_psd: Whether to project to positive semi-definite
         :return: Configured FidelityKernel
         """
@@ -584,16 +600,14 @@ class KernelCircuitBuilder:
         if input_state is None:
             n_modes = self._n_modes or max(self._input_size or 2, 4)
             n_photons = self._n_photons or (self._input_size or 2)
-            input_state = StateGenerator.generate_state(
-                n_modes, n_photons, StatePattern.SPACED
-            )
+            input_state = list(generate_state(n_modes, n_photons, StatePattern.SPACED))
 
         return FidelityKernel(
             feature_map=feature_map,
             input_state=input_state,
             shots=shots,
             sampling_method=sampling_method,
-            no_bunching=no_bunching,
+            computation_space=computation_space,
             force_psd=force_psd,
             device=self._device,
             dtype=self._dtype,
@@ -621,8 +635,8 @@ class FidelityKernel(MerlinModule):
     :param sampling_method: Probability distributions are post-
         processed with some pseudo-sampling method: 'multinomial',
         'binomial' or 'gaussian'.
-    :param no_bunching: Whether or not to post-select out results with
-        bunching. Default: `False`.
+    :param computation_space: Logical computation subspace; one of
+        ``{"fock", "unbunched", "dual_rail"}``. Default: ``FOCK``.
     :param force_psd: Projects training kernel matrix to closest
         positive semi-definite. Default: `True`.
     :param device: Device on which to perform SLOS
@@ -639,7 +653,6 @@ class FidelityKernel(MerlinModule):
         >>> quantum_kernel = FidelityKernel(
         >>>     feature_map,
         >>>     input_state=[0, 4],
-        >>>     no_bunching=False,
         >>> )
         >>> # Construct the training & test kernel matrices
         >>> K_train = quantum_kernel(X_train)
@@ -654,6 +667,7 @@ class FidelityKernel(MerlinModule):
         >>> y_pred = svc.predict(K_test)
     """
 
+    @sanitize_parameters
     def __init__(
         self,
         feature_map: FeatureMap,
@@ -661,17 +675,22 @@ class FidelityKernel(MerlinModule):
         *,
         shots: int | None = None,
         sampling_method: str = "multinomial",
-        no_bunching: bool = False,
+        computation_space: ComputationSpace | str | None = None,
         force_psd: bool = True,
         device: torch.device | None = None,
         dtype: str | torch.dtype | None = None,
     ):
         super().__init__()
+        if computation_space is None:
+            computation_space = ComputationSpace.FOCK
+        else:
+            computation_space = ComputationSpace.coerce(computation_space)
+        self.computation_space = computation_space
         self.feature_map = feature_map
         self.input_state = input_state
         self.shots = shots or 0
         self.sampling_method = sampling_method
-        self.no_bunching = no_bunching
+        self.no_bunching = self.computation_space is not ComputationSpace.FOCK
         self.force_psd = force_psd
         base_device = device if device is not None else feature_map.device
         self.device = (
@@ -707,32 +726,36 @@ class FidelityKernel(MerlinModule):
                 "Experiment circuit must have the same number of modes as the feature map circuit."
             )
 
-        if max(input_state) > 1 and no_bunching:
+        if max(input_state) > 1 and self.computation_space is not ComputationSpace.FOCK:
             raise ValueError(
                 f"Bunching must be enabled for an input state with"
                 f"{max(input_state)} in one mode."
             )
-        elif all(x == 1 for x in input_state) and no_bunching:
+        elif (
+            all(x == 1 for x in input_state)
+            and self.computation_space is not ComputationSpace.FOCK
+        ):
             raise ValueError(
-                "For `no_bunching = True`, the kernel value will always be 1"
-                " for an input state with a photon in all modes."
+                "For non-FOCK computation_space, the kernel value will always be 1 "
+                "for an input state with a photon in all modes."
             )
 
         m, n = len(input_state), sum(input_state)
         self._detectors, self._empty_detectors = resolve_detectors(self.experiment, m)
 
-        # Verify that no Detector was defined in experiement if using no_bunching=True:
-        # TODO: change no_bunching check with computation_space check
-        # if not self._empty_detectors and not ComputationSpace.FOCK:
-        if not self._empty_detectors and no_bunching:
+        # Verify that no Detector was defined in experiment if using non-FOCK space:
+        if (
+            not self._empty_detectors
+            and self.computation_space is not ComputationSpace.FOCK
+        ):
             raise RuntimeError(
-                "no_bunching must be False if Experiment contains at least one Detector."
+                "computation_space must be FOCK if Experiment contains at least one Detector."
             )
 
         self._slos_graph = build_slos_graph(
             m=m,
             n_photons=n,
-            no_bunching=no_bunching,
+            computation_space=self.computation_space,
             keep_keys=True,
             device=device,
             dtype=self.dtype,
@@ -1012,48 +1035,50 @@ class FidelityKernel(MerlinModule):
         return value.item()
 
     @classmethod
+    @sanitize_parameters
     def simple(
         cls,
         input_size: int,
-        n_modes: int,
-        n_photons: int | None = None,
-        input_state: list[int] | None = None,
         *,
         shots: int = 0,
         sampling_method: str = "multinomial",
-        no_bunching: bool = False,
+        computation_space: ComputationSpace | str | None = None,
         force_psd: bool = True,
-        trainable: bool = True,
         dtype: str | torch.dtype = torch.float32,
         device: torch.device | None = None,
         angle_encoding_scale: float = 1.0,
+        n_modes: int = None,
     ) -> "FidelityKernel":
         """
         Simple factory method to create a FidelityKernel with minimal configuration.
         """
-        if n_photons is None:
-            n_photons = input_size
         feature_map = FeatureMap.simple(
             input_size=input_size,
             n_modes=n_modes,
-            n_photons=n_photons,
-            trainable=trainable,
             dtype=dtype,
             device=device,
             angle_encoding_scale=angle_encoding_scale,
         )
 
-        if input_state is None:
-            input_state = StateGenerator.generate_state(
-                n_modes, n_photons, StatePattern.SPACED
-            )
+        if n_modes is None:
+            state_size = input_size
+        else:
+            state_size = max(n_modes, input_size)
+
+        if state_size == 1:
+            input_state = [0, 1]
+        else:
+            input_state = state_size * [0]
+            for i in range(state_size):
+                if i % 2 == 1:
+                    input_state[i] = 1
 
         return cls(
             feature_map=feature_map,
             input_state=input_state,
             shots=shots,
             sampling_method=sampling_method,
-            no_bunching=no_bunching,
+            computation_space=computation_space,
             force_psd=force_psd,
             device=device,
             dtype=dtype,

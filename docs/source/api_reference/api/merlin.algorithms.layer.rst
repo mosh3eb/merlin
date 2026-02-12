@@ -22,7 +22,6 @@ Example: Quickstart QuantumLayer
 
     simple_layer = QuantumLayer.simple(
         input_size=4,
-        n_params=120,
     )
 
     model = nn.Sequential(
@@ -43,12 +42,10 @@ Example: Quickstart QuantumLayer
    :width: 600px
    :align: center
 
-The simple quantum layer above implements a circuit of 10 modes and 5 photons with at least 90 trainable parameters. This circuit is made of:
-- A first entangling layer (trainable)
-- Angle encoding on the first N modes (for N input parameters with `input_size <= n_modes`)
-- Add MZI blocks (two trainable parameters each) to match the requested number of trainable parameters
-
-Additional trainable budget must therefore increase in multiples of two beyond the base interferometer (90 parameters).
+The simple quantum layer above implements a circuit of (input_size) modes and (input_size//2) photons. This circuit is made of:
+- A fully trainable entangling layer acting on all modes;
+- A full input encoding layer spanning all encoded features;
+- A fully trainable entangling layer acting on all modes.
 
 Example: Declarative builder API
 --------------------------------
@@ -68,7 +65,7 @@ Example: Declarative builder API
         input_size=4,
         builder=builder,
         n_photons=3,  # is equivalent to input_state=[1,1,1,0,0,0]
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(),
     )
 
     model = nn.Sequential(
@@ -129,7 +126,7 @@ Example: Manual Perceval circuit (more control)
         input_state=[1, 0, 1, 0, 1, 0],
         trainable_parameters=["theta"],
         input_parameters=["input"],
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(),
     )
 
     model = nn.Sequential(
@@ -143,6 +140,8 @@ Example: Manual Perceval circuit (more control)
    :width: 600px
    :align: center
 
+Here, the grouping can also be directly added to the ``MeasurementStrategy`` object used in the ``measurement_strategy`` parameter.
+
 See the User guide and Notebooks for more advanced usage and training routines !
 
 Input states and amplitude encoding
@@ -155,8 +154,13 @@ following representations:
 
 * :class:`perceval.BasicState` – a single configuration such as ``pcvl.BasicState([1, 0, 1, 0])``;
 * :class:`perceval.StateVector` – an arbitrary superposition of basic states with complex amplitudes;
-* **Deprecated**: Python lists, e.g. ``[1, 0, 1, 0]``. Lists are still recognised for backward compatibility but are
-  immediately converted to their Perceval counterparts—new code should build explicit ``BasicState`` objects.
+* Python lists/tuples, e.g. ``[1, 0, 1, 0]``. These are accepted as convenience inputs and are immediately converted
+    to a Perceval :class:`perceval.BasicState`.
+
+.. note::
+
+     For Fock/occupation inputs, :class:`~merlin.algorithms.layer.QuantumLayer` stores ``.input_state`` as a Perceval
+     :class:`perceval.BasicState`. If you need the raw occupation vector, use ``list(layer.input_state)``.
 
 When ``input_state`` is passed, the layer always injects that photonic state. In more elaborate pipelines you may want
 to cascade circuits and let the output amplitudes of the previous layer become the input state of the next. Merlin
@@ -173,6 +177,7 @@ The snippet below prepares a dual-rail Bell state as the initial condition and e
     from merlin.algorithms.layer import QuantumLayer
     from merlin.core import ComputationSpace
     from merlin.measurement.strategies import MeasurementStrategy
+    from merlin.measurement.
 
     circuit = pcvl.Unitary(pcvl.Matrix.random_unitary(4))  # some haar-random 4-mode circuit
 
@@ -185,8 +190,7 @@ The snippet below prepares a dual-rail Bell state as the initial condition and e
         circuit=circuit,
         n_photons=2,
         input_state=bell,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
-        computation_space=ComputationSpace.DUAL_RAIL,
+        measurement_strategy=MeasurementStrategy.probs(computation_space=ComputationSpace.DUAL_RAIL),
     )
 
     x = torch.rand(10, circuit.m)  # batch of classical parameters
@@ -200,7 +204,7 @@ For comparison, the ``amplitude_encoding`` variant supplies the photonic state d
     import torch
     import perceval as pcvl
     from merlin.algorithms.layer import QuantumLayer
-    from merlin.core import ComputationSpace
+    from merlin.core import MeasurementStrategy,ComputationSpace
 
     circuit = pcvl.Circuit(3)
 
@@ -208,7 +212,7 @@ For comparison, the ``amplitude_encoding`` variant supplies the photonic state d
         circuit=circuit,
         n_photons=2,
         amplitude_encoding=True,
-        computation_space=ComputationSpace.UNBUNCHED,
+        measurement_strategy=MeasurementStrategy.probs(computation_space=ComputationSpace.UNBUNCHED),
         dtype=torch.cdouble,
     )
 
@@ -223,3 +227,66 @@ For comparison, the ``amplitude_encoding`` variant supplies the photonic state d
 In the first example the circuit always starts from ``bell``; in the second, each row of ``prepared_states`` represents a
 different logical photonic state that flows through the layer. This separation allows you to mix classical angle
 encoding with fully quantum, amplitude-based data pipelines.
+
+
+Returning typed objects
+-------------------------
+
+When ``return_object`` is set to True, the output of a ``forward()`` call depends of the ``measurement_strategy``. By default,
+it is set to False. See the following output matrix to size what to expect as the return of a forward call.
+
+|   measurement_strategy   |  return_object=False   |  return_object=True       |
+|   :-------------------   |  :------------------   |  :----------------:       |
+|   AMPLTITUDES            |  torch.Tensor          |  StateVector              |
+|   PROBABILITIES          |  torch.Tensor          |  ProbabilityDistribution  |
+|   PARTIAL_MEASUREMENT    |  PartialMeasurement    |  PartialMeasurement       |
+|   MODE_EXPECTATIONS      |  torch.Tensor          |  torch.Tensor             |
+
+Most of the typed objects can give the ``torch.Tensor`` as an output with the ``.tensor`` parameter. Only the 
+PartialMeasurement object is a little different. See its according documentation.
+
+These object could be quite useful to access metadata like the number of photons, modes and measurement_strategy behind the output tensors. For example, a better access to specific
+states is available with ``StateVector`` and ``ProbabilityDistribution`` by indexing the desired state. The objects also have an interoperability
+with Perceval making it easy interations to have an easy crossplay between the two libraries.
+
+For more information on the typed output capabilities, follow the following links:
+- ``StateVector`` : :doc:`/api_reference/api/merlin.algorithms.core.state_vector`
+- ``ProbabilityDistribution`` : :doc:`/api_reference/api/merlin.algorithms.core.probability_distribution`
+- ``PartialMeasurement`` : :doc:`/api_reference/api/merlin.algorithms.core.partial_measurement`
+
+The snippet below prepares a basic quantum layer and returns a ``ProbabilityDistribution`` object:
+
+.. code-block:: python
+
+    import torch
+    import perceval as pcvl
+    from merlin.algorithms.layer import QuantumLayer
+    from merlin.core import ComputationSpace
+    from merlin.measurement.strategies import MeasurementStrategy
+    from merlin import ProbabilityDistribution
+
+    circuit = pcvl.Unitary(pcvl.Matrix.random_unitary(4))  # some haar-random 4-mode circuit
+
+    bell = pcvl.StateVector()
+    bell += pcvl.BasicState([1, 0, 1, 0])
+    bell += pcvl.BasicState([0, 1, 0, 1])
+    print(bell) # bell is a state vector of 2 photons in 4 modes
+
+    layer = QuantumLayer(
+        circuit=circuit,
+        n_photons=2,
+        input_state=bell,
+        measurement_strategy=MeasurementStrategy.probs(computation_space=ComputationSpace.DUAL_RAIL),
+        return_object=True,
+    )
+
+    x = torch.rand(10, circuit.m)  # batch of classical parameters
+    probs = layer(x)
+    assert isinstance(probs,ProbabilityDistribution)
+    assert isinstance(probs.tensor,torch.Tensor)
+
+Deprecations
+-------------------------
+.. warning:: *Deprecated since version 0.3:*
+   The use of the ``no_bunching`` flag  is deprecated and is removed since version 0.3.0.
+   Use the ``computation_space`` flag inside ``measurement_strategy`` instead. See :doc:`/user_guide/migration_guide`.

@@ -103,7 +103,7 @@ result to :class:`~merlin.algorithms.layer.QuantumLayer`.
         input_size=X_train.shape[1],
         builder=builder,
         n_photons=3,                             # 3 photons evenly distributed on 6 modes
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(),
     )
 
     model = nn.Sequential(
@@ -136,8 +136,8 @@ that best matches the rest of your model.
 .. code-block:: python
 
     strategies = {
-        "probabilities": MeasurementStrategy.PROBABILITIES,
-        "mode_expectations": MeasurementStrategy.MODE_EXPECTATIONS,
+        "probabilities": MeasurementStrategy.probs(),
+        "mode_expectations": MeasurementStrategy.mode_expectations(),
     }
 
     for label, strategy in strategies.items():
@@ -159,7 +159,7 @@ that best matches the rest of your model.
         input_size=X_train.shape[1],
         builder=builder,
         n_photons=3,
-        measurement_strategy=MeasurementStrategy.AMPLITUDES,
+        measurement_strategy=MeasurementStrategy.amplitudes(),
     )
     class ComplexToReal(nn.Module):
         def forward(self, x):
@@ -178,20 +178,19 @@ that best matches the rest of your model.
 Measurement strategy tips
 -------------------------
 
-- ``PROBABILITIES`` returns the Fock state probability distribution – Ideal for attaching dense classical heads, simple linear probings or grouping strategies.
-- ``MODE_EXPECTATIONS`` compresses the outputs to one value per mode, reducing the
+- ``MeasurementStrategy.probs()`` returns the Fock state probability distribution – Ideal for attaching dense classical heads, simple linear probings or grouping strategies.
+- ``MeasurementStrategy.mode_expectations()`` compresses the outputs to one value per mode, reducing the
   number of classical weights you need downstream.
-- ``AMPLITUDES`` yields tensors with complex values and is restricted to noiseless simulations without detectors. Convert them with ``torch.view_as_real`` or flatten real/imaginary parts before feeding the data to classical layers.
+- ``MeasurementStrategy.amplitudes()`` yields tensors with complex values and is restricted to noiseless simulations without detectors. Convert them with ``torch.view_as_real`` or flatten real/imaginary parts before feeding the data to classical layers.
 
 More informations on measurement strategies can be found here: :doc:`../user_guide/measurement_strategy`.
 
 Choosing a computation space
 ============================
 
-The ``computation_space`` parameter controls how Perceval truncates the Fock space. If
-you omit it, MerLin falls back to ``ComputationSpace.FOCK`` (or ``UNBUNCHED`` when the
-legacy ``no_bunching`` flag is active). Override the default when you need explicit
-control:
+The ``computation_space`` parameter is not recommended, it will be deprecated in the future. Instead, define the computation_space,
+how Perceval truncates the Fock space, in the MeasurementStrategy chosen. By default the computation space is the ``ComputationSpace.UNBUNCHED``.
+Override the default when you need explicit control:
 
 .. code-block:: python
 
@@ -201,21 +200,21 @@ control:
         input_size=X_train.shape[1],
         builder=builder,
         n_photons=3,
-        computation_space=ComputationSpace.FOCK,       # Full Fock basis
+        measurement_strategy=MeasurementStrategy.probs(ComputationSpace.FOCK),       # Full Fock basis
     )
 
     unbunched_layer = QuantumLayer(
         input_size=X_train.shape[1],
         builder=builder,
         n_photons=3,
-        computation_space=ComputationSpace.UNBUNCHED,  # Forbid multiple photons per mode
+        measurement_strategy=MeasurementStrategy.probs(ComputationSpace.UNBUNCHED),  # Forbid multiple photons per mode
     )
 
     dual_rail_layer = QuantumLayer(
         input_size=X_train.shape[1],
         builder=builder,
         n_photons=3,
-        computation_space=ComputationSpace.DUAL_RAIL,  # Pair modes to encode qubits
+        measurement_strategy=MeasurementStrategy.probs(ComputationSpace.DUAL_RAIL),  # Pair modes to encode qubits
     )
 
 - ``FOCK`` keeps the entire combinatorial space of the declared photons.
@@ -247,7 +246,7 @@ of truth for measurement semantics.
         experiment=experiment,
         input_state=[1, 1, 1, 0, 0, 0],
         input_parameters=["input"],
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(),
     )
 
     model_with_noise = nn.Sequential(
@@ -261,7 +260,7 @@ of truth for measurement semantics.
 Experiment notes
 ----------------
 
-- Attaching detectors or photon-loss models disables ``MeasurementStrategy.AMPLITUDES``
+- Attaching detectors or photon-loss models disables ``MeasurementStrategy.amplitudes()``
   because amplitudes are no longer observable.
 - ``input_parameters`` must match the prefixes emitted by ``add_angle_encoding`` (``"input"`` in this example).
 - You can reuse the same experiment across multiple layers or kernel feature maps to
@@ -272,6 +271,7 @@ Next steps
 
 - Swap out ``builder.add_superpositions`` or introduce additional entangling layers to
   explore deeper circuits.
+- Set ``return_object`` to True to get a more detailed object as a result of a forward call. Take a look at :doc:`../api_reference/api/merlin.algorithms.layer` for more details about returned typed objects.
 - Combine :class:`~merlin.utils.grouping.LexGrouping` or :class:`~merlin.utils.grouping.ModGrouping` modules to tailor the classical feature
   count to your downstream model.
 - Re-run the experiments with alternative computation spaces to benchmark accuracy vs.

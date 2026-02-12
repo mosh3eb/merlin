@@ -7,6 +7,7 @@ from itertools import combinations
 import torch
 from _helpers import make_layer, spin_until
 
+from merlin.core.computation_space import ComputationSpace
 from merlin.core.merlin_processor import MerlinProcessor
 
 
@@ -29,7 +30,7 @@ class TestPerCallRemoteProcessorPooling:
         and that pool-based parallelism is correctly bounded per forward call.
         """
         # Make a layer that offloads
-        q = make_layer(6, 2, input_size=2, no_bunching=True)
+        q = make_layer(6, 2, input_size=2, computation_space=ComputationSpace.UNBUNCHED)
         # Shape: B=7 -> with microbatch_size=2 we get chunks: [0:2],[2:4],[4:6],[6:7] = 4 chunks
         B = 7
         microbatch_size = 2
@@ -81,7 +82,7 @@ class TestPerCallRemoteProcessorPooling:
           - All complete successfully.
           - Their job_ids sets are disjoint (strong sign of per-call isolation).
         """
-        q = make_layer(6, 2, input_size=2, no_bunching=True)
+        q = make_layer(6, 2, input_size=2, computation_space=ComputationSpace.UNBUNCHED)
         # Small batches so each call still chunks at least a little when we set microbatch_size low.
         Xs = [torch.rand(5, 2) for _ in range(3)]
 

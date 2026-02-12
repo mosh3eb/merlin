@@ -33,7 +33,9 @@ def _basis_states(n_modes: int, n_photons: int) -> list[tuple[int, ...]]:
             input_size=0,
             circuit=pcvl.Circuit(n_modes),
             n_photons=n_photons,
-            computation_space=ComputationSpace.FOCK,
+            measurement_strategy=MeasurementStrategy.probs(
+                computation_space=ComputationSpace.FOCK
+            ),
         )
         _BASIS_CACHE[cache_key] = layer.computation_process.simulation_graph.mapped_keys
     return _BASIS_CACHE[cache_key]
@@ -193,7 +195,7 @@ def test_feedforward_block2_amplitude_strategy_matches_probabilities():
     block_amp = FeedForwardBlock(
         exp,
         input_state=input_state,
-        measurement_strategy=MeasurementStrategy.AMPLITUDES,
+        measurement_strategy=MeasurementStrategy.NONE,
     )
 
     prob_outputs = block_prob()
@@ -234,7 +236,9 @@ def test_feedforward_block2_mode_expectations():
     block_expect = FeedForwardBlock(
         exp,
         input_state=input_state,
-        measurement_strategy=MeasurementStrategy.MODE_EXPECTATIONS,
+        measurement_strategy=MeasurementStrategy.mode_expectations(
+            ComputationSpace.UNBUNCHED
+        ),
     )
 
     prob_outputs = block_prob()

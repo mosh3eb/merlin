@@ -37,12 +37,11 @@ def make_layer():
         params = {
             "circuit": circuit,
             "n_photons": 1,
-            "measurement_strategy": MeasurementStrategy.AMPLITUDES,
+            "measurement_strategy": MeasurementStrategy.NONE,
             "trainable_parameters": ["phi"],
             "input_parameters": [],
             "dtype": torch.float32,
             "amplitude_encoding": True,
-            "computation_space": ComputationSpace.UNBUNCHED,
         }
         params.update(overrides)
         if not params.get("amplitude_encoding", False):
@@ -108,9 +107,8 @@ def test_amplitude_encoding_output_matches_computation_space(
     layer = QuantumLayer(
         circuit=circuit,
         n_photons=n_photons,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(computation_space=space),
         amplitude_encoding=True,
-        computation_space=space,
         trainable_parameters=["phi"],
         input_parameters=[],
         dtype=torch.float32,
@@ -142,9 +140,8 @@ def test_amplitude_encoding_gradients_follow_computation_space(
     layer = QuantumLayer(
         circuit=circuit,
         n_photons=n_photons,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(computation_space=space),
         amplitude_encoding=True,
-        computation_space=space,
         trainable_parameters=["phi"],
         input_parameters=[],
         dtype=torch.float32,
@@ -194,9 +191,8 @@ def test_amplitude_encoding_gpu_roundtrip(
     layer = QuantumLayer(
         circuit=circuit,
         n_photons=n_photons,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(computation_space=space),
         amplitude_encoding=True,
-        computation_space=space,
         trainable_parameters=["phi"],
         input_parameters=[],
         dtype=torch.float32,
@@ -289,32 +285,23 @@ def test_amplitude_encoding_validates_dimension(make_layer):
 
 def test_computation_space_selector(make_layer):
     layer_fock = make_layer(
-        amplitude_encoding=False, computation_space=ComputationSpace.FOCK
+        amplitude_encoding=False,
+        measurement_strategy=MeasurementStrategy.amplitudes(
+            computation_space=ComputationSpace.FOCK
+        ),
     )
     assert layer_fock.computation_space is ComputationSpace.FOCK
 
     layer_nb = make_layer(
-        amplitude_encoding=False, computation_space=ComputationSpace.UNBUNCHED
+        amplitude_encoding=False,
+        measurement_strategy=MeasurementStrategy.amplitudes(
+            computation_space=ComputationSpace.UNBUNCHED
+        ),
     )
     assert layer_nb.computation_space is ComputationSpace.UNBUNCHED
 
     with pytest.raises(ValueError):
-        make_layer(amplitude_encoding=False, computation_space="invalid")
-
-    with warnings.catch_warnings(record=True) as caught:
-        # don't fail because of the DeprecationWarning
-        warnings.filterwarnings("default", category=DeprecationWarning)
-        with pytest.raises(
-            ValueError,
-            match="Incompatible 'no_bunching' value with selected 'computation_space'.",
-        ):
-            make_layer(
-                amplitude_encoding=False,
-                computation_space=ComputationSpace.FOCK,
-                no_bunching=True,
-            )
-    # and a warning should also be raised about no_bunching being deprecated
-    assert len(caught) == 1
+        ComputationSpace.coerce("invalid")
 
 
 def test_computation_space_consistency_no_warning(make_layer):
@@ -322,17 +309,17 @@ def test_computation_space_consistency_no_warning(make_layer):
         warnings.simplefilter("always")
         layer = make_layer(
             amplitude_encoding=False,
-            computation_space=ComputationSpace.UNBUNCHED,
-            no_bunching=True,
+            measurement_strategy=MeasurementStrategy.amplitudes(
+                computation_space=ComputationSpace.UNBUNCHED
+            ),
         )
 
     assert layer.computation_space is ComputationSpace.UNBUNCHED
-    # warning will be generated because no_bunching is deprecated, but not about inconsistency
-    assert caught != []
+    assert caught == []
 
 
 def test_amplitude_encoding_probabilities_strategy(make_layer):
-    layer = make_layer(measurement_strategy=MeasurementStrategy.PROBABILITIES)
+    layer = make_layer(measurement_strategy=MeasurementStrategy.probs())
     num_states = len(layer.computation_process.simulation_graph.mapped_keys)
     raw_amplitude = torch.arange(1, num_states + 1, dtype=torch.float32)
 
@@ -360,13 +347,14 @@ def test_mapped_keys_no_bunching_space():
     layer = QuantumLayer(
         circuit=circuit,
         n_photons=n_photons,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(
+            computation_space=ComputationSpace.UNBUNCHED
+        ),
         input_state=input_state,
         trainable_parameters=["phi"],
         input_parameters=[],
         dtype=torch.float32,
         amplitude_encoding=True,
-        computation_space=ComputationSpace.UNBUNCHED,
     )
 
     mapped_keys = layer.output_keys
@@ -388,13 +376,14 @@ def test_mapped_keys_fock_space():
     layer = QuantumLayer(
         circuit=circuit,
         n_photons=n_photons,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(
+            computation_space=ComputationSpace.FOCK
+        ),
         input_state=input_state,
         trainable_parameters=["phi"],
         input_parameters=[],
         dtype=torch.float32,
         amplitude_encoding=True,
-        computation_space=ComputationSpace.FOCK,
     )
 
     mapped_keys = layer.output_keys
@@ -416,13 +405,14 @@ def test_mapped_keys_dual_rail_space():
     layer = QuantumLayer(
         circuit=circuit,
         n_photons=n_photons,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(
+            computation_space=ComputationSpace.DUAL_RAIL
+        ),
         input_state=input_state,
         trainable_parameters=["phi"],
         input_parameters=[],
         dtype=torch.float32,
         amplitude_encoding=True,
-        computation_space=ComputationSpace.DUAL_RAIL,
     )
 
     mapped_keys = layer.output_keys
@@ -450,13 +440,14 @@ def test_ebs_batches_group_fock_states(computation_space: ComputationSpace):
     layer = QuantumLayer(
         circuit=circuit,
         n_photons=n_photons,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(
+            computation_space=computation_space
+        ),
         input_state=None,
         trainable_parameters=["phi"],
         input_parameters=[],
         dtype=torch.float32,
         amplitude_encoding=True,
-        computation_space=computation_space,
     )
 
     expected_states = layer.input_size
@@ -501,7 +492,7 @@ def test_amplitude_encoding_input_size(
         circuit=circuit,
         n_photons=n_photons,
         amplitude_encoding=True,
-        computation_space=space,
+        measurement_strategy=MeasurementStrategy.probs(computation_space=space),
     )
 
     assert layer.input_size == expected_size
@@ -543,7 +534,9 @@ def test_dual_rail_requires_even_mode_count():
             circuit=circuit,
             n_photons=2,
             amplitude_encoding=True,
-            computation_space=ComputationSpace.DUAL_RAIL,
+            measurement_strategy=MeasurementStrategy.probs(
+                computation_space=ComputationSpace.DUAL_RAIL
+            ),
         )
 
 
@@ -554,7 +547,9 @@ def test_dual_rail_rejects_incorrect_amplitude_length():
         circuit=circuit,
         n_photons=n_photons,
         amplitude_encoding=True,
-        computation_space=ComputationSpace.DUAL_RAIL,
+        measurement_strategy=MeasurementStrategy.probs(
+            computation_space=ComputationSpace.DUAL_RAIL
+        ),
     )
     invalid = torch.rand((2**n_photons) + 1, dtype=torch.float32)
 
@@ -574,9 +569,10 @@ def test_amplitude_encoding_superposition_matches_basis_sum():
     layer = QuantumLayer(
         circuit=circuit,
         n_photons=n_photons,
-        measurement_strategy=MeasurementStrategy.AMPLITUDES,
+        measurement_strategy=MeasurementStrategy.amplitudes(
+            computation_space=ComputationSpace.DUAL_RAIL
+        ),
         amplitude_encoding=True,
-        computation_space=ComputationSpace.DUAL_RAIL,
     )
 
     basis_indices = [0, 1, 2]
@@ -619,10 +615,12 @@ def test_ebs_wrt_quantumlayer(
     # define circuit
     circuit = pcvl.GenericInterferometer(
         m,
-        lambda i: pcvl.BS()
-        // pcvl.PS(phi=np.pi / 4 * i)
-        // pcvl.BS()
-        // pcvl.PS(phi=np.pi / 8 * i),
+        lambda i: (
+            pcvl.BS()
+            // pcvl.PS(phi=np.pi / 4 * i)
+            // pcvl.BS()
+            // pcvl.PS(phi=np.pi / 8 * i)
+        ),
         shape=pcvl.InterferometerShape.RECTANGLE,
     )
     n_photons = m // 2
@@ -630,9 +628,10 @@ def test_ebs_wrt_quantumlayer(
     ebs_layer = QuantumLayer(
         circuit=circuit,
         n_photons=n_photons,
-        measurement_strategy=MeasurementStrategy.AMPLITUDES,
+        measurement_strategy=MeasurementStrategy.amplitudes(
+            computation_space=computation_space
+        ),
         amplitude_encoding=True,
-        computation_space=computation_space,
     )
 
     num_states = len(ebs_layer.output_keys)
@@ -664,10 +663,11 @@ def test_ebs_wrt_quantumlayer(
             single_layer = QuantumLayer(
                 circuit=copy.deepcopy(circuit),
                 n_photons=n_photons,
-                measurement_strategy=MeasurementStrategy.AMPLITUDES,
+                measurement_strategy=MeasurementStrategy.amplitudes(
+                    computation_space=computation_space
+                ),
                 input_state=list(state),
                 amplitude_encoding=False,
-                computation_space=computation_space,
             )
 
             single_layer.load_state_dict(shared_state, strict=False)

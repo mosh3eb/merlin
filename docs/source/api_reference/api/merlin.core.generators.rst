@@ -1,7 +1,7 @@
-merlin.core.generators module
-=============================
+merlin.core.generators module (removed)
+======================================
 
-.. automodule:: merlin.core.generators
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. warning:: *Deprecated since version 0.3:*
+    This module has been removed.
+    Use :mod:`merlin.core.state` for input-state helpers and :class:`~merlin.builder.circuit_builder.CircuitBuilder`
+    to build circuits.

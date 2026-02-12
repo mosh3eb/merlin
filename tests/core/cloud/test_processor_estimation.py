@@ -7,12 +7,13 @@ import pytest
 import torch
 from _helpers import make_layer
 
+from merlin.core.computation_space import ComputationSpace
 from merlin.core.merlin_processor import MerlinProcessor
 
 
 class TestShotEstimation:
     def test_single_and_batch_estimates(self, remote_processor):
-        q = make_layer(6, 2, 2, no_bunching=True)
+        q = make_layer(6, 2, 2, computation_space=ComputationSpace.UNBUNCHED)
         proc = MerlinProcessor(remote_processor)
 
         est_single = proc.estimate_required_shots_per_input(
@@ -36,7 +37,7 @@ class TestShotEstimation:
         )
 
     def test_monotonic_with_desired_samples(self, remote_processor):
-        q = make_layer(5, 2, 2, no_bunching=True)
+        q = make_layer(5, 2, 2, computation_space=ComputationSpace.UNBUNCHED)
         proc = MerlinProcessor(remote_processor)
         X = torch.rand(4, 2)
         lo = proc.estimate_required_shots_per_input(
@@ -50,7 +51,7 @@ class TestShotEstimation:
             assert b >= a  # larger target -> requires >= shots
 
     def test_no_jobs_created(self, remote_processor):
-        q = make_layer(6, 2, 2, no_bunching=True)
+        q = make_layer(6, 2, 2, computation_space=ComputationSpace.UNBUNCHED)
         proc = MerlinProcessor(remote_processor)
         before = len(proc.get_job_history())
         _ = proc.estimate_required_shots_per_input(
@@ -62,28 +63,28 @@ class TestShotEstimation:
 
 class TestOutputAndExport:
     @pytest.mark.parametrize(
-        "m,n,input_size,no_bunching,expected",
+        "m,n,input_size,computation_space,expected",
         [
-            (4, 2, 2, True, 6),
-            (4, 2, 2, False, 10),
-            (5, 3, 3, True, 10),
-            (5, 3, 3, False, 35),
-            (6, 2, 2, True, 15),
+            (4, 2, 2, ComputationSpace.UNBUNCHED, 6),
+            (4, 2, 2, ComputationSpace.FOCK, 10),
+            (5, 3, 3, ComputationSpace.UNBUNCHED, 10),
+            (5, 3, 3, ComputationSpace.FOCK, 35),
+            (6, 2, 2, ComputationSpace.UNBUNCHED, 15),
         ],
     )
-    def test_local_distribution_size(self, m, n, input_size, no_bunching, expected):
-        q = make_layer(m, n, input_size, no_bunching=no_bunching)
+    def test_local_distribution_size(self, m, n, input_size, computation_space, expected):
+        q = make_layer(m, n, input_size, computation_space=computation_space)
         y = q(torch.rand(3, input_size))
         assert y.shape == (3, expected)
         assert torch.allclose(y.sum(dim=1), torch.ones(3), atol=1e-5)
 
     def test_cloud_distribution_size_matches(self, remote_processor):
-        q = make_layer(6, 2, 2, no_bunching=True)
+        q = make_layer(6, 2, 2, computation_space=ComputationSpace.UNBUNCHED)
         y = MerlinProcessor(remote_processor).forward(q, torch.rand(4, 2), nsample=2000)
         assert y.shape == (4, comb(6, 2))
 
     def test_export_config_includes_trained_thetas(self):
-        q = make_layer(5, 3, 3, no_bunching=True, trainable=True)
+        q = make_layer(5, 3, 3, computation_space=ComputationSpace.UNBUNCHED, trainable=True)
         before = {n: p.clone() for n, p in q.named_parameters()}
         q.train()
         opt = torch.optim.Adam(q.parameters(), lr=0.05)

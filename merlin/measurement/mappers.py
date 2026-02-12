@@ -33,7 +33,11 @@ import torch.nn as nn
 
 from merlin.core import ComputationSpace
 
-from .strategies import MeasurementStrategy
+from .strategies import (
+    MeasurementKind,
+    MeasurementStrategyLike,
+    _resolve_measurement_kind,
+)
 
 
 class OutputMapper:
@@ -46,19 +50,20 @@ class OutputMapper:
 
     @staticmethod
     def create_mapping(
-        strategy: MeasurementStrategy,
+        strategy: MeasurementStrategyLike,
         computation_space: ComputationSpace = ComputationSpace.FOCK,
         keys: list[tuple[int, ...]] | None = None,
+        dtype: torch.dtype | None = None,
     ):
         """
         Create an output mapping based on the specified strategy.
 
         Args:
             strategy: The measurement mapping strategy to use
-            no_bunching: (Only used for ModeExpectations measurement strategy) If True (default), the per-mode probability of finding at least one photon is returned.
-                         Otherwise, it is the per-mode expected number of photons that is returned.
+            computation_space: The computation space for the measurement.
             keys: (Only used for ModeExpectations measurement strategy) List of tuples that represent the possible quantum Fock states.
                   For example, keys = [(0,1,0,2), (1,0,1,0), ...]
+            dtype: Target dtype for internal tensors. Defaults to torch.float32.
 
         Returns:
             A PyTorch module that maps the per state amplitudes or probabilities to the desired format.
@@ -66,15 +71,19 @@ class OutputMapper:
         Raises:
             ValueError: If strategy is unknown
         """
-        if strategy == MeasurementStrategy.PROBABILITIES:
+        try:
+            kind = _resolve_measurement_kind(strategy)
+        except TypeError as exc:
+            raise ValueError(f"Unknown measurement strategy: {strategy}") from exc
+        if kind == MeasurementKind.PROBABILITIES:
             return Probabilities()
-        elif strategy == MeasurementStrategy.MODE_EXPECTATIONS:
+        elif kind == MeasurementKind.MODE_EXPECTATIONS:
             if keys is None:
                 raise ValueError(
                     "When using ModeExpectations measurement strategy, keys must be provided."
                 )
-            return ModeExpectations(computation_space, keys)
-        elif strategy == MeasurementStrategy.AMPLITUDES:
+            return ModeExpectations(computation_space, keys, dtype=dtype)
+        elif kind == MeasurementKind.AMPLITUDES:
             return Amplitudes()
         else:
             raise ValueError(f"Unknown measurement strategy: {strategy}")
@@ -116,15 +125,19 @@ class ModeExpectations(nn.Module):
     """Maps quantum state amplitudes or probabilities to the per mode expected number of photons."""
 
     def __init__(
-        self, computation_space: ComputationSpace, keys: list[tuple[int, ...]]
+        self,
+        computation_space: ComputationSpace,
+        keys: list[tuple[int, ...]],
+        *,
+        dtype: torch.dtype | None = None,
     ):
         """Initialize the expectation grouping mapper.
 
         Args:
-            no_bunching: If True (default), the per-mode probability of finding at least one photon is returned.
-                         Otherwise, it is the per-mode expected number of photons that is returned.
+            computation_space: The computation space (FOCK, UNBUNCHED, DUAL_RAIL).
             keys: List of tuples describing the possible Fock states output from the circuit preceding the output
                   mapping. e.g., [(0,1,0,2), (1,0,1,0), ...]
+            dtype: Target dtype for internal tensors. Defaults to torch.float32.
         """
         super().__init__()
         self.computation_space = computation_space
@@ -136,15 +149,18 @@ class ModeExpectations(nn.Module):
         if len({len(key) for key in keys}) > 1:
             raise ValueError("All keys must have the same length (number of modes)")
 
+        # Resolve dtype (default to float32 for backward compatibility)
+        resolved_dtype = dtype if dtype is not None else torch.float32
+
         # Create mask and register as buffer
         keys_tensor = torch.tensor(keys, dtype=torch.long)
         if computation_space in {
             ComputationSpace.UNBUNCHED,
             ComputationSpace.DUAL_RAIL,
         }:
-            mask = (keys_tensor >= 1).T.float()
+            mask = (keys_tensor >= 1).T.to(dtype=resolved_dtype)
         else:
-            mask = keys_tensor.T.float()
+            mask = keys_tensor.T.to(dtype=resolved_dtype)
 
         # Make the expected type explicit for static analysers.
         self.mask: torch.Tensor

@@ -83,7 +83,7 @@ def test_builder_api_pipeline_on_iris(iris_batch):
         input_size=features.shape[1],
         builder=builder,
         n_photons=5,
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(),
         dtype=features.dtype,
     )
     pcvl.pdisplay(layer.computation_process.circuit, output_format=pcvl.Format.TEXT)
@@ -114,10 +114,12 @@ def test_manual_pcvl_circuit_pipeline_on_iris(iris_batch):
 
     wl = pcvl.GenericInterferometer(
         4,
-        lambda i: pcvl.BS()
-        // pcvl.PS(pcvl.P(f"theta_li{i}"))
-        // pcvl.BS()
-        // pcvl.PS(pcvl.P(f"theta_lo{i}")),
+        lambda i: (
+            pcvl.BS()
+            // pcvl.PS(pcvl.P(f"theta_li{i}"))
+            // pcvl.BS()
+            // pcvl.PS(pcvl.P(f"theta_lo{i}"))
+        ),
         shape=pcvl.InterferometerShape.RECTANGLE,
     )
     circuit = pcvl.Circuit(4)
@@ -127,10 +129,12 @@ def test_manual_pcvl_circuit_pipeline_on_iris(iris_batch):
 
     wr = pcvl.GenericInterferometer(
         4,
-        lambda i: pcvl.BS()
-        // pcvl.PS(pcvl.P(f"theta_ri{i}"))
-        // pcvl.BS()
-        // pcvl.PS(pcvl.P(f"theta_ro{i}")),
+        lambda i: (
+            pcvl.BS()
+            // pcvl.PS(pcvl.P(f"theta_ri{i}"))
+            // pcvl.BS()
+            // pcvl.PS(pcvl.P(f"theta_ro{i}"))
+        ),
         shape=pcvl.InterferometerShape.RECTANGLE,
     )
 
@@ -141,7 +145,7 @@ def test_manual_pcvl_circuit_pipeline_on_iris(iris_batch):
         n_photons=1,
         trainable_parameters=["theta"],
         input_parameters=["input"],
-        measurement_strategy=MeasurementStrategy.PROBABILITIES,
+        measurement_strategy=MeasurementStrategy.probs(),
         dtype=features.dtype,
     )
     model = torch.nn.Sequential(layer, torch.nn.Linear(layer.output_size, 3))
