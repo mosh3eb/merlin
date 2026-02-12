@@ -43,6 +43,11 @@ class MerlinProcessor:
         session:          A Perceval ISession — e.g. from Scaleway or Perceval
                           Cloud (preferred path).  Exactly one of
                           ``remote_processor`` or ``session`` must be provided.
+        token:            Optional auth token forwarded to cloned
+                          RemoteProcessors.  When omitted the token is
+                          auto-extracted from the RP's handler, which
+                          covers both inline-token and
+                          ``RemoteConfig.set_token()`` workflows.
     """
 
     DEFAULT_MAX_SHOTS: int = 100_000
@@ -59,6 +64,7 @@ class MerlinProcessor:
         timeout: float = 3600.0,
         max_shots_per_call: int | None = None,
         chunk_concurrency: int = 1,
+        token: str | None = None,
     ):
         # ── Validate: exactly one of the two must be provided ──
         if remote_processor is not None and session is not None:
@@ -68,6 +74,7 @@ class MerlinProcessor:
 
         self.session: ISession | None = None
         self.remote_processor: RemoteProcessor | None = None
+        self._token: str | None = token
 
         if session is not None:
             # ── ISession path ──
@@ -87,6 +94,19 @@ class MerlinProcessor:
                 )
             self.remote_processor = remote_processor
             self.backend_name = getattr(remote_processor, "name", "unknown")
+
+            # Auto-extract the token from the RP's handler when not
+            # explicitly provided, so cloned RPs inherit it.
+            if self._token is None:
+                self._token = self._extract_rp_token(remote_processor)
+
+            if self._token is None:
+                raise ValueError(
+                    "Could not extract auth token from RemoteProcessor. "
+                    "Either pass token= to MerlinProcessor or call "
+                    "RemoteConfig.set_token() before constructing the "
+                    "RemoteProcessor."
+                )
 
             if hasattr(remote_processor, "available_commands"):
                 self.available_commands = remote_processor.available_commands
@@ -624,15 +644,62 @@ class MerlinProcessor:
     # ---------------- Utilities & mapping ----------------
 
     def _clone_remote_processor(self, rp: RemoteProcessor) -> RemoteProcessor:
-        """Create a sibling RemoteProcessor with its own RPC handler (thread-safe)."""
+        """Create a sibling RemoteProcessor with its own RPC handler (thread-safe).
+
+        Forwards the token extracted at init time so that inline-token
+        RemoteProcessors are cloned correctly.
+        """
         return RemoteProcessor(
             name=rp.name,
-            token=None,
+            token=self._token,
             url=rp.get_rpc_handler().url
             if hasattr(rp.get_rpc_handler(), "url")
             else None,
             proxies=rp.proxies,
         )
+
+    @staticmethod
+    def _extract_rp_token(rp: RemoteProcessor) -> str | None:
+        """Extract the auth token from a RemoteProcessor.
+
+        Perceval stores the token on the RPC handler as ``handler.token``
+        and also embeds it in ``handler.headers['Authorization']``.  We
+        probe both locations so that inline-token and global-config
+        ``RemoteProcessor`` instances are both handled.
+
+        As a last resort, falls back to ``RemoteConfig().get_token()``.
+        Returns ``None`` only if every strategy fails.
+        """
+        try:
+            handler = rp.get_rpc_handler()
+        except Exception:
+            handler = None
+
+        if handler is not None:
+            # Primary: handler.token (set by RPCHandler.__init__)
+            for attr in ("token", "_token", "auth_token"):
+                val = getattr(handler, attr, None)
+                if isinstance(val, str) and val:
+                    return val
+
+            # Fallback: parse 'Bearer <token>' from Authorization header
+            headers = getattr(handler, "headers", None)
+            if isinstance(headers, dict):
+                auth = headers.get("Authorization", "")
+                if auth.startswith("Bearer ") and len(auth) > 7:
+                    return auth[7:]
+
+        # Last resort: check the global config
+        try:
+            from perceval.runtime import RemoteConfig
+
+            global_token = (RemoteConfig().get_token() or "").strip()
+            if global_token:
+                return global_token
+        except Exception:
+            logger.debug("RemoteConfig token lookup failed", exc_info=True)
+
+        return None
 
     def _iter_layers_in_order(self, module: nn.Module) -> Iterable[nn.Module]:
         """Yield execution leaves in deterministic order.
