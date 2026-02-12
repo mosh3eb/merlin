@@ -38,6 +38,17 @@ You need **one** of the following backends configured:
 * A Perceval ``RemoteProcessor`` instance (e.g. a simulator like
   ``"sim:slos"`` or a QPU-backed platform).
 
+.. code-block:: python
+
+   import perceval as pcvl
+   from merlin.measurement.strategies import MeasurementStrategy
+
+   # Configure your Quandela Cloud token (one of the following):
+   RemoteConfig.set_token("YOUR_TOKEN")                # option 1: global config
+   rp = pcvl.RemoteProcessor("sim:slos")
+
+   rp = pcvl.RemoteProcessor("sim:slos", "YOUR_TOKEN") # option 2: inline token
+
 **Option B — Scaleway (ISession)**
 
 * The ``perceval.providers.scaleway`` module installed.
@@ -120,7 +131,7 @@ Quick Start — Scaleway Session
 
     # 1) Open a Scaleway session (context manager handles cleanup)
     with scw.Session(
-        "sim:ascella",                         # platform name
+        "EMU-ASCELLA-6PQ",                         # platform name
         project_id="YOUR_SCW_PROJECT_ID",      # or read from env
         token="YOUR_SCW_SECRET_KEY",           # or read from env
         deduplication_id="merlin-guide",       # reuse session if still alive
@@ -204,7 +215,7 @@ Computation Spaces
 ------------------
 
 The computation space controls which output Fock states are included in the
-probability vector. It is specified via ``MeasurementStrategy.probs()``:
+probability vector. It is specified via ``MeasurementStrategy``:
 
 .. code-block:: python
 
