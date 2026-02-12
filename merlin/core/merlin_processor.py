@@ -101,12 +101,11 @@ class MerlinProcessor:
                 self._token = self._extract_rp_token(remote_processor)
 
             if self._token is None:
-                warnings.warn(
+                raise ValueError(
                     "Could not extract auth token from RemoteProcessor. "
-                    "Chunk pooling and retries will fail when creating "
-                    "sibling RemoteProcessors. Either pass token= to "
-                    "MerlinProcessor or set RemoteConfig.set_token().",
-                    stacklevel=2,
+                    "Either pass token= to MerlinProcessor or call "
+                    "RemoteConfig.set_token() before constructing the "
+                    "RemoteProcessor."
                 )
 
             if hasattr(remote_processor, "available_commands"):

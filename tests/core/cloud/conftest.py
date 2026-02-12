@@ -7,7 +7,6 @@ import perceval as pcvl
 import pytest
 from perceval.runtime import RemoteConfig
 
-
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Add Scaleway test option (--run-cloud-tests is defined in parent conftest)."""
     try:
@@ -28,7 +27,7 @@ def pytest_collection_modifyitems(
 
     - If --run-cloud-tests is NOT passed: skip tests that use the
       'remote_processor' fixture.
-    - If --run-cloud-tests IS passed: all cloud tests run.  The token is
+    - If --run-cloud-tests is passed: all cloud tests run.  The token is
       resolved from ``RemoteConfig`` or the environment.
     - If --run-scaleway-tests is NOT passed: skip tests that use the
       'scaleway_session' fixture.
