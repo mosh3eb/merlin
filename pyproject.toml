@@ -2,7 +2,8 @@
 requires = [
     "setuptools>=45",
     "wheel",
-    "scmver"
+    "scmver",
+    "setuptools-scm>=8"
 ]
 build-backend = "setuptools.build_meta"
 
@@ -101,6 +102,10 @@ omit = [
     "*/.venv/*",
     "setup.py",
 ]
+
+[tool.setuptools_scm]
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"
 
 [tool.coverage.report]
 exclude_lines = [
