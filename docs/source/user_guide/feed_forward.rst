@@ -6,7 +6,7 @@ Feedforward Circuits
 Feedforward is a key capability in photonic quantum circuits, where a *partial
 measurement* determines the configuration of the downstream circuit.
 This mechanism is comparable to *dynamic circuits* in the gate-based model of
-quantum computing (see `IBM Dynamic Circuits <https://research.ibm.com/blog/dynamic-circuits>`_).
+quantum computing (see `IBM Dynamic Circuits <https://quantum.cloud.ibm.com/docs/en/guides/classical-feedforward-and-control-flow>`_).
 
 The main difference is in the physical implementation:
 
@@ -48,25 +48,25 @@ propagated in amplitude-encoding mode.
 ``measurement_strategy`` controls the classical view exposed by
 :meth:`~merlin.algorithms.feed_forward.FeedForwardBlock.forward`:
 
-* ``PROBABILITIES`` (default): returns a tensor of shape
+* ``merlin.MeasurementStrategy.probs()`` (default): returns a tensor of shape
   ``(batch_size, len(output_keys))``. Each column already corresponds to the
   fully specified Fock state listed in
   :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_keys`.
-* ``MODE_EXPECTATIONS``: returns a tensor of shape
+* ``merlin.MeasurementStrategy.mode_expectations()``: returns a tensor of shape
   ``(batch_size, num_modes)`` containing the per-mode photon expectations
   aggregated across **all** measurement keys. The
   :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_keys` list is
   retained for metadata while
   :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_state_sizes`
   stores ``num_modes`` for each entry.
-* ``AMPLITUDES``: list of tuples
+* ``merlin.MeasurementStrategy.amplitudes()``: list of tuples
   ``(measurement_key, branch_probability, remaining_photons, amplitudes)``
   describing the mixed state produced after every partial measurement.
 
 For tensor outputs the attribute
 :pyattr:`~merlin.algorithms.feed_forward.FeedForwardBlock.output_keys` lists the
-measurement tuple corresponding to each column. ``PROBABILITIES`` therefore
-directly aligns with the dictionary keys, whereas ``MODE_EXPECTATIONS``
+measurement tuple corresponding to each column. ``merlin.MeasurementStrategy.probs()`` therefore
+directly aligns with the dictionary keys, whereas ``merlin.MeasurementStrategy.mode_expectations()``
 retains the key ordering purely as metadata because the returned tensor is
 already aggregated across all outcomes.
 
@@ -104,7 +104,7 @@ Example
        input_state=[2, 0, 0],
        trainable_parameters=["theta"],   # optional Perceval prefixes
        input_parameters=["phi"],         # classical inputs for the first unitary
-       measurement_strategy=MeasurementStrategy.PROBABILITIES,
+       measurement_strategy=MeasurementStrategy.probs(),
    )
 
    x = torch.zeros((1, 1))               # only the first stage consumes features
@@ -118,7 +118,6 @@ without passing a tensor (an empty feature tensor is injected automatically).
 
 Further Reading
 ---------------
-
-- :ref:`internal_design`
-- :ref:`circuit_specific_optimizations`
-- :ref:`output_mappings`
+- :doc:`/quantum_expert_area/internal_design`
+- For circuit specific optimizations: :doc:`/quantum_expert_area/building_intuition`
+- Output mapping startegies: :doc:`/user_guide/grouping`

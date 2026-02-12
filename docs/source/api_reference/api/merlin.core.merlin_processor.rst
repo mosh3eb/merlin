@@ -7,22 +7,29 @@ MerlinProcessor API Reference
 Overview
 ========
 :class:`MerlinProcessor` is an RPC-style bridge that offloads **quantum leaves**
-(e.g., layers exposing ``export_config()``) to a Perceval
-:class:`~perceval.runtime.RemoteProcessor`, while keeping classical layers local.
-It supports batched execution with chunking, limited intra-leaf concurrency,
-per-call/global timeouts, cooperative cancellation, and a Torch-friendly async
-interface returning :class:`torch.futures.Future`.
+(e.g., layers exposing ``export_config()``) to a remote backend, while keeping
+classical layers local. It supports two backend paths:
+
+* **Perceval** :class:`~perceval.runtime.RemoteProcessor` — the original
+  Quandela Cloud path.
+* **Perceval** :class:`~perceval.runtime.session.ISession` — the preferred path
+  for Scaleway-hosted platforms (and any future session-based providers).
+
+Both paths support batched execution with chunking, limited intra-leaf
+concurrency, per-call/global timeouts, cooperative cancellation, and a
+Torch-friendly async interface returning :class:`torch.futures.Future`.
 
 Key Capabilities
 ----------------
 * Automatic traversal of a PyTorch module; offloads only **quantum leaves**.
 * Batch **chunking** (``microbatch_size``) and **parallel** submission per leaf
-  (``chunk_concurrency``).
+  (``chunk_concurrency``). Works identically for both backend paths.
 * **Synchronous** (``forward``) and **asynchronous** (``forward_async``) APIs.
 * **Cancellation** of a single call or **all** calls in flight.
 * **Timeouts** that cancel in-flight cloud jobs.
-* Per-call pool of cloned :class:`~perceval.runtime.RemoteProcessor` objects
-  (avoid cross-thread handler sharing).
+* Per-chunk fresh :class:`~perceval.runtime.RemoteProcessor` objects — cloned
+  from the original (RemoteProcessor path) or built from the session (ISession
+  path) — to avoid cross-thread handler sharing.
 * Stable, descriptive cloud job names (capped to 50 chars).
 
 .. note::
@@ -36,32 +43,52 @@ Class Reference
 
 MerlinProcessor
 ---------------
-.. class:: MerlinProcessor(remote_processor, microbatch_size=32, timeout=3600.0, max_shots_per_call=None, chunk_concurrency=1)
+.. class:: MerlinProcessor(remote_processor=None, session=None, microbatch_size=32, timeout=3600.0, max_shots_per_call=None, chunk_concurrency=1)
 
-   Create a processor that offloads quantum leaves to the given Perceval
-   :class:`~perceval.runtime.RemoteProcessor`.
+   Create a processor that offloads quantum leaves to a remote backend.
+   Exactly **one** of ``remote_processor`` or ``session`` must be provided.
 
-   :param perceval.runtime.RemoteProcessor remote_processor:
-      Authenticated Perceval remote processor (simulator or QPU-backed).
+   :param remote_processor: Authenticated Perceval
+      :class:`~perceval.runtime.RemoteProcessor` (simulator or QPU-backed).
+      Merlin clones it per chunk so concurrent jobs have independent state.
+      Type: ``RemoteProcessor | None``.
+   :param session: A Perceval :class:`~perceval.runtime.session.ISession`
+      object — e.g. from ``perceval.providers.scaleway.Session``. Merlin calls
+      ``session.build_remote_processor()`` per chunk, giving each chunk
+      an independent RP. Type: ``ISession | None``.
    :param int microbatch_size: Maximum **rows per cloud job** (chunk size).
-      Values > 32 are accepted but effectively capped by platform/job strategy.
-   :param float timeout: Default wall-time limit (seconds) per call. Must be a
-      finite float. Per-call override via ``timeout=...`` on API methods.
-   :param int | None max_shots_per_call: Hard cap on **shots per cloud call**.
-      If ``None``, a safe default is used internally.
+   :param float timeout: Default wall-time limit (seconds) per call. Per-call
+      override via ``timeout=...`` on API methods.
+   :param max_shots_per_call: Hard cap on **shots per cloud call**.
+      If ``None``, a safe default is used internally. If ``nsample`` exceeds
+      this cap, Merlin automatically raises it to match.
+      Type: ``int | None``.
    :param int chunk_concurrency: Max number of chunk jobs in flight **per
       quantum leaf** during a single call. ``>=1`` (default: 1, i.e., serial).
 
+   :raises TypeError: If both or neither of ``remote_processor`` and ``session``
+      are provided, or if the provided argument is not the expected type.
+
    **Attributes**
+
+   .. attribute:: remote_processor
+
+      ``RemoteProcessor | None`` — set when constructed with
+      ``remote_processor``; ``None`` for the session path.
+
+   .. attribute:: session
+
+      ``ISession | None`` — set when constructed with ``session``;
+      ``None`` for the RemoteProcessor path.
 
    .. attribute:: backend_name
 
-      ``str`` - Best-effort backend name of ``remote_processor``.
+      ``str`` — best-effort backend name from the remote processor or session.
 
    .. attribute:: available_commands
 
-      ``list[str]`` - Commands exposed by the backend (e.g., ``"probs"``,
-      ``"sample_count"``, ``"samples"``). Empty if unknown.
+      ``list[str]`` — commands exposed by the backend (e.g., ``"probs"``,
+      ``"sample_count"``, ``"samples"``). Always empty for the ISession path.
 
    .. attribute:: microbatch_size
                   default_timeout
@@ -112,10 +139,10 @@ Execution APIs
 
    **Future extensions**
 
-   * ``future.job_ids: list[str]`` - Accumulates job IDs across all chunk jobs.
-   * ``future.status() -> dict`` - Current state/progress/message plus chunk
+   * ``future.job_ids: list[str]`` — accumulates job IDs across all chunk jobs.
+   * ``future.status() -> dict`` — current state/progress/message plus chunk
      counters: ``{"chunks_total", "chunks_done", "active_chunks"}``.
-   * ``future.cancel_remote() -> None`` - Cooperative cancel; in-flight jobs are
+   * ``future.cancel_remote() -> None`` — cooperative cancel; in-flight jobs are
      best-effort cancelled and ``future.wait()`` raises
      ``CancelledError``.
 
@@ -163,15 +190,18 @@ Execution Semantics
 Traversal & Offload
 ^^^^^^^^^^^^^^^^^^^
 * Leaves with ``export_config()`` are treated as **quantum leaves** and are
-  offloaded unless they expose a ``should_offload(remote_processor, nsample)``
-  method that returns ``False``, or they set ``force_local=True``.
+  offloaded unless they expose a ``should_offload()`` method that returns
+  ``False``, or they set ``force_local=True``.
 * Non-quantum leaves run locally under ``torch.no_grad()``.
 
 Batching & Chunking
 ^^^^^^^^^^^^^^^^^^^
 * If ``B > microbatch_size``, the batch is split into chunks of size
   ``<= microbatch_size``. Up to ``chunk_concurrency`` chunk jobs per quantum
-  leaf are submitted in parallel.
+  leaf are submitted in parallel. This applies to both the RemoteProcessor
+  and ISession paths.
+* Failed chunks are retried up to 3 times with exponential backoff.
+  Cancellation and timeout errors propagate immediately without retry.
 
 Backends & Commands
 ^^^^^^^^^^^^^^^^^^^
@@ -179,6 +209,8 @@ Backends & Commands
   and ignores ``nsample``.
 * Otherwise it uses ``"sample_count"`` or ``"samples"`` with
   ``nsample or DEFAULT_SHOTS_PER_CALL``.
+* Command detection is only available on the RemoteProcessor path;
+  the ISession path always uses sampling.
 
 Timeouts & Cancellation
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -190,29 +222,44 @@ Timeouts & Cancellation
 Job Naming & Traceability
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 * Each chunk job receives a descriptive name of the form
-  ``"mer:{layer}:{call_id}:{idx}/{total}:{pool_slot}:{cmd}"``, sanitized and
+  ``"mer:{layer}:{call_id}:{idx}/{total}:{cmd}"``, sanitized and
   truncated to 50 characters with a stable hash suffix when necessary.
 
-Threading & Pools
-^^^^^^^^^^^^^^^^^
-* For each call and for each quantum leaf, the processor creates a **pool** of
-  cloned :class:`~perceval.runtime.RemoteProcessor` objects sized to
-  ``chunk_concurrency``. Each clone has its own RPC handler to avoid
-  cross-thread sharing.
+Threading & Fresh RPs
+^^^^^^^^^^^^^^^^^^^^^
+* For each chunk attempt, the processor builds a **fresh**
+  :class:`~perceval.runtime.RemoteProcessor`:
+
+  * **RemoteProcessor path**: clones the original RP (independent RPC handler).
+  * **ISession path**: calls ``session.build_remote_processor()`` (independent
+    RP per chunk).
+
+  This ensures concurrent chunks and retries never share mutable RP state.
 
 Return Shapes & Mapping
 ^^^^^^^^^^^^^^^^^^^^^^^
 * Distribution size is inferred from the leaf graph or from
-  ``(n_modes, n_photons)`` and whether ``no_bunching`` is enabled. Probability
-  vectors are normalized if needed.
+  ``(n_modes, n_photons)`` and the computation space chosen (``UNBUNCHED``
+  or ``FOCK``). Probability vectors are normalized if needed.
 
 Examples
 ========
-Synchronous execution
----------------------
+Synchronous execution (RemoteProcessor)
+----------------------------------------
 .. code-block:: python
 
+   proc = MerlinProcessor(pcvl.RemoteProcessor("sim:slos"))
    y = proc.forward(model, X, nsample=20_000)
+
+Synchronous execution (ISession)
+---------------------------------
+.. code-block:: python
+
+   import perceval.providers.scaleway as scw
+
+   with scw.Session("sim:ascella", project_id=..., token=...) as session:
+       proc = MerlinProcessor(session=session, timeout=300.0)
+       y = proc.forward(model, X, nsample=5_000)
 
 Asynchronous with status and cancellation
 -----------------------------------------
@@ -236,10 +283,12 @@ High-throughput chunking
 
 Version Notes
 =============
+* Both ``remote_processor`` and ``session`` paths now support chunking and
+  ``chunk_concurrency``. Each chunk gets an independent ``RemoteProcessor``.
 * Default ``chunk_concurrency`` is **1** (serial).
 * The constructor ``timeout`` must be a **float**; use per-call ``timeout=None``
   for an unlimited call.
+* ``max_shots_per_call`` is automatically raised to match ``nsample`` when
+  needed.
 * Shots are **user-controlled** (no auto-shot chooser); use the estimator helper
   to plan values ahead of time.
-
-

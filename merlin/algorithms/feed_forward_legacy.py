@@ -27,8 +27,9 @@ import torch
 from perceval.components import BS, PS
 
 from ..core.computation_space import ComputationSpace
-from ..core.generators import StateGenerator, StatePattern
+from ..core.state import StatePattern, generate_state
 from ..measurement.strategies import MeasurementStrategy
+from ..utils.deprecations import raise_no_bunching_deprecated
 from .layer import QuantumLayer
 
 
@@ -77,16 +78,15 @@ def define_layer_no_input(n_modes, n_photons, circuit_type=None):
     """
 
     circuit = create_circuit(n_modes, 0)
-    input_state = StateGenerator.generate_state(n_modes, n_photons, StatePattern.SPACED)
+    input_state = list(generate_state(n_modes, n_photons, StatePattern.SPACED))
 
     layer = QuantumLayer(
         input_size=0,
         circuit=circuit,
         n_photons=n_photons,
         input_state=input_state,  # Random Initial quantum state used only for initialization
-        measurement_strategy=MeasurementStrategy.AMPLITUDES,
+        measurement_strategy=MeasurementStrategy.amplitudes(ComputationSpace.UNBUNCHED),
         trainable_parameters=["phi"],
-        computation_space=ComputationSpace.UNBUNCHED,
     )
     return layer
 
@@ -105,16 +105,15 @@ def define_layer_with_input(M, N, input_size, circuit_type=None):
     # (number of modes, number of photons, input size)
 
     circuit = create_circuit(M, input_size)
-    input_state = StateGenerator.generate_state(M, N, StatePattern.SPACED)
+    input_state = list(generate_state(M, N, StatePattern.SPACED))
     layer = QuantumLayer(
         input_size=input_size,
         circuit=circuit,
         n_photons=N,
         input_state=input_state,  # Random Initial quantum state used only for initialization
-        measurement_strategy=MeasurementStrategy.AMPLITUDES,
+        measurement_strategy=MeasurementStrategy.amplitudes(ComputationSpace.UNBUNCHED),
         input_parameters=["pl"],  # Optional: Specify device
         trainable_parameters=["phi"],
-        computation_space=ComputationSpace.UNBUNCHED,
     )
     return layer
 
@@ -602,9 +601,8 @@ class PoolingFeedForwardLegacy(torch.nn.Module):
         Specifies how input modes are grouped (pooled) into output modes.
         Each sublist contains the indices of input modes to pool together
         for one output mode. If None, an even pooling scheme is automatically generated.
-    no_bunching : bool, default=True
-        Whether to restrict to Fock states without photon bunching
-        (i.e., no two photons occupy the same mode).
+    no_bunching : bool | None, optional (deprecated)
+        Deprecated and now removed; use computation_space in MeasurementStrategy instead.
 
     Attributes
     ----------
@@ -625,24 +623,32 @@ class PoolingFeedForwardLegacy(torch.nn.Module):
         n_photons: int,
         n_output_modes: int,
         pooling_modes: list[list[int]] = None,
-        no_bunching=True,
+        no_bunching: bool | None = None,
     ):
         super().__init__()
+        if no_bunching is not None:
+            raise_no_bunching_deprecated(stacklevel=2)
+        if no_bunching is None:
+            no_bunching = True
         keys_in = QuantumLayer(
             0,
             circuit=pcvl.Circuit(n_modes),
             n_photons=n_photons,
-            computation_space=ComputationSpace.UNBUNCHED
-            if no_bunching
-            else ComputationSpace.FOCK,
+            measurement_strategy=MeasurementStrategy.probs(
+                computation_space=ComputationSpace.coerce(
+                    ComputationSpace.UNBUNCHED if no_bunching else ComputationSpace.FOCK
+                )
+            ),
         ).computation_process.simulation_graph.mapped_keys
         keys_out = QuantumLayer(
             0,
             circuit=pcvl.Circuit(n_output_modes),
             n_photons=n_photons,
-            computation_space=ComputationSpace.UNBUNCHED
-            if no_bunching
-            else ComputationSpace.FOCK,
+            measurement_strategy=MeasurementStrategy.probs(
+                computation_space=ComputationSpace.coerce(
+                    ComputationSpace.UNBUNCHED if no_bunching else ComputationSpace.FOCK
+                )
+            ),
         ).computation_process.simulation_graph.mapped_keys
 
         # If no pooling structure is provided, construct a balanced one
